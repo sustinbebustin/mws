@@ -1,0 +1,28 @@
+# {{.ProjectName}}
+
+{{if .Description}}{{.Description}}
+
+{{end}}This is a **meta workspace** managed by [`mws`](https://github.com/sustinbebustin/mws). Top-level files and harness directories (`.claude/`, `.workspace/`, `justfile`, ...) live in the sibling `{{.ProjectName}}-meta/` and are symlinked into this working copy. Native repos below are independent git checkouts.
+
+## Structure
+
+```
+{{.ProjectName}}/                  # this working copy (NOT a git repo at the top level)
+{{- range .Repos}}
+- {{.Folder}}/               # native git repo
+{{- end}}
+- .workspace/             # AI dev workspace (see .workspace/INDEX.md)
+```
+
+Sibling `{{.ProjectName}}-meta/` is the git-versioned meta workspace. Everything you see here that is not a native repo is a symlink into it.
+
+## Workflow
+
+- Commit changes to the meta from `cd ../{{.ProjectName}}-meta && git ...`.
+- Commit code changes inside the relevant native repo (`cd <repo> && git ...`).
+- Spin up parallel work via `mws clone <name>` -- creates `{{.ProjectName}}-<name>/` next to this one, sharing the meta.
+- Promote a file from this working copy into the meta (and into every peer) with `mws promote <path>`.
+
+## Conventions
+
+Project-specific conventions live under `.claude/rules/` and `.workspace/knowledge/`. Start there.

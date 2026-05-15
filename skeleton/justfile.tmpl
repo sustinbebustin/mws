@@ -1,0 +1,12 @@
+# Justfile for {{.ProjectName}}
+#
+# Add project-specific recipes below. Run `just --list` to see what's available.
+
+# Default: show available recipes
+default:
+    @just --list
+{{range .Repos}}
+# Run any default command in {{.Folder}} (placeholder -- edit me).
+{{.Folder}}:
+    @echo "TODO: define recipes for {{.Folder}}/"
+{{end}}

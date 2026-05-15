@@ -1,0 +1,4 @@
+# Honored by ripgrep, fd, etc. Keep narrow -- only paths that pollute search results.
+.claude/logs/
+.claude/cache/
+.workspace/work/cloudfront-logs/

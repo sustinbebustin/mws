@@ -1,0 +1,29 @@
+# Meta workspace gitignore. Native repos sit outside this directory (in sibling
+# working copies) so this file does not need rules for them.
+
+# Editor backups & OS noise
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Local secrets and ephemeral files
+*.pem
+*.key
+*.cert
+*secret*
+*password*
+.env
+.env.local
+.env.*.local
+
+# Claude cache / agent output / hook scratch
+.claude/cache/
+.claude/tsc-cache/
+.claude/hooks/node_modules/
+.claude/logs/
+
+# Workspace ephemera
+.workspace/lab/_scratch/
+.workspace/work/cloudfront-logs/

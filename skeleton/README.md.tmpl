@@ -1,0 +1,34 @@
+# {{.ProjectName}}-meta
+
+{{if .Description}}{{.Description}}
+
+{{end}}Meta workspace for **{{.ProjectName}}**, managed by [`mws`](https://github.com/sustinbebustin/mws).
+
+This directory holds the AI harness (`.claude/`, `.workspace/`), shared docs (`CLAUDE.md`, `justfile`), and the `mws` config (`.mws/config.toml`). Working copies live as sibling directories and symlink every top-level entry here.
+
+## Native repos
+{{if .Repos}}
+| Folder | URL |
+|---|---|
+{{range .Repos}}| `{{.Folder}}` | `{{.URL}}` |
+{{end}}
+{{else}}
+None registered yet. Add with:
+
+```bash
+mws add-repo <git-url> [folder]
+```
+{{end}}
+## Layout
+
+```
+{{.ProjectName}}-meta/         # this directory (git-versioned)
+{{.ProjectName}}/              # working copy (sibling, NOT a git repo at top level)
+{{.ProjectName}}-<peer>/       # zero or more peer working copies, created via `mws clone`
+```
+
+## Conventions
+
+- Edit harness content here, in the meta. Working copies see the change instantly through symlinks.
+- New top-level files added directly in a working copy stay local until you `mws promote <path>` them.
+- Native repos inside working copies are independent git clones -- each peer has its own `.git/`.

@@ -1,0 +1,94 @@
+package commands
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestRepairDivergedFilesAutoRepairsIdentical(t *testing.T) {
+	root := t.TempDir()
+	meta := filepath.Join(root, "demo-meta")
+	peer := filepath.Join(root, "demo")
+	mustMkdir(t, meta)
+	mustMkdir(t, peer)
+
+	body := []byte(`{"k":"v"}`)
+	mustWriteFile(t, filepath.Join(meta, ".mcp.json"), string(body))
+	mustWriteFile(t, filepath.Join(peer, ".mcp.json"), string(body))
+
+	called := false
+	prompt := func(string, string) (string, error) {
+		called = true
+		return "", errors.New("prompt should not be called for identical content")
+	}
+	if err := repairDivergedFiles(nopReporter{}, meta, peer, prompt); err != nil {
+		t.Fatalf("repairDivergedFiles: %v", err)
+	}
+	if called {
+		t.Fatal("prompt was called for identical content")
+	}
+	if _, err := os.Lstat(filepath.Join(peer, ".mcp.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected peer .mcp.json removed, got err=%v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(meta, ".mcp.json")); err != nil {
+		t.Fatalf("meta .mcp.json should remain: %v", err)
+	}
+}
+
+func TestRepairDivergedFilesPromptsAndPromotes(t *testing.T) {
+	root := t.TempDir()
+	meta := filepath.Join(root, "demo-meta")
+	peer := filepath.Join(root, "demo")
+	mustMkdir(t, meta)
+	mustMkdir(t, peer)
+
+	mustWriteFile(t, filepath.Join(meta, ".mcp.json"), `{"old":true}`)
+	mustWriteFile(t, filepath.Join(peer, ".mcp.json"), `{"new":true}`)
+
+	prompt := func(string, string) (string, error) { return "peer", nil }
+	if err := repairDivergedFiles(nopReporter{}, meta, peer, prompt); err != nil {
+		t.Fatalf("repairDivergedFiles: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(meta, ".mcp.json"))
+	if err != nil {
+		t.Fatalf("read meta after promote: %v", err)
+	}
+	if string(body) != `{"new":true}` {
+		t.Fatalf("meta not promoted; got %q", string(body))
+	}
+	if _, err := os.Lstat(filepath.Join(peer, ".mcp.json")); !os.IsNotExist(err) {
+		t.Fatalf("peer file should have been moved, got err=%v", err)
+	}
+}
+
+func TestRepairDivergedFilesSkipsSymlinksAndPeerOnlyFiles(t *testing.T) {
+	root := t.TempDir()
+	meta := filepath.Join(root, "demo-meta")
+	peer := filepath.Join(root, "demo")
+	mustMkdir(t, meta)
+	mustMkdir(t, peer)
+
+	// peer has a symlink at .mcp.json -- not a divergence.
+	mustWriteFile(t, filepath.Join(meta, ".mcp.json"), `meta`)
+	if err := os.Symlink("../demo-meta/.mcp.json", filepath.Join(peer, ".mcp.json")); err != nil {
+		t.Fatal(err)
+	}
+	// peer has a regular file with no meta counterpart -- user content, leave alone.
+	mustWriteFile(t, filepath.Join(peer, "notes.md"), `peer-only`)
+
+	prompt := func(string, string) (string, error) {
+		t.Fatal("prompt should not be called")
+		return "", nil
+	}
+	if err := repairDivergedFiles(nopReporter{}, meta, peer, prompt); err != nil {
+		t.Fatalf("repairDivergedFiles: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(peer, ".mcp.json")); err != nil {
+		t.Fatalf("peer symlink should remain: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(peer, "notes.md")); err != nil {
+		t.Fatalf("peer-only file should remain: %v", err)
+	}
+}
