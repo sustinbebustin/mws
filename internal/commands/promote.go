@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 
 	"github.com/sustinbebustin/mws/internal/project"
@@ -18,9 +19,13 @@ func newPromoteCmd() *cobra.Command {
 		Long: `promote moves a file or directory that lives only in the current working
 copy into the sibling meta workspace, replaces the original with a symlink, and
 backfills the symlink into every peer working copy so the item is now shared.`,
-		Args: cobra.ExactArgs(1),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runPromote(newConsoleReporter(), args[0])
+			var arg string
+			if len(args) == 1 {
+				arg = args[0]
+			}
+			return runPromote(newConsoleReporter(), arg)
 		},
 	}
 }
@@ -36,6 +41,29 @@ func runPromote(r Reporter, arg string) error {
 	}
 	if ws.WorkingCopy == "" {
 		return errors.New("promote must be run from a working copy, not from the meta")
+	}
+
+	if arg == "" {
+		candidates, err := promoteCandidates(ws.WorkingCopy, ws.MetaRoot)
+		if err != nil {
+			return err
+		}
+		if len(candidates) == 0 {
+			return errors.New("no promotable top-level entries (everything is already a symlink or already exists in meta)")
+		}
+		opts := make([]huh.Option[string], 0, len(candidates))
+		for _, name := range candidates {
+			opts = append(opts, huh.NewOption(name, name))
+		}
+		var picked string
+		if err := huh.NewSelect[string]().
+			Title("Select entry to promote into the meta").
+			Options(opts...).
+			Value(&picked).
+			Run(); err != nil {
+			return err
+		}
+		arg = filepath.Join(ws.WorkingCopy, picked)
 	}
 
 	abs, err := filepath.Abs(arg)
@@ -114,6 +142,27 @@ func runPromote(r Reporter, arg string) error {
 		r.OK(fmt.Sprintf("%s: linked %s", filepath.Base(peer), rel))
 	}
 	return nil
+}
+
+// promoteCandidates returns sorted top-level entries in workingCopy that can be promoted:
+// not symlinks (already shared) and not present in meta (would conflict).
+func promoteCandidates(workingCopy, metaRoot string) ([]string, error) {
+	entries, err := os.ReadDir(workingCopy)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, e := range entries {
+		st, err := os.Lstat(filepath.Join(workingCopy, e.Name()))
+		if err != nil || st.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+		if _, err := os.Lstat(filepath.Join(metaRoot, e.Name())); err == nil {
+			continue
+		}
+		out = append(out, e.Name())
+	}
+	return out, nil
 }
 
 func hasParentSegment(rel string) bool {

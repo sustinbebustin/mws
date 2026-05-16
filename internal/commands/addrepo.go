@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 
 	"github.com/sustinbebustin/mws/internal/config"
@@ -15,15 +17,18 @@ import (
 
 func newAddRepoCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "add-repo <url> [folder]",
+		Use:   "add-repo [url] [folder]",
 		Short: "Register a native repo and clone it into every peer working copy",
 		Long: `add-repo appends a native repo to the meta workspace's config.toml and clones
 it into every existing peer working copy. If folder is omitted it is derived from
-the repo URL.`,
-		Args: cobra.RangeArgs(1, 2),
+the repo URL. With no arguments, prompts interactively.`,
+		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			repoURL := args[0]
+			repoURL := ""
 			folder := ""
+			if len(args) >= 1 {
+				repoURL = args[0]
+			}
 			if len(args) == 2 {
 				folder = args[1]
 			}
@@ -44,6 +49,24 @@ func runAddRepo(ctx context.Context, r Reporter, repoURL, folder string) error {
 	cfg, err := config.Load(ws.MetaRoot)
 	if err != nil {
 		return err
+	}
+
+	if repoURL == "" {
+		if err := huh.NewForm(huh.NewGroup(
+			huh.NewInput().
+				Title("Repo URL").
+				Description("git@host:org/name.git or https://host/org/name").
+				Validate(nonEmpty).
+				Value(&repoURL),
+			huh.NewInput().
+				Title("Local folder").
+				Description("Defaults to the repo name from the URL.").
+				Value(&folder),
+		)).Run(); err != nil {
+			return err
+		}
+		repoURL = strings.TrimSpace(repoURL)
+		folder = strings.TrimSpace(folder)
 	}
 
 	if folder == "" {

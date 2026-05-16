@@ -27,9 +27,13 @@ func newMigrateCmd() *cobra.Command {
 harness into a new sibling <name>-meta/ directory. The original directory
 becomes a working copy: every meta entry is symlinked back, native repos stay
 in place, and a .mws/config.toml is initialized with the detected native repos.`,
-		Args: cobra.ExactArgs(1),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMigrate(cmd.Context(), newConsoleReporter(), args[0], yes)
+			var arg string
+			if len(args) == 1 {
+				arg = args[0]
+			}
+			return runMigrate(cmd.Context(), newConsoleReporter(), arg, yes)
 		},
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation")
@@ -48,6 +52,16 @@ type migratePlan struct {
 func runMigrate(ctx context.Context, r Reporter, arg string, yes bool) error {
 	if _, err := exec.LookPath("git"); err != nil {
 		return fmt.Errorf("git not found on PATH: %w", err)
+	}
+	if arg == "" {
+		if err := huh.NewInput().
+			Title("Path to migrate").
+			Description("Directory whose top level mixes harness content with native git repos.").
+			Validate(validateExistingDir).
+			Value(&arg).
+			Run(); err != nil {
+			return err
+		}
 	}
 	source, err := filepath.Abs(arg)
 	if err != nil {

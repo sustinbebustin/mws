@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 
 	"github.com/sustinbebustin/mws/internal/config"
@@ -31,14 +33,29 @@ invoking peer's current branch -- a deliberate fresh-start semantic.
 
 Clone failures for individual native repos are reported but do not abort the
 overall flow.`,
-		Args: cobra.ExactArgs(1),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runClone(cmd.Context(), newConsoleReporter(), args[0])
+			var suffix string
+			if len(args) == 1 {
+				suffix = args[0]
+			}
+			return runClone(cmd.Context(), newConsoleReporter(), suffix)
 		},
 	}
 }
 
 func runClone(ctx context.Context, r Reporter, suffix string) error {
+	if suffix == "" {
+		if err := huh.NewInput().
+			Title("Peer name suffix").
+			Description("New peer will be created at <project>-<suffix>/ as a sibling of the meta.").
+			Validate(validateProjectName).
+			Value(&suffix).
+			Run(); err != nil {
+			return err
+		}
+		suffix = strings.TrimSpace(suffix)
+	}
 	if err := validateProjectName(suffix); err != nil {
 		return err
 	}
