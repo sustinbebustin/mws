@@ -1,0 +1,96 @@
+version: "2"
+
+run:
+  timeout: 3m
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+linters:
+  enable:
+    # Correctness
+    - staticcheck
+    - govet
+    - errcheck
+    - gosec
+
+    # Quality
+    - unused
+    - ineffassign
+    - gocritic
+    - revive
+    - unparam
+    - errorlint
+    - forbidigo
+    - copyloopvar
+    - gocheckcompilerdirectives
+
+    # Style & cleanup
+    - misspell
+    - whitespace
+    - unconvert
+    - nolintlint
+
+  settings:
+    errcheck:
+      check-blank: true
+      exclude-functions:
+        - (io.Closer).Close
+        - (*os.File).Close
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - fmt.Fprint
+
+    gosec:
+      excludes:
+        - G104  # duplicate of errcheck
+        - G204  # subprocess with variable input -- we exec `git` with user-supplied args by design
+        - G301  # directory perms -- 0o755 is correct for workspace dirs we create
+        - G302  # file perms -- 0o644 is correct for skeleton output
+        - G304  # file inclusion via variable -- core to mws path manipulation
+        - G306  # file perms -- same as G302
+        - G704  # duplicate of errcheck
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+        - style
+      disabled-checks:
+        - hugeParam        # Modern escape analysis handles value-vs-pointer better than a byte threshold
+        - paramTypeCombine # Cosmetic; fights explicit per-arg typing
+        - unnamedResult    # Cosmetic
+
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: error-return
+        - name: error-strings
+        - name: increment-decrement
+        - name: var-declaration
+
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+
+    errorlint:
+      errorf: true
+      asserts: true
+      comparison: true
+
+    forbidigo:
+      forbid:
+        - pattern: 'context\.TODO'
+          msg: "use the request context instead of context.TODO"
+
+  exclusions:
+    paths:
+      - skeleton/  # Separate Go modules with their own go.mod; not part of the main build.
+    rules:
+      - linters:
+          - errcheck
+          - unparam
+        path: _test\.go

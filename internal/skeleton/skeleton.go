@@ -2,6 +2,7 @@
 package skeleton
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -29,7 +30,19 @@ const (
 // with data and stripping the .tmpl extension.
 //
 // Empty placeholder files (e.g., skeleton/.gitkeep, skeleton/docs/adr/.gitkeep) are skipped.
+// Existing files at the destination are overwritten.
 func Render(dst string, data Data) error {
+	return render(dst, data, false)
+}
+
+// RenderGaps is like Render but leaves existing destination files untouched -- only
+// missing files are written. Useful for filling in skeleton content beside pre-existing
+// user files (e.g., during `mws migrate`).
+func RenderGaps(dst string, data Data) error {
+	return render(dst, data, true)
+}
+
+func render(dst string, data Data, skipExisting bool) error {
 	root, err := fs.Sub(mws.SkeletonFS, rootPrefix)
 	if err != nil {
 		return fmt.Errorf("open embedded skeleton: %w", err)
@@ -50,6 +63,14 @@ func Render(dst string, data Data) error {
 
 		if d.IsDir() {
 			return os.MkdirAll(target, 0o755)
+		}
+
+		if skipExisting {
+			if _, statErr := os.Stat(target); statErr == nil {
+				return nil
+			} else if !errors.Is(statErr, os.ErrNotExist) {
+				return statErr
+			}
 		}
 
 		content, err := fs.ReadFile(root, path)

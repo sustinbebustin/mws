@@ -212,38 +212,7 @@ func executeMigrate(ctx context.Context, r Reporter, p *migratePlan) error {
 
 // renderSkeletonGaps renders the embedded skeleton into metaDir but skips any file that already exists.
 func renderSkeletonGaps(metaDir string, data skeleton.Data) error {
-	staging, err := os.MkdirTemp("", "mws-skel-")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(staging)
-	if err := skeleton.Render(staging, data); err != nil {
-		return err
-	}
-	return filepath.Walk(staging, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if path == staging {
-			return nil
-		}
-		rel, _ := filepath.Rel(staging, path)
-		dst := filepath.Join(metaDir, rel)
-		if info.IsDir() {
-			return os.MkdirAll(dst, 0o755)
-		}
-		if _, err := os.Stat(dst); err == nil {
-			return nil // gap-fill only
-		}
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return err
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(dst, data, info.Mode().Perm())
-	})
+	return skeleton.RenderGaps(metaDir, data)
 }
 
 func hasGitDir(p string) bool {

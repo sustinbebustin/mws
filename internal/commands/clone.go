@@ -157,8 +157,7 @@ func checkoutDefault(ctx context.Context, r Reporter, repoDir string) error {
 		r.Warn(fmt.Sprintf("%s: could not determine default branch (%v)", filepath.Base(repoDir), err))
 		return nil
 	}
-	cur, _ := git.CurrentBranch(ctx, repoDir)
-	if cur == br {
+	if cur, err := git.CurrentBranch(ctx, repoDir); err == nil && cur == br {
 		r.OK(fmt.Sprintf("%s: on default branch %s", filepath.Base(repoDir), br))
 		return nil
 	}

@@ -32,8 +32,9 @@ func TestRoundTrip(t *testing.T) {
 }
 
 func TestPath(t *testing.T) {
-	got := Path("/tmp/foo-meta")
-	want := filepath.Join("/tmp/foo-meta", ".mws", "config.toml")
+	metaRoot := filepath.Join(t.TempDir(), "foo-meta")
+	got := Path(metaRoot)
+	want := filepath.Join(metaRoot, ".mws", "config.toml")
 	if got != want {
 		t.Fatalf("Path: got %q want %q", got, want)
 	}
