@@ -1,5 +1,7 @@
 # Sibling-meta architecture
 
+**Status:** Superseded by [0004 -- Meta-at-root architecture](./0004-meta-at-root-architecture.md).
+
 The **Meta workspace** lives as a peer directory of **Working copies** (e.g., `my-project-meta/` alongside `my-project/` and `my-project-bug-fix/`), not inside any one of them. Working copies symlink every top-level entry of the meta (discovered dynamically at init/clone time, excluding `.git/`) into themselves. This makes peer working copies fully symmetric -- any one can be deleted without affecting the others -- and edits to meta files propagate instantly across peers because they're the same files. Files created directly in a working copy stay local until explicitly promoted via `mws promote <path>`.
 
 ## Considered options
