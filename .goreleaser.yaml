@@ -78,6 +78,7 @@ brews:
       owner: sustinbebustin
       name: homebrew-mws
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
     homepage: "https://github.com/sustinbebustin/mws"
     description: "Manage meta workspaces around independent native git repos"
     license: "MIT"
