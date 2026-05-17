@@ -91,16 +91,6 @@ Each `[[repos.envs]]` entry in `.mws.toml` maps a flat-named staged source file 
 
 On `mws clone <name>`, staged files are copied (not symlinked) into the new working copy at their target paths. Subsequent `mws sync-env <name>` re-pushes staged defaults; `mws stage-env <name>` captures live values back into staging. Env staging is automatically untracked by the meta's allowlist `.gitignore` -- secrets stay local.
 
-## Design references
-
-The architecture is captured in [`docs/adr/`](./docs/adr):
-
-- [`0001-sibling-meta-architecture.md`](./docs/adr/0001-sibling-meta-architecture.md) -- original sibling-meta layout (superseded).
-- [`0002-embedded-skeleton-distribution.md`](./docs/adr/0002-embedded-skeleton-distribution.md) -- why the skeleton ships in the binary via `//go:embed`.
-- [`0003-independent-native-repos.md`](./docs/adr/0003-independent-native-repos.md) -- why each working copy gets its own `.git/` for native repos.
-- [`0004-meta-at-root-architecture.md`](./docs/adr/0004-meta-at-root-architecture.md) -- current layout: meta IS the git repo, working copies are untracked children, harness lives in `.mws/`.
-- [`0005-env-staging-via-copy.md`](./docs/adr/0005-env-staging-via-copy.md) -- env files via copy-on-clone with config-driven mapping.
-
 ## Development
 
 ```bash
