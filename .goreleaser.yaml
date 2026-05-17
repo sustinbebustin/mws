@@ -1,0 +1,89 @@
+version: 2
+
+project_name: mws
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: mws
+    main: ./cmd/mws
+    binary: mws
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/sustinbebustin/mws/internal/commands.version={{ .Version }}
+      - -X github.com/sustinbebustin/mws/internal/commands.commit={{ .Commit }}
+      - -X github.com/sustinbebustin/mws/internal/commands.date={{ .Date }}
+
+archives:
+  - id: mws
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - "Merge pull request"
+      - "Merge branch"
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: Bug fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Performance
+      regexp: '^.*?perf(\([[:word:]]+\))??!?:.+$'
+      order: 2
+    - title: Refactors
+      regexp: '^.*?refactor(\([[:word:]]+\))??!?:.+$'
+      order: 3
+    - title: Others
+      order: 999
+
+release:
+  github:
+    owner: sustinbebustin
+    name: mws
+  draft: false
+  prerelease: auto
+
+brews:
+  - name: mws
+    repository:
+      owner: sustinbebustin
+      name: homebrew-mws
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: "https://github.com/sustinbebustin/mws"
+    description: "Manage meta workspaces around independent native git repos"
+    license: "MIT"
+    dependencies:
+      - name: git
+    install: |
+      bin.install "mws"
+    test: |
+      system "#{bin}/mws", "version"
