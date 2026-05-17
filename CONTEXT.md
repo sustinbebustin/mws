@@ -40,6 +40,10 @@ _Avoid_: manifest, project file.
 A dedicated directory inside the **Meta workspace** (`.envs/`, organized per **Native repo**) holding canonical env files. Per-repo entries in the **mws config** map staged files to target paths inside each clone's native repo. Files are **copied** into a **Working copy** on `mws clone` (not symlinked), so peers can diverge freely (different ports, different external service keys, etc.). `mws sync-env [clone]` re-pushes from staging when you want to reset a clone to defaults. Not tracked by the meta's git.
 _Avoid_: env vault (sounds like secrets management), env dir (ambiguous).
 
+**Setup commands**:
+Per-**Native repo** shell commands listed in the **mws config** under `[[repos.setup]]`. Executed at the end of `mws clone` (after clone + env-copy) via `sh -c`, with cwd set to the repo's directory in the new **Working copy**, so a fresh peer can be made ready-to-use in one step. Opt-in: the user is prompted before execution and can override the prompt with `--setup` / `--no-setup`.
+_Avoid_: hooks (implies a broader lifecycle that does not exist), scripts (overloaded with package.json's name-keyed semantics).
+
 ## Relationships
 
 - A **Meta workspace** is a git repository at its root, containing the **Harness dir** and **mws config** as tracked content, and zero or more **Working copies** as untracked children.
@@ -48,6 +52,7 @@ _Avoid_: env vault (sounds like secrets management), env dir (ambiguous).
 - **Peer working copies** share one **Harness dir** but each has its own **Native repo** clones.
 - The **mws config** is reachable from any **Working copy** by walking up to the **Meta workspace** root.
 - **Env staging** is owned by the **Meta workspace** and copied into a **Working copy**'s **Native repos** on `mws clone` per the mappings in the **mws config**. Env files in a working copy are independent of staging after the copy -- edits do not flow back.
+- **Setup commands** are owned per **Native repo** in the **mws config** and executed by `mws clone` against the new **Working copy** after clone and env-copy complete. They are the last step of clone; intra-repo commands are sequential and stop at the first failure, but a failure in one repo does not block other repos.
 
 ## Example dialogue
 

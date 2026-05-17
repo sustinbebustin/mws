@@ -84,6 +84,43 @@ func TestRoundTripWithEnvs(t *testing.T) {
 	}
 }
 
+func TestRoundTripWithSetup(t *testing.T) {
+	dir := t.TempDir()
+	want := &Config{
+		ProjectName: "demo",
+		Repos: []Repo{
+			{
+				Folder: "frontend",
+				URL:    "git@github.com:example/frontend.git",
+				Setup: []SetupCommand{
+					{Cmd: "pnpm install --frozen-lockfile"},
+					{Cmd: "pnpm build"},
+				},
+			},
+			{Folder: "backend", URL: "git@github.com:example/backend.git"},
+		},
+	}
+
+	if err := Save(dir, want); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("round-trip mismatch\n got: %+v\nwant: %+v", got, want)
+	}
+
+	body, err := os.ReadFile(Path(dir))
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if n := strings.Count(string(body), "[[repos.setup]]"); n != 2 {
+		t.Fatalf("expected 2 [[repos.setup]] entries in toml, got %d:\n%s", n, string(body))
+	}
+}
+
 func TestAddRepoDedup(t *testing.T) {
 	c := &Config{}
 	if !c.AddRepo(Repo{Folder: "frontend", URL: "a"}) {

@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -16,8 +18,21 @@ import (
 	"github.com/sustinbebustin/mws/internal/project"
 )
 
+// setupChoice models the three policies for running [[repos.setup]] commands
+// at the end of `mws clone`. Collapsing the (--setup, --no-setup) flag pair
+// into a single enum at the command boundary keeps the rest of the file free
+// of a two-bool state that has no meaningful "both true" representation.
+type setupChoice int
+
+const (
+	setupAsk      setupChoice = iota // no flag -- prompt the user
+	setupForceRun                    // --setup
+	setupSkip                        // --no-setup
+)
+
 func newCloneCmd() *cobra.Command {
-	return &cobra.Command{
+	var doSetup, noSetup bool
+	cmd := &cobra.Command{
 		Use:   "clone <name>",
 		Short: "Create a new working copy inside this meta workspace",
 		Long: `clone creates a new working copy at <meta-root>/<name>/. It clones each
@@ -27,19 +42,35 @@ URL), fans the harness symlinks out from .mws/, and copies any env files
 mapped in .mws.toml from env staging into the working copy.
 
 Native repos are checked out on each repo's default branch, not on the
-invoking copy's current branch -- a deliberate fresh-start semantic.`,
+invoking copy's current branch -- a deliberate fresh-start semantic.
+
+After clone and env-copy succeed, any [[repos.setup]] commands run inside
+each cloned repo via sh -c. By default a single confirmation prompt summarises
+all configured commands. Use --setup to run without prompting or --no-setup
+to skip entirely.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var name string
 			if len(args) == 1 {
 				name = args[0]
 			}
-			return runClone(cmd.Context(), newConsoleReporter(), name)
+			choice := setupAsk
+			switch {
+			case doSetup:
+				choice = setupForceRun
+			case noSetup:
+				choice = setupSkip
+			}
+			return runClone(cmd.Context(), newConsoleReporter(), name, choice)
 		},
 	}
+	cmd.Flags().BoolVar(&doSetup, "setup", false, "run [[repos.setup]] commands without prompting")
+	cmd.Flags().BoolVar(&noSetup, "no-setup", false, "skip [[repos.setup]] commands without prompting")
+	cmd.MarkFlagsMutuallyExclusive("setup", "no-setup")
+	return cmd
 }
 
-func runClone(ctx context.Context, r Reporter, name string) error {
+func runClone(ctx context.Context, r Reporter, name string, choice setupChoice) error {
 	if name == "" {
 		if err := huh.NewInput().
 			Title("New working copy name").
@@ -105,6 +136,20 @@ func runClone(ctx context.Context, r Reporter, name string) error {
 	if len(failed) > 0 {
 		return fmt.Errorf("clone completed with errors: %d repo(s) failed: %s", len(failed), strings.Join(failed, ", "))
 	}
+
+	items := collectSetup(cfg)
+	run, err := confirmSetup(choice, items)
+	if err != nil {
+		return err
+	}
+	if run {
+		setupFailed := runSetup(ctx, r, target, items, os.Stdout, os.Stderr)
+		if len(setupFailed) > 0 {
+			return fmt.Errorf("clone completed but %d setup command(s) failed:\n  %s",
+				len(setupFailed), strings.Join(setupFailed, "\n  "))
+		}
+	}
+
 	r.OK(fmt.Sprintf("Working copy ready at %s", target))
 	return nil
 }
@@ -182,6 +227,116 @@ func checkoutDefault(ctx context.Context, r Reporter, repoDir string) error {
 	}
 	r.OK(fmt.Sprintf("%s: checked out default branch %s", filepath.Base(repoDir), br))
 	return nil
+}
+
+// confirmSetup decides whether [[repos.setup]] commands run. With explicit
+// flags the answer is immediate; otherwise the user is prompted with a
+// grouped listing of every configured command. An empty items slice always
+// returns (false, nil) without prompting -- nothing to ask about.
+func confirmSetup(choice setupChoice, items []setupItem) (bool, error) {
+	if len(items) == 0 {
+		return false, nil
+	}
+	switch choice {
+	case setupForceRun:
+		return true, nil
+	case setupSkip:
+		return false, nil
+	}
+	var ok bool
+	if err := huh.NewConfirm().
+		Title("Run setup commands?").
+		Description(setupPromptBody(items)).
+		Affirmative("Run").
+		Negative("Skip").
+		Value(&ok).
+		Run(); err != nil {
+		return false, err
+	}
+	return ok, nil
+}
+
+// setupPromptBody renders items grouped by repo folder, two-space indented
+// under each folder heading. See docs/adr/0006-post-clone-setup-commands.md.
+func setupPromptBody(items []setupItem) string {
+	var b strings.Builder
+	var lastFolder string
+	for i, it := range items {
+		if it.Folder != lastFolder {
+			if i > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString(it.Folder)
+			b.WriteString("\n")
+			lastFolder = it.Folder
+		}
+		b.WriteString("  ")
+		b.WriteString(it.Cmd)
+		b.WriteString("\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// setupItem is one flat (repo folder, shell command) pair scheduled by
+// collectSetup. The flat shape lets confirmSetup/runSetup iterate without
+// re-walking the config and decouples them from the config types.
+type setupItem struct {
+	Folder string
+	Cmd    string
+}
+
+// collectSetup returns the [[repos.setup]] commands across cfg as a flat,
+// ordered slice. Each cmd is trimmed; entries that are empty after trimming
+// are dropped. Repos with no setup contribute nothing. An empty return means
+// callers should short-circuit without prompting or executing.
+func collectSetup(cfg *config.Config) []setupItem {
+	var out []setupItem
+	for _, repo := range cfg.Repos {
+		for _, sc := range repo.Setup {
+			cmd := strings.TrimSpace(sc.Cmd)
+			if cmd == "" {
+				continue
+			}
+			out = append(out, setupItem{Folder: repo.Folder, Cmd: cmd})
+		}
+	}
+	return out
+}
+
+// runSetup executes items in order against target/<folder>. Commands inside a
+// single repo run sequentially and stop at the first non-zero exit; failures
+// in one repo do not block other repos. Returns "<folder>: <cmd>" strings for
+// each failure -- nil if everything passed. stdout/stderr are injected so
+// production can stream live to the terminal and tests can discard.
+func runSetup(ctx context.Context, r Reporter, target string, items []setupItem, stdout, stderr io.Writer) []string {
+	var failed []string
+	var skipFolder, lastHeading string
+	for _, it := range items {
+		if it.Folder == skipFolder {
+			continue
+		}
+		if it.Folder != lastHeading {
+			r.Heading(fmt.Sprintf("Setup: %s ...", it.Folder))
+			lastHeading = it.Folder
+		}
+		r.Info(fmt.Sprintf("$ %s", it.Cmd))
+
+		cmd := exec.CommandContext(ctx, "sh", "-c", it.Cmd)
+		cmd.Dir = filepath.Join(target, it.Folder)
+		cmd.Env = os.Environ()
+		cmd.Stdout = stdout
+		cmd.Stderr = stderr
+		cmd.Stdin = nil
+
+		if err := cmd.Run(); err != nil {
+			r.Fail(fmt.Sprintf("%s: %s (%v)", it.Folder, it.Cmd, err))
+			failed = append(failed, fmt.Sprintf("%s: %s", it.Folder, it.Cmd))
+			skipFolder = it.Folder
+			continue
+		}
+		r.OK(fmt.Sprintf("%s: %s", it.Folder, it.Cmd))
+	}
+	return failed
 }
 
 // copyEnvsFor materialises every env mapping for repo into the new working copy.

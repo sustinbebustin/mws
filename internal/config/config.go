@@ -22,11 +22,13 @@ type Config struct {
 
 // Repo identifies one native git repo by its target folder and clone URL.
 // Envs lists optional staged-env-file mappings to materialise when a working
-// copy is created or refreshed.
+// copy is created or refreshed. Setup lists optional shell commands to run in
+// the cloned repo directory at the end of `mws clone`.
 type Repo struct {
-	Folder string       `toml:"folder"`
-	URL    string       `toml:"url"`
-	Envs   []EnvMapping `toml:"envs,omitempty"`
+	Folder string         `toml:"folder"`
+	URL    string         `toml:"url"`
+	Envs   []EnvMapping   `toml:"envs,omitempty"`
+	Setup  []SetupCommand `toml:"setup,omitempty"`
 }
 
 // EnvMapping maps a flat-named env file in `.envs/<repo>/` (Source) to its
@@ -34,6 +36,12 @@ type Repo struct {
 type EnvMapping struct {
 	Source string `toml:"source"`
 	Target string `toml:"target"`
+}
+
+// SetupCommand is one shell command run by `mws clone` against the new working
+// copy's native repo directory after clone and env-copy succeed.
+type SetupCommand struct {
+	Cmd string `toml:"cmd"`
 }
 
 // Path returns the absolute path to the config file inside a meta directory.
