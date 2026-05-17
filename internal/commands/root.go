@@ -27,6 +27,7 @@ func NewRootCmd() *cobra.Command {
 		newMigrateCmd(),
 		newSyncEnvCmd(),
 		newStageEnvCmd(),
+		newVersionCmd(),
 	)
 
 	return root
