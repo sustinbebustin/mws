@@ -1,4 +1,5 @@
-// Package project locates a meta workspace from a working copy and enumerates peers.
+// Package project locates a meta workspace from any directory inside it and
+// enumerates working copies (untracked children of the meta root).
 package project
 
 import (
@@ -12,27 +13,30 @@ import (
 	"github.com/sustinbebustin/mws/internal/config"
 )
 
-// ErrNotInWorkspace indicates the cwd is neither a meta workspace nor a working copy of one.
-var ErrNotInWorkspace = errors.New("not inside a meta workspace or working copy")
+// ErrNotInWorkspace indicates the cwd is not inside any meta workspace.
+var ErrNotInWorkspace = errors.New("not inside a meta workspace")
 
-// MetaSuffix is the directory-name suffix that identifies a meta workspace.
-const MetaSuffix = "-meta"
+// HarnessDirName is the meta-root directory that holds harness content that
+// fans out into every working copy.
+const HarnessDirName = ".mws"
+
+// EnvStagingDirName is the meta-root directory that stages env files for copy
+// into working copies on clone/sync.
+const EnvStagingDirName = ".envs"
 
 // Workspace describes the meta and working copy paths discovered from a starting directory.
 type Workspace struct {
 	// MetaRoot is the absolute path to the meta workspace directory.
 	MetaRoot string
 	// WorkingCopy is the absolute path to the working copy the search started from,
-	// or empty when the starting directory was the meta itself.
+	// or empty when the starting directory was the meta root itself.
 	WorkingCopy string
 }
 
-// Locate walks from start towards root, returning the meta workspace path.
-//
-// Three discovery modes:
-//  1. start is itself a meta (has .mws/config.toml directly).
-//  2. start is a working copy whose .mws is a symlink into a sibling meta.
-//  3. ancestors are searched up to the filesystem root.
+// Locate walks from start towards filesystem root looking for a directory that
+// contains .mws.toml. The first match is the meta root. If start was nested
+// inside the meta, WorkingCopy is set to the direct child of the meta that
+// contains start.
 func Locate(start string) (*Workspace, error) {
 	start, err := filepath.Abs(start)
 	if err != nil {
@@ -41,8 +45,8 @@ func Locate(start string) (*Workspace, error) {
 
 	dir := start
 	for {
-		if ws, ok := workspaceFor(dir); ok {
-			return ws, nil
+		if isValidMeta(dir) {
+			return resolveWorkspace(dir, start), nil
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -52,95 +56,114 @@ func Locate(start string) (*Workspace, error) {
 	}
 }
 
-// workspaceFor checks whether dir is a meta or working copy and, if so, returns the resolved workspace.
-func workspaceFor(dir string) (*Workspace, bool) {
-	mwsDir := filepath.Join(dir, config.DirName)
-	st, err := os.Lstat(mwsDir)
-	if err != nil {
-		return nil, false
+// resolveWorkspace builds a Workspace given the meta root and the original
+// starting directory. If start lives inside metaRoot, WorkingCopy is the direct
+// child of metaRoot containing start.
+func resolveWorkspace(metaRoot, start string) *Workspace {
+	if start == metaRoot {
+		return &Workspace{MetaRoot: metaRoot}
 	}
-
-	// Working copy: .mws is a symlink whose target sits inside a valid meta.
-	if st.Mode()&os.ModeSymlink != 0 {
-		resolved, err := filepath.EvalSymlinks(mwsDir)
-		if err != nil {
-			return nil, false
-		}
-		metaRoot := filepath.Dir(resolved)
-		if !isValidMeta(metaRoot) {
-			return nil, false
-		}
-		return &Workspace{MetaRoot: metaRoot, WorkingCopy: dir}, true
+	rel, err := filepath.Rel(metaRoot, start)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return &Workspace{MetaRoot: metaRoot}
 	}
-
-	// Direct meta: real .mws directory with a real config file.
-	if st.IsDir() && isValidMeta(dir) {
-		return &Workspace{MetaRoot: dir}, true
+	parts := strings.Split(rel, string(filepath.Separator))
+	if len(parts) == 0 || parts[0] == "" {
+		return &Workspace{MetaRoot: metaRoot}
 	}
-
-	return nil, false
+	return &Workspace{
+		MetaRoot:    metaRoot,
+		WorkingCopy: filepath.Join(metaRoot, parts[0]),
+	}
 }
 
-// isValidMeta reports whether dir is a meta workspace: has .mws/config.toml as a regular file.
+// isValidMeta reports whether dir is a meta workspace root: <dir>/.mws.toml exists as a regular file.
 func isValidMeta(dir string) bool {
-	_, err := os.Stat(filepath.Join(dir, config.DirName, config.FileName))
-	return err == nil
+	st, err := os.Stat(filepath.Join(dir, config.ConfigFileName))
+	return err == nil && st.Mode().IsRegular()
 }
 
-// isPeerOf reports whether candidate is a working-copy peer of metaRoot: candidate/.mws is a symlink
-// resolving to metaRoot/.mws, and metaRoot is a valid meta.
-func isPeerOf(metaRoot, candidate string) bool {
-	if candidate == metaRoot {
-		return false
-	}
-	st, err := os.Lstat(candidate)
-	if err != nil || !st.IsDir() {
-		return false
-	}
-	peerMws := filepath.Join(candidate, config.DirName)
-	peerTarget, err := filepath.EvalSymlinks(peerMws)
-	if err != nil {
-		return false
-	}
-	metaTarget, err := filepath.EvalSymlinks(filepath.Join(metaRoot, config.DirName))
-	if err != nil {
-		return false
-	}
-	return peerTarget == metaTarget && isValidMeta(metaRoot)
-}
-
-// EnumeratePeers returns all working-copy peers of metaRoot living in metaRoot's parent directory.
+// EnumerateWorkingCopies returns all working copies inside metaRoot, sorted by path.
 //
-// A peer is any sibling directory satisfying isPeerOf. The meta directory itself is excluded.
-func EnumeratePeers(metaRoot string) ([]string, error) {
+// A working copy is any direct subdirectory of metaRoot whose name does NOT
+// start with a dot. The defensive dotfile filter excludes harness-internal
+// dirs like .mws, .envs, .git plus any future system dir. The meta root
+// itself is not included.
+func EnumerateWorkingCopies(metaRoot string) ([]string, error) {
 	metaRoot, err := filepath.Abs(metaRoot)
 	if err != nil {
 		return nil, err
 	}
-	parent := filepath.Dir(metaRoot)
-	entries, err := os.ReadDir(parent)
+	entries, err := os.ReadDir(metaRoot)
 	if err != nil {
-		return nil, fmt.Errorf("read parent dir %s: %w", parent, err)
+		return nil, fmt.Errorf("read meta root %s: %w", metaRoot, err)
 	}
 
-	var peers []string
+	var copies []string
 	for _, e := range entries {
-		candidate := filepath.Join(parent, e.Name())
-		if isPeerOf(metaRoot, candidate) {
-			peers = append(peers, candidate)
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+		copies = append(copies, filepath.Join(metaRoot, name))
+	}
+	sort.Strings(copies)
+	return copies, nil
+}
+
+// ResolveCopy resolves an optional name to an absolute working-copy path
+// inside w.MetaRoot. If name is empty, w.WorkingCopy is used as a fallback
+// (so commands run from inside a working copy default to that copy). The
+// resulting path is verified to exist as a directory.
+func (w *Workspace) ResolveCopy(name string) (string, error) {
+	if name == "" {
+		if w.WorkingCopy == "" {
+			return "", errors.New("working copy name required (none could be inferred from cwd)")
+		}
+		name = filepath.Base(w.WorkingCopy)
+	}
+	if err := ValidateName(name); err != nil {
+		return "", err
+	}
+	target := filepath.Join(w.MetaRoot, name)
+	st, err := os.Stat(target)
+	if err != nil {
+		return "", fmt.Errorf("working copy %s: %w", target, err)
+	}
+	if !st.IsDir() {
+		return "", fmt.Errorf("working copy %s is not a directory", target)
+	}
+	return target, nil
+}
+
+// ValidateName checks that name is a path-safe single segment: ASCII letters,
+// digits, '-', '_', or '.', and not starting with '.' or '-'. This is the
+// segment shape used by both project names and working-copy names; the dot-
+// prefix ban means the harness (.mws), env staging (.envs), and .git can
+// never collide with a working-copy name.
+func ValidateName(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errors.New("name is required")
+	}
+	if strings.HasPrefix(name, ".") {
+		return errors.New("must not start with '.'")
+	}
+	if strings.HasPrefix(name, "-") {
+		return errors.New("must not start with '-'")
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'A' && r <= 'Z':
+		case r >= 'a' && r <= 'z':
+		case r >= '0' && r <= '9':
+		case r == '-' || r == '_' || r == '.':
+		default:
+			return fmt.Errorf("invalid character %q (allowed: letters, digits, '-', '_', '.')", r)
 		}
 	}
-	sort.Strings(peers)
-	return peers, nil
-}
-
-// Name derives the project name from a meta directory: strips the trailing "-meta".
-func Name(metaRoot string) string {
-	base := filepath.Base(metaRoot)
-	return strings.TrimSuffix(base, MetaSuffix)
-}
-
-// MetaDirName returns the conventional meta directory name for a given project name.
-func MetaDirName(projectName string) string {
-	return projectName + MetaSuffix
+	return nil
 }

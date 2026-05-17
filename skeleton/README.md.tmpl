@@ -1,10 +1,10 @@
-# {{.ProjectName}}-meta
+# {{.ProjectName}}
 
 {{if .Description}}{{.Description}}
 
 {{end}}Meta workspace for **{{.ProjectName}}**, managed by [`mws`](https://github.com/sustinbebustin/mws).
 
-This directory holds the AI harness (`.claude/`, `.workspace/`), shared docs (`CLAUDE.md`, `justfile`), and the `mws` config (`.mws/config.toml`). Working copies live as sibling directories and symlink every top-level entry here.
+This directory is itself a git repository. The harness (`.claude/`, `.workspace/`, `CLAUDE.md`, ...) lives under `.mws/` and fans out into each working copy via symlinks. Working copies sit alongside `.mws/` as untracked children and contain the actual native git clones.
 
 ## Native repos
 {{if .Repos}}
@@ -22,13 +22,18 @@ mws add-repo <git-url> [folder]
 ## Layout
 
 ```
-{{.ProjectName}}-meta/         # this directory (git-versioned)
-{{.ProjectName}}/              # working copy (sibling, NOT a git repo at top level)
-{{.ProjectName}}-<peer>/       # zero or more peer working copies, created via `mws clone`
+{{.ProjectName}}/                  # this directory (git-versioned)
+  .gitignore               # allowlist: only tracks .gitignore, .mws.toml, .mws/, README.md
+  .mws.toml                # mws config (project name, repos, env mappings)
+  .mws/                    # harness; everything here symlinks into every working copy
+  .envs/                   # env staging (per-repo files, copied into working copies on clone)
+  main/                    # first working copy created by `mws init`
+  <peer>/                  # any number of peer working copies created via `mws clone`
 ```
 
 ## Conventions
 
-- Edit harness content here, in the meta. Working copies see the change instantly through symlinks.
-- New top-level files added directly in a working copy stay local until you `mws promote <path>` them.
-- Native repos inside working copies are independent git clones -- each peer has its own `.git/`.
+- Edit harness content under `.mws/`. Working copies see the change instantly through symlinks.
+- New top-level files added directly in a working copy stay local until you `mws promote <path>` them into `.mws/`.
+- Native repos inside each working copy are independent git clones -- every working copy has its own `.git/` inside each repo dir.
+- Env files: populate them in a working copy, then `mws stage-env <copy>` to capture defaults. Subsequent `mws clone` reproduces them automatically. `mws sync-env <copy>` resets a copy back to staged defaults.

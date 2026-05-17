@@ -24,41 +24,57 @@ func TestRenderEmbeddedSkeleton(t *testing.T) {
 		t.Fatalf("Render: %v", err)
 	}
 
-	// CLAUDE.md.tmpl -> CLAUDE.md with rendered substitutions.
-	claude, err := os.ReadFile(filepath.Join(dst, "CLAUDE.md"))
+	// .mws/CLAUDE.md.tmpl -> .mws/CLAUDE.md with rendered substitutions.
+	claude, err := os.ReadFile(filepath.Join(dst, ".mws", "CLAUDE.md"))
 	if err != nil {
-		t.Fatalf("read CLAUDE.md: %v", err)
+		t.Fatalf("read .mws/CLAUDE.md: %v", err)
 	}
 	if !strings.Contains(string(claude), "# demo") {
-		t.Fatalf("CLAUDE.md missing project name; got:\n%s", string(claude))
+		t.Fatalf(".mws/CLAUDE.md missing project name; got:\n%s", string(claude))
 	}
 	if !strings.Contains(string(claude), "frontend/") {
-		t.Fatalf("CLAUDE.md missing repo folder; got:\n%s", string(claude))
+		t.Fatalf(".mws/CLAUDE.md missing repo folder; got:\n%s", string(claude))
 	}
 
-	// README.md.tmpl -> README.md
+	// README.md.tmpl -> README.md at meta root.
 	readme, err := os.ReadFile(filepath.Join(dst, "README.md"))
 	if err != nil {
 		t.Fatalf("read README.md: %v", err)
 	}
-	if !strings.Contains(string(readme), "demo-meta") {
-		t.Fatalf("README.md missing meta name; got:\n%s", string(readme))
+	if !strings.Contains(string(readme), "demo") {
+		t.Fatalf("README.md missing project name; got:\n%s", string(readme))
 	}
 	if !strings.Contains(string(readme), "git@github.com:demo/frontend.git") {
 		t.Fatalf("README.md missing repo URL")
 	}
 
-	// .gitkeep files are not materialised.
-	if _, err := os.Stat(filepath.Join(dst, ".claude", "skills", ".gitkeep")); err == nil {
-		t.Fatalf(".gitkeep should not be materialised")
+	// Meta-root allowlist .gitignore.
+	gi, err := os.ReadFile(filepath.Join(dst, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
 	}
-	// Parent directory of a .gitkeep still gets created.
-	if _, err := os.Stat(filepath.Join(dst, ".claude", "skills")); err != nil {
-		t.Fatalf(".claude/skills/ should exist: %v", err)
+	body := string(gi)
+	for _, want := range []string{"/*", "!/.gitignore", "!/.mws.toml", "!/.mws/", "!/README.md"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("meta-root .gitignore missing %q; got:\n%s", want, body)
+		}
 	}
 
-	// Sanity check: a known harness file copied through verbatim.
-	if _, err := os.Stat(filepath.Join(dst, ".claude", "settings.json")); err != nil {
-		t.Fatalf(".claude/settings.json missing: %v", err)
+	// .gitkeep files are not materialised but their parent dirs are.
+	if _, err := os.Stat(filepath.Join(dst, ".mws", ".claude", "skills", ".gitkeep")); err == nil {
+		t.Fatalf(".gitkeep should not be materialised")
+	}
+	if _, err := os.Stat(filepath.Join(dst, ".mws", ".claude", "skills")); err != nil {
+		t.Fatalf(".mws/.claude/skills/ should exist: %v", err)
+	}
+
+	// Verbatim harness file copied through.
+	if _, err := os.Stat(filepath.Join(dst, ".mws", ".claude", "settings.json")); err != nil {
+		t.Fatalf(".mws/.claude/settings.json missing: %v", err)
+	}
+
+	// CLAUDE.md should NOT appear at meta root -- it lives in .mws/ for fan-out.
+	if _, err := os.Stat(filepath.Join(dst, "CLAUDE.md")); err == nil {
+		t.Fatalf("CLAUDE.md should not exist at meta root; it belongs in .mws/")
 	}
 }

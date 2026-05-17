@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
@@ -14,24 +15,25 @@ import (
 func newRmCmd() *cobra.Command {
 	yes := false
 	cmd := &cobra.Command{
-		Use:   "rm <peer>",
-		Short: "Remove a peer working copy",
-		Long: `rm deletes a peer working copy directory. The peer's native repos and any
-non-symlink files inside it are removed; the meta workspace is untouched.`,
+		Use:   "rm <name>",
+		Short: "Remove a working copy",
+		Long: `rm deletes a working copy directory inside the meta workspace. The
+working copy's native repos and any non-symlink files inside it are removed;
+the meta workspace and harness are untouched.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var peerName string
+			var name string
 			if len(args) == 1 {
-				peerName = args[0]
+				name = args[0]
 			}
-			return runRm(newConsoleReporter(), peerName, yes)
+			return runRm(newConsoleReporter(), name, yes)
 		},
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation")
 	return cmd
 }
 
-func runRm(r Reporter, peerName string, yes bool) error {
+func runRm(r Reporter, name string, yes bool) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -41,51 +43,40 @@ func runRm(r Reporter, peerName string, yes bool) error {
 		return err
 	}
 
-	peers, err := project.EnumeratePeers(ws.MetaRoot)
+	peers, err := project.EnumerateWorkingCopies(ws.MetaRoot)
 	if err != nil {
 		return err
 	}
 	if len(peers) == 0 {
-		return fmt.Errorf("no peer working copies to remove")
+		return fmt.Errorf("no working copies to remove")
 	}
 
-	parent := filepath.Dir(ws.MetaRoot)
-
-	if peerName == "" {
+	if name == "" {
 		opts := make([]huh.Option[string], 0, len(peers))
 		for _, p := range peers {
 			opts = append(opts, huh.NewOption(filepath.Base(p), filepath.Base(p)))
 		}
 		if err := huh.NewSelect[string]().
-			Title("Select peer working copy to remove").
+			Title("Select working copy to remove").
 			Options(opts...).
-			Value(&peerName).
+			Value(&name).
 			Run(); err != nil {
 			return err
 		}
 	}
 
-	target := filepath.Join(parent, peerName)
-
-	if target == ws.MetaRoot {
-		return fmt.Errorf("refusing to remove the meta workspace")
+	target := filepath.Join(ws.MetaRoot, name)
+	if !slices.Contains(peers, target) {
+		return fmt.Errorf("%s is not a working copy of %s", target, ws.MetaRoot)
 	}
-
-	known := false
-	for _, p := range peers {
-		if p == target {
-			known = true
-			break
-		}
-	}
-	if !known {
-		return fmt.Errorf("%s is not a peer working copy of %s", target, ws.MetaRoot)
+	if !looksLikeWorkingCopy(ws.MetaRoot, target) {
+		return fmt.Errorf("%s does not contain any harness symlinks pointing into %s/.mws/; refusing to remove. If this is genuinely a working copy whose symlinks are broken, run `mws relink` first, or remove it manually", target, ws.MetaRoot)
 	}
 
 	if !yes {
 		var ok bool
 		if err := huh.NewConfirm().
-			Title(fmt.Sprintf("Remove peer working copy %s?", target)).
+			Title(fmt.Sprintf("Remove working copy %s?", target)).
 			Description("This deletes the directory and any native repo clones inside it.").
 			Affirmative("Remove").
 			Negative("Cancel").

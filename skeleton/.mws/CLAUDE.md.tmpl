@@ -1,0 +1,31 @@
+# {{.ProjectName}}
+
+{{if .Description}}{{.Description}}
+
+{{end}}This is a **working copy** inside the meta workspace `{{.ProjectName}}/`, managed by [`mws`](https://github.com/sustinbebustin/mws). Harness entries (`.claude/`, `.workspace/`, `CLAUDE.md`, ...) are symlinks pointing into the parent meta's `.mws/` -- shared across every working copy. Native repos below are independent git checkouts owned by this working copy.
+
+## Structure
+
+```
+<this working copy>/                # not a git repo at the top level
+{{- range .Repos}}
+- {{.Folder}}/                # native git repo (own .git/, own branch)
+{{- end}}
+- .workspace/             # AI dev workspace (see .workspace/INDEX.md), symlinked from ../.mws/
+- .claude/                # AI harness config, symlinked from ../.mws/
+- CLAUDE.md               # this file, symlinked from ../.mws/
+```
+
+The meta workspace root sits at `../` and IS the git repo: `cd .. && git ...` commits harness changes there.
+
+## Workflow
+
+- Commit harness/config changes from the meta root: `cd .. && git add .gitignore .mws.toml .mws README.md && git commit`.
+- Commit code changes inside the relevant native repo: `cd <repo> && git ...`.
+- Spin up parallel work via `mws clone <name>` -- creates a sibling working copy `../<name>/` sharing the same meta and harness.
+- Promote a file from this working copy into the harness (so other working copies see it) with `mws promote <path>` -- the file moves into `../.mws/` and is replaced here with a symlink.
+- Reset env files to staged defaults: `mws sync-env <this-copy>`. Capture your current env values into staging: `mws stage-env <this-copy>`.
+
+## Conventions
+
+Project-specific conventions live under `.claude/rules/` and `.workspace/knowledge/`. Start there.

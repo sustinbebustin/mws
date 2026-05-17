@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
@@ -15,10 +17,11 @@ import (
 func newPromoteCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "promote <path>",
-		Short: "Move a file or directory from a working copy into the meta workspace",
+		Short: "Move a top-level file or directory from a working copy into the harness",
 		Long: `promote moves a file or directory that lives only in the current working
-copy into the sibling meta workspace, replaces the original with a symlink, and
-backfills the symlink into every peer working copy so the item is now shared.`,
+copy into the meta's .mws/ harness dir, replaces the original with a symlink,
+and backfills the symlink into every other working copy so the item is now
+shared across all copies.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var arg string
@@ -40,16 +43,18 @@ func runPromote(r Reporter, arg string) error {
 		return err
 	}
 	if ws.WorkingCopy == "" {
-		return errors.New("promote must be run from a working copy, not from the meta")
+		return errors.New("promote must be run from a working copy, not from the meta root")
 	}
 
+	harnessRoot := filepath.Join(ws.MetaRoot, project.HarnessDirName)
+
 	if arg == "" {
-		candidates, err := promoteCandidates(ws.WorkingCopy, ws.MetaRoot)
+		candidates, err := promoteCandidates(ws.WorkingCopy, harnessRoot)
 		if err != nil {
 			return err
 		}
 		if len(candidates) == 0 {
-			return errors.New("no promotable top-level entries (everything is already a symlink or already exists in meta)")
+			return errors.New("no promotable top-level entries (everything is already a symlink or already exists in the harness)")
 		}
 		opts := make([]huh.Option[string], 0, len(candidates))
 		for _, name := range candidates {
@@ -57,7 +62,7 @@ func runPromote(r Reporter, arg string) error {
 		}
 		var picked string
 		if err := huh.NewSelect[string]().
-			Title("Select entry to promote into the meta").
+			Title("Select entry to promote into the harness").
 			Options(opts...).
 			Value(&picked).
 			Run(); err != nil {
@@ -85,17 +90,18 @@ func runPromote(r Reporter, arg string) error {
 	if st.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("%s is already a symlink; nothing to promote", abs)
 	}
-
-	// Only top-level entries can be promoted -- the symlink discovery model only links top-level items.
 	if filepath.Dir(rel) != "." {
 		return fmt.Errorf("promote only handles top-level entries; got nested path %q", rel)
 	}
 
-	dst := filepath.Join(ws.MetaRoot, rel)
+	dst := filepath.Join(harnessRoot, rel)
 	if _, err := os.Lstat(dst); err == nil {
-		return fmt.Errorf("meta already has %s; resolve manually", rel)
+		return fmt.Errorf("harness already has %s; resolve manually", rel)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
+	}
+	if err := os.MkdirAll(harnessRoot, 0o755); err != nil {
+		return fmt.Errorf("ensure harness dir %s: %w", harnessRoot, err)
 	}
 
 	if err := os.Rename(abs, dst); err != nil {
@@ -105,13 +111,16 @@ func runPromote(r Reporter, arg string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.Symlink(relTarget, abs); err != nil {
+	if err := project.AtomicSymlink(relTarget, abs); err != nil {
+		// Try to roll back the rename so the working copy is restored.
+		if rbErr := os.Rename(dst, abs); rbErr != nil {
+			return fmt.Errorf("symlink %s failed and rollback failed; content is at %s: %w", abs, dst, errors.Join(err, rbErr))
+		}
 		return fmt.Errorf("symlink %s -> %s: %w", abs, relTarget, err)
 	}
-	r.OK(fmt.Sprintf("Promoted %s into %s", rel, filepath.Base(ws.MetaRoot)))
+	r.OK(fmt.Sprintf("Promoted %s into harness", rel))
 
-	// Backfill into peers.
-	peers, err := project.EnumeratePeers(ws.MetaRoot)
+	peers, err := project.EnumerateWorkingCopies(ws.MetaRoot)
 	if err != nil {
 		return err
 	}
@@ -120,22 +129,16 @@ func runPromote(r Reporter, arg string) error {
 			continue
 		}
 		linkPath := filepath.Join(peer, rel)
-		if st, err := os.Lstat(linkPath); err == nil {
-			if st.Mode()&os.ModeSymlink == 0 {
-				r.Warn(fmt.Sprintf("%s: %s exists and is not a symlink; skipping", filepath.Base(peer), rel))
-				continue
-			}
-			if err := os.Remove(linkPath); err != nil {
-				r.Fail(fmt.Sprintf("%s: %v", filepath.Base(peer), err))
-				continue
-			}
+		if st, err := os.Lstat(linkPath); err == nil && st.Mode()&os.ModeSymlink == 0 {
+			r.Warn(fmt.Sprintf("%s: %s exists and is not a symlink; skipping", filepath.Base(peer), rel))
+			continue
 		}
 		target, err := filepath.Rel(peer, dst)
 		if err != nil {
 			r.Fail(fmt.Sprintf("%s: %v", filepath.Base(peer), err))
 			continue
 		}
-		if err := os.Symlink(target, linkPath); err != nil {
+		if err := project.AtomicSymlink(target, linkPath); err != nil {
 			r.Fail(fmt.Sprintf("%s: %v", filepath.Base(peer), err))
 			continue
 		}
@@ -145,8 +148,8 @@ func runPromote(r Reporter, arg string) error {
 }
 
 // promoteCandidates returns sorted top-level entries in workingCopy that can be promoted:
-// not symlinks (already shared) and not present in meta (would conflict).
-func promoteCandidates(workingCopy, metaRoot string) ([]string, error) {
+// not symlinks (already shared) and not present in harnessRoot (would conflict).
+func promoteCandidates(workingCopy, harnessRoot string) ([]string, error) {
 	entries, err := os.ReadDir(workingCopy)
 	if err != nil {
 		return nil, err
@@ -157,7 +160,7 @@ func promoteCandidates(workingCopy, metaRoot string) ([]string, error) {
 		if err != nil || st.Mode()&os.ModeSymlink != 0 {
 			continue
 		}
-		if _, err := os.Lstat(filepath.Join(metaRoot, e.Name())); err == nil {
+		if _, err := os.Lstat(filepath.Join(harnessRoot, e.Name())); err == nil {
 			continue
 		}
 		out = append(out, e.Name())
@@ -166,28 +169,5 @@ func promoteCandidates(workingCopy, metaRoot string) ([]string, error) {
 }
 
 func hasParentSegment(rel string) bool {
-	for _, seg := range splitPath(rel) {
-		if seg == ".." {
-			return true
-		}
-	}
-	return false
-}
-
-func splitPath(p string) []string {
-	var out []string
-	for {
-		dir, file := filepath.Split(p)
-		if file != "" {
-			out = append([]string{file}, out...)
-		}
-		if dir == "" || dir == string(filepath.Separator) {
-			break
-		}
-		p = filepath.Clean(dir)
-		if p == "." || p == string(filepath.Separator) {
-			break
-		}
-	}
-	return out
+	return slices.Contains(strings.Split(filepath.ToSlash(rel), "/"), "..")
 }

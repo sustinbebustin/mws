@@ -10,13 +10,10 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// FileName is the on-disk name of the mws config file (inside the meta's .mws/ dir).
-const FileName = "config.toml"
+// ConfigFileName is the on-disk name of the mws config file, at the meta root.
+const ConfigFileName = ".mws.toml"
 
-// DirName is the directory inside the meta that holds the config.
-const DirName = ".mws"
-
-// Config is the persisted mws config, stored at <meta>/.mws/config.toml.
+// Config is the persisted mws config, stored at <meta>/.mws.toml.
 type Config struct {
 	ProjectName string `toml:"project_name"`
 	Description string `toml:"description"`
@@ -24,17 +21,27 @@ type Config struct {
 }
 
 // Repo identifies one native git repo by its target folder and clone URL.
+// Envs lists optional staged-env-file mappings to materialise when a working
+// copy is created or refreshed.
 type Repo struct {
-	Folder string `toml:"folder"`
-	URL    string `toml:"url"`
+	Folder string       `toml:"folder"`
+	URL    string       `toml:"url"`
+	Envs   []EnvMapping `toml:"envs,omitempty"`
+}
+
+// EnvMapping maps a flat-named env file in `.envs/<repo>/` (Source) to its
+// target path inside the repo working tree (Target).
+type EnvMapping struct {
+	Source string `toml:"source"`
+	Target string `toml:"target"`
 }
 
 // Path returns the absolute path to the config file inside a meta directory.
 func Path(metaRoot string) string {
-	return filepath.Join(metaRoot, DirName, FileName)
+	return filepath.Join(metaRoot, ConfigFileName)
 }
 
-// Load reads and parses the config at <metaRoot>/.mws/config.toml.
+// Load reads and parses the config at <metaRoot>/.mws.toml.
 func Load(metaRoot string) (*Config, error) {
 	p := Path(metaRoot)
 	data, err := os.ReadFile(p)
@@ -48,17 +55,16 @@ func Load(metaRoot string) (*Config, error) {
 	return &c, nil
 }
 
-// Save writes the config to <metaRoot>/.mws/config.toml, creating the directory if needed.
+// Save writes the config to <metaRoot>/.mws.toml.
 func Save(metaRoot string, c *Config) error {
-	dir := filepath.Join(metaRoot, DirName)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("mkdir %s: %w", dir, err)
+	if err := os.MkdirAll(metaRoot, 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", metaRoot, err)
 	}
 	var buf bytes.Buffer
 	if err := toml.NewEncoder(&buf).Encode(c); err != nil {
 		return fmt.Errorf("encode config: %w", err)
 	}
-	p := filepath.Join(dir, FileName)
+	p := Path(metaRoot)
 	if err := os.WriteFile(p, buf.Bytes(), 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", p, err)
 	}

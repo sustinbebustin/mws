@@ -1,0 +1,19 @@
+# Harness-internal gitignore. Lives at .mws/.gitignore inside the meta repo.
+# Env files do NOT belong here -- they sit under <meta>/.envs/ and are
+# excluded by the meta-root allowlist.
+
+# Editor backups & OS noise
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Claude cache / agent output / hook scratch
+.claude/cache/
+.claude/tsc-cache/
+.claude/hooks/node_modules/
+.claude/logs/
+
+# Workspace ephemera
+.workspace/lab/_scratch/

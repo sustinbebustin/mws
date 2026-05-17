@@ -13,7 +13,7 @@ import (
 func newListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
-		Short: "List peer working copies sharing this meta workspace",
+		Short: "List working copies in this meta workspace",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runList(newConsoleReporter())
@@ -32,12 +32,12 @@ func runList(r Reporter) error {
 	}
 
 	r.Heading(fmt.Sprintf("Meta workspace: %s", ws.MetaRoot))
-	peers, err := project.EnumeratePeers(ws.MetaRoot)
+	peers, err := project.EnumerateWorkingCopies(ws.MetaRoot)
 	if err != nil {
 		return err
 	}
 	if len(peers) == 0 {
-		r.Info("No peer working copies.")
+		r.Info("No working copies.")
 		return nil
 	}
 	for _, peer := range peers {

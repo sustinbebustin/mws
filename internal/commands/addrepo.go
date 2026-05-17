@@ -18,9 +18,9 @@ import (
 func newAddRepoCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "add-repo [url] [folder]",
-		Short: "Register a native repo and clone it into every peer working copy",
-		Long: `add-repo appends a native repo to the meta workspace's config.toml and clones
-it into every existing peer working copy. If folder is omitted it is derived from
+		Short: "Register a native repo and clone it into every working copy",
+		Long: `add-repo appends a native repo to the meta workspace's .mws.toml and clones
+it into every existing working copy. If folder is omitted it is derived from
 the repo URL. With no arguments, prompts interactively.`,
 		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -84,15 +84,16 @@ func runAddRepo(ctx context.Context, r Reporter, repoURL, folder string) error {
 	}
 	r.OK(fmt.Sprintf("Registered %s -> %s", folder, repoURL))
 
-	peers, err := project.EnumeratePeers(ws.MetaRoot)
+	peers, err := project.EnumerateWorkingCopies(ws.MetaRoot)
 	if err != nil {
 		return err
 	}
 	if len(peers) == 0 {
-		r.Info("No peer working copies found. Run `mws clone <name>` to create one.")
+		r.Info("No working copies found. Run `mws clone <name>` to create one.")
 		return nil
 	}
 
+	var failed []string
 	for _, peer := range peers {
 		target := filepath.Join(peer, folder)
 		if _, err := os.Stat(target); err == nil {
@@ -102,9 +103,13 @@ func runAddRepo(ctx context.Context, r Reporter, repoURL, folder string) error {
 		r.Heading(fmt.Sprintf("Cloning into %s ...", filepath.Base(peer)))
 		if err := git.Clone(ctx, repoURL, target); err != nil {
 			r.Fail(fmt.Sprintf("%s: %v", filepath.Base(peer), err))
+			failed = append(failed, filepath.Base(peer))
 			continue
 		}
 		r.OK(fmt.Sprintf("%s: cloned %s", filepath.Base(peer), folder))
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("add-repo completed with errors: %d working copy clone(s) failed: %s", len(failed), strings.Join(failed, ", "))
 	}
 	return nil
 }

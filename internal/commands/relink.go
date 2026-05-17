@@ -16,15 +16,16 @@ import (
 func newRelinkCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "relink",
-		Short: "Refresh meta symlinks in every peer working copy",
-		Long: `relink walks every peer working copy of this meta workspace and re-runs
-symlink discovery against the meta. New top-level meta entries get linked in,
-broken symlinks are repaired, and existing non-symlink files are left alone.
+		Short: "Refresh harness symlinks in every working copy",
+		Long: `relink walks every working copy under this meta workspace and re-runs
+symlink discovery against the harness. New top-level harness entries get linked
+in, broken symlinks are repaired, and existing non-symlink files are left alone.
 
-If a peer holds a regular file where the meta has the same-named regular file
-(typically because an editor's atomic-save replaced a symlink), relink detects
-the divergence. Identical content is auto-repaired by removing the peer copy
-so the symlink can be restored. Diverged content prompts for which side wins.`,
+If a working copy holds a regular file where the harness has the same-named
+regular file (typically because an editor's atomic-save replaced a symlink),
+relink detects the divergence. Identical content is auto-repaired by removing
+the working-copy file so the symlink can be restored. Diverged content prompts
+for which side wins.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRelink(newConsoleReporter())
@@ -42,12 +43,12 @@ func runRelink(r Reporter) error {
 		return err
 	}
 
-	peers, err := project.EnumeratePeers(ws.MetaRoot)
+	peers, err := project.EnumerateWorkingCopies(ws.MetaRoot)
 	if err != nil {
 		return err
 	}
 	if len(peers) == 0 {
-		r.Info("No peer working copies to relink.")
+		r.Info("No working copies to relink.")
 		return nil
 	}
 
@@ -57,7 +58,7 @@ func runRelink(r Reporter) error {
 			r.Fail(fmt.Sprintf("%s: divergence repair: %v", filepath.Base(peer), err))
 			continue
 		}
-		linked, err := project.LinkMetaIntoWorkingCopy(ws.MetaRoot, peer)
+		linked, err := project.LinkHarnessIntoWorkingCopy(ws.MetaRoot, peer)
 		if err != nil {
 			r.Fail(fmt.Sprintf("%s: %v", filepath.Base(peer), err))
 			continue
@@ -78,10 +79,11 @@ func runRelink(r Reporter) error {
 type divergencePrompt func(peerName, fileName string) (string, error)
 
 // repairDivergedFiles detects top-level entries where the peer has a regular file (not a
-// symlink) at a name the meta also has as a regular file. Identical content is auto-resolved
-// by removing the peer copy (LinkMetaIntoWorkingCopy then recreates the symlink). Divergent
-// content goes through prompt.
+// symlink) at a name the harness (<metaRoot>/.mws/) also has as a regular file. Identical
+// content is auto-resolved by removing the peer copy (LinkHarnessIntoWorkingCopy then
+// recreates the symlink). Divergent content goes through prompt.
 func repairDivergedFiles(r Reporter, metaRoot, peer string, prompt divergencePrompt) error {
+	harnessRoot := filepath.Join(metaRoot, project.HarnessDirName)
 	entries, err := os.ReadDir(peer)
 	if err != nil {
 		return err
@@ -92,7 +94,7 @@ func repairDivergedFiles(r Reporter, metaRoot, peer string, prompt divergencePro
 		if err != nil || st.Mode()&os.ModeSymlink != 0 || !st.Mode().IsRegular() {
 			continue
 		}
-		metaPath := filepath.Join(metaRoot, e.Name())
+		metaPath := filepath.Join(harnessRoot, e.Name())
 		mst, err := os.Lstat(metaPath)
 		if err != nil || !mst.Mode().IsRegular() {
 			continue
@@ -116,7 +118,7 @@ func repairDivergedFiles(r Reporter, metaRoot, peer string, prompt divergencePro
 		}
 		switch choice {
 		case "peer":
-			if err := os.Rename(peerPath, metaPath); err != nil {
+			if err := moveFile(peerPath, metaPath); err != nil {
 				return fmt.Errorf("move %s -> %s: %w", peerPath, metaPath, err)
 			}
 			r.OK(fmt.Sprintf("%s: promoted peer %s into meta", filepath.Base(peer), e.Name()))

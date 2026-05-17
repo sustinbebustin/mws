@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -10,6 +11,10 @@ import (
 )
 
 func TestExecuteInitGreenfieldNoRepos(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+
 	parent := t.TempDir()
 	p := &initPlan{
 		ParentDir:   parent,
@@ -20,23 +25,33 @@ func TestExecuteInitGreenfieldNoRepos(t *testing.T) {
 		t.Fatalf("executeInit: %v", err)
 	}
 
-	metaDir := filepath.Join(parent, "demo-meta")
-	wc := filepath.Join(parent, "demo")
+	metaDir := filepath.Join(parent, "demo")
+	mainCopy := filepath.Join(metaDir, "main")
 
 	for _, p := range []string{
-		filepath.Join(metaDir, ".mws", "config.toml"),
+		filepath.Join(metaDir, ".mws.toml"),
+		filepath.Join(metaDir, ".mws", "CLAUDE.md"),
+		filepath.Join(metaDir, ".gitignore"),
+		filepath.Join(metaDir, "README.md"),
 		filepath.Join(metaDir, ".git"),
-		filepath.Join(wc, ".mws"),
+		mainCopy,
 	} {
 		if _, err := os.Lstat(p); err != nil {
 			t.Fatalf("missing %s: %v", p, err)
 		}
 	}
 
-	// Confirm .mws in working copy is a symlink and resolves to meta's .mws.
-	st, err := os.Lstat(filepath.Join(wc, ".mws"))
-	if err != nil || st.Mode()&os.ModeSymlink == 0 {
-		t.Fatalf("expected .mws to be symlink, got %v err=%v", st.Mode(), err)
+	// Harness entry in main/ must be a symlink, NOT a .mws symlink (no back-link).
+	if _, err := os.Lstat(filepath.Join(mainCopy, ".mws")); err == nil {
+		t.Fatalf(".mws symlink in working copy is no longer used; should not exist")
+	}
+	claudeLink := filepath.Join(mainCopy, "CLAUDE.md")
+	st, err := os.Lstat(claudeLink)
+	if err != nil {
+		t.Fatalf("Lstat %s: %v", claudeLink, err)
+	}
+	if st.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("expected %s to be a symlink", claudeLink)
 	}
 
 	c, err := config.Load(metaDir)

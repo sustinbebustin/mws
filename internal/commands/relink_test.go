@@ -5,17 +5,25 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/sustinbebustin/mws/internal/project"
 )
 
-func TestRepairDivergedFilesAutoRepairsIdentical(t *testing.T) {
+func setupRelinkTree(t *testing.T) (meta, peer string) {
+	t.Helper()
 	root := t.TempDir()
-	meta := filepath.Join(root, "demo-meta")
-	peer := filepath.Join(root, "demo")
-	mustMkdir(t, meta)
+	meta = filepath.Join(root, "demo")
+	peer = filepath.Join(meta, "main")
+	mustMkdir(t, filepath.Join(meta, project.HarnessDirName))
 	mustMkdir(t, peer)
+	return meta, peer
+}
+
+func TestRepairDivergedFilesAutoRepairsIdentical(t *testing.T) {
+	meta, peer := setupRelinkTree(t)
 
 	body := []byte(`{"k":"v"}`)
-	mustWriteFile(t, filepath.Join(meta, ".mcp.json"), string(body))
+	mustWriteFile(t, filepath.Join(meta, project.HarnessDirName, ".mcp.json"), string(body))
 	mustWriteFile(t, filepath.Join(peer, ".mcp.json"), string(body))
 
 	called := false
@@ -32,31 +40,27 @@ func TestRepairDivergedFilesAutoRepairsIdentical(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(peer, ".mcp.json")); !os.IsNotExist(err) {
 		t.Fatalf("expected peer .mcp.json removed, got err=%v", err)
 	}
-	if _, err := os.Lstat(filepath.Join(meta, ".mcp.json")); err != nil {
-		t.Fatalf("meta .mcp.json should remain: %v", err)
+	if _, err := os.Lstat(filepath.Join(meta, project.HarnessDirName, ".mcp.json")); err != nil {
+		t.Fatalf("harness .mcp.json should remain: %v", err)
 	}
 }
 
 func TestRepairDivergedFilesPromptsAndPromotes(t *testing.T) {
-	root := t.TempDir()
-	meta := filepath.Join(root, "demo-meta")
-	peer := filepath.Join(root, "demo")
-	mustMkdir(t, meta)
-	mustMkdir(t, peer)
+	meta, peer := setupRelinkTree(t)
 
-	mustWriteFile(t, filepath.Join(meta, ".mcp.json"), `{"old":true}`)
+	mustWriteFile(t, filepath.Join(meta, project.HarnessDirName, ".mcp.json"), `{"old":true}`)
 	mustWriteFile(t, filepath.Join(peer, ".mcp.json"), `{"new":true}`)
 
 	prompt := func(string, string) (string, error) { return "peer", nil }
 	if err := repairDivergedFiles(nopReporter{}, meta, peer, prompt); err != nil {
 		t.Fatalf("repairDivergedFiles: %v", err)
 	}
-	body, err := os.ReadFile(filepath.Join(meta, ".mcp.json"))
+	body, err := os.ReadFile(filepath.Join(meta, project.HarnessDirName, ".mcp.json"))
 	if err != nil {
-		t.Fatalf("read meta after promote: %v", err)
+		t.Fatalf("read harness after promote: %v", err)
 	}
 	if string(body) != `{"new":true}` {
-		t.Fatalf("meta not promoted; got %q", string(body))
+		t.Fatalf("harness not promoted; got %q", string(body))
 	}
 	if _, err := os.Lstat(filepath.Join(peer, ".mcp.json")); !os.IsNotExist(err) {
 		t.Fatalf("peer file should have been moved, got err=%v", err)
@@ -64,18 +68,12 @@ func TestRepairDivergedFilesPromptsAndPromotes(t *testing.T) {
 }
 
 func TestRepairDivergedFilesSkipsSymlinksAndPeerOnlyFiles(t *testing.T) {
-	root := t.TempDir()
-	meta := filepath.Join(root, "demo-meta")
-	peer := filepath.Join(root, "demo")
-	mustMkdir(t, meta)
-	mustMkdir(t, peer)
+	meta, peer := setupRelinkTree(t)
 
-	// peer has a symlink at .mcp.json -- not a divergence.
-	mustWriteFile(t, filepath.Join(meta, ".mcp.json"), `meta`)
-	if err := os.Symlink("../demo-meta/.mcp.json", filepath.Join(peer, ".mcp.json")); err != nil {
+	mustWriteFile(t, filepath.Join(meta, project.HarnessDirName, ".mcp.json"), `meta`)
+	if err := os.Symlink("../.mws/.mcp.json", filepath.Join(peer, ".mcp.json")); err != nil {
 		t.Fatal(err)
 	}
-	// peer has a regular file with no meta counterpart -- user content, leave alone.
 	mustWriteFile(t, filepath.Join(peer, "notes.md"), `peer-only`)
 
 	prompt := func(string, string) (string, error) {

@@ -19,14 +19,18 @@ import (
 	"github.com/sustinbebustin/mws/internal/skeleton"
 )
 
+// firstWorkingCopyName is the conventional name for the working copy created
+// alongside the meta on `mws init`.
+const firstWorkingCopyName = "main"
+
 func newInitCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "init [name]",
-		Short: "Create a new meta workspace and working copy",
-		Long: `init creates a sibling-meta layout: a meta workspace directory holding the AI
-harness (.claude, .workspace, CLAUDE.md, ...) and an adjacent working copy that
-symlinks back into it. Prompts collect everything up front, then executes once
-confirmed.`,
+		Short: "Create a new meta workspace with a first working copy",
+		Long: `init creates a meta-at-root workspace: a directory <parent>/<name>/ that
+is a git repo at its root, contains the AI harness under .mws/, the mws config
+at .mws.toml, an allowlist .gitignore, and a first working copy at <name>/main/.
+Prompts collect everything up front, then executes once confirmed.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var arg string
@@ -43,7 +47,6 @@ type initPlan struct {
 	ProjectName string
 	Description string
 	Repos       []config.Repo
-	Brownfield  bool
 }
 
 func runInit(ctx context.Context, r Reporter, arg string) error {
@@ -55,7 +58,7 @@ func runInit(ctx context.Context, r Reporter, arg string) error {
 		return err
 	}
 
-	plan, err := collectInitPlan(r, arg, cwd)
+	plan, err := collectInitPlan(arg, cwd)
 	if err != nil {
 		return err
 	}
@@ -64,7 +67,7 @@ func runInit(ctx context.Context, r Reporter, arg string) error {
 
 	var confirm bool
 	if err := huh.NewConfirm().
-		Title("Create meta workspace and working copy?").
+		Title("Create meta workspace?").
 		Affirmative("Yes").
 		Negative("Cancel").
 		Value(&confirm).
@@ -79,42 +82,25 @@ func runInit(ctx context.Context, r Reporter, arg string) error {
 	return executeInit(ctx, r, plan)
 }
 
-func collectInitPlan(r Reporter, arg, cwd string) (*initPlan, error) {
+func collectInitPlan(arg, cwd string) (*initPlan, error) {
 	p := &initPlan{ParentDir: cwd, ProjectName: arg}
 
-	if err := huh.NewConfirm().
-		Title("Are there existing native repos to bring under mws?").
-		Description("Yes: import repos already cloned somewhere. No: start fresh.").
-		Affirmative("Yes (brownfield)").
-		Negative("No (greenfield)").
-		Value(&p.Brownfield).
-		Run(); err != nil {
-		return nil, err
-	}
-
-	if p.Brownfield {
-		return collectBrownfieldPlan(r, p)
-	}
-	return collectGreenfieldPlan(p)
-}
-
-func collectGreenfieldPlan(p *initPlan) (*initPlan, error) {
 	fields := []huh.Field{}
 	if p.ProjectName == "" {
 		fields = append(fields, huh.NewInput().
 			Title("Project name").
-			Description("Used as the working-copy and meta-workspace directory base name.").
-			Validate(validateProjectName).
+			Description("Used as the meta workspace directory name.").
+			Validate(project.ValidateName).
 			Value(&p.ProjectName))
 	}
 	fields = append(fields, huh.NewInput().
 		Title("Description").
-		Description("Short one-line description -- ends up in CLAUDE.md and README.md.").
+		Description("Short one-line description -- shown in CLAUDE.md and README.md.").
 		Value(&p.Description))
 	parent := p.ParentDir
 	fields = append(fields, huh.NewInput().
 		Title("Parent directory").
-		Description("Both the meta and the working copy will be created here.").
+		Description("The meta workspace will be created here.").
 		Validate(validateExistingDir).
 		Value(&parent))
 
@@ -128,77 +114,6 @@ func collectGreenfieldPlan(p *initPlan) (*initPlan, error) {
 		return nil, err
 	}
 	p.Repos = repos
-	return p, nil
-}
-
-func collectBrownfieldPlan(r Reporter, p *initPlan) (*initPlan, error) {
-	workingCopy := p.ParentDir
-	fields := []huh.Field{
-		huh.NewInput().
-			Title("Working copy path").
-			Description("The directory that already contains your native repo clones. Will become a working copy.").
-			Validate(validateExistingDir).
-			Value(&workingCopy),
-	}
-	if p.ProjectName == "" {
-		fields = append(fields, huh.NewInput().
-			Title("Project name").
-			Description("Used as the meta-workspace directory base name (working copy keeps its name).").
-			Validate(validateProjectName).
-			Value(&p.ProjectName))
-	}
-	fields = append(fields, huh.NewInput().
-		Title("Description").
-		Value(&p.Description))
-
-	if err := huh.NewForm(huh.NewGroup(fields...)).Run(); err != nil {
-		return nil, err
-	}
-
-	workingCopy = strings.TrimSpace(workingCopy)
-	abs, err := filepath.Abs(workingCopy)
-	if err != nil {
-		return nil, err
-	}
-	p.ParentDir = filepath.Dir(abs)
-	if p.ProjectName == "" {
-		p.ProjectName = filepath.Base(abs)
-	}
-
-	detected, err := detectNativeRepos(abs)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(detected) == 0 {
-		r.Info("No git repos detected in working copy. You can add some later with `mws add-repo`.")
-		extras, err := promptRepoLoop("Add another native repo to register?")
-		if err != nil {
-			return nil, err
-		}
-		p.Repos = extras
-		return p, nil
-	}
-
-	var selected []string
-	if err := huh.NewMultiSelect[string]().
-		Title("Select native repos to register").
-		Options(detectedToOptions(detected)...).
-		Value(&selected).
-		Run(); err != nil {
-		return nil, err
-	}
-
-	for _, name := range selected {
-		repoURL := detected[name]
-		p.Repos = append(p.Repos, config.Repo{Folder: name, URL: repoURL})
-	}
-
-	extras, err := promptRepoLoop("Register an additional native repo?")
-	if err != nil {
-		return nil, err
-	}
-	p.Repos = append(p.Repos, extras...)
 	return p, nil
 }
 
@@ -240,52 +155,13 @@ func promptRepoLoop(prompt string) ([]config.Repo, error) {
 	}
 }
 
-func detectedToOptions(m map[string]string) []huh.Option[string] {
-	var opts []huh.Option[string]
-	for name, repoURL := range m {
-		opts = append(opts, huh.NewOption(fmt.Sprintf("%s  (%s)", name, repoURL), name).Selected(true))
-	}
-	return opts
-}
-
-// detectNativeRepos returns a map of folder name -> origin URL for direct subdirectories of root
-// that contain a .git directory. Subdirs without an origin are still included with an empty URL.
-func detectNativeRepos(root string) (map[string]string, error) {
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]string{}
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		gitDir := filepath.Join(root, e.Name(), ".git")
-		if _, err := os.Stat(gitDir); err != nil {
-			continue
-		}
-		out[e.Name()] = readOriginURL(filepath.Join(root, e.Name()))
-	}
-	return out, nil
-}
-
-func readOriginURL(repoDir string) string {
-	// Best-effort: ignore errors, return empty when no origin.
-	cmd := exec.Command("git", "-C", repoDir, "remote", "get-url", "origin")
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
-}
-
 func showSummary(r Reporter, p *initPlan) {
-	metaDir := filepath.Join(p.ParentDir, project.MetaDirName(p.ProjectName))
-	workingCopy := filepath.Join(p.ParentDir, p.ProjectName)
+	metaDir := filepath.Join(p.ParentDir, p.ProjectName)
+	mainCopy := filepath.Join(metaDir, firstWorkingCopyName)
 
 	r.Heading("\nPlanned actions")
 	r.Info(fmt.Sprintf("  meta workspace : %s", metaDir))
-	r.Info(fmt.Sprintf("  working copy   : %s", workingCopy))
+	r.Info(fmt.Sprintf("  working copy   : %s", mainCopy))
 	r.Info(fmt.Sprintf("  description    : %s", or(p.Description, "(none)")))
 	if len(p.Repos) == 0 {
 		r.Info("  native repos   : (none)")
@@ -295,19 +171,15 @@ func showSummary(r Reporter, p *initPlan) {
 			r.Info(fmt.Sprintf("    - %s  %s", repo.Folder, repo.URL))
 		}
 	}
-	mode := "greenfield"
-	if p.Brownfield {
-		mode = "brownfield"
-	}
-	r.Info(fmt.Sprintf("  mode           : %s\n", mode))
 }
 
 func executeInit(ctx context.Context, r Reporter, p *initPlan) error {
-	metaDir := filepath.Join(p.ParentDir, project.MetaDirName(p.ProjectName))
-	workingCopy := filepath.Join(p.ParentDir, p.ProjectName)
+	metaDir := filepath.Join(p.ParentDir, p.ProjectName)
 
 	if _, err := os.Stat(metaDir); err == nil {
-		return fmt.Errorf("meta workspace already exists at %s", metaDir)
+		return fmt.Errorf("path already exists at %s", metaDir)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
 
 	skeletonData := skeleton.Data{
@@ -334,25 +206,21 @@ func executeInit(ctx context.Context, r Reporter, p *initPlan) error {
 	}
 	r.OK(fmt.Sprintf("Created meta workspace at %s", metaDir))
 
-	if _, err := os.Stat(workingCopy); err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		if err := os.MkdirAll(workingCopy, 0o755); err != nil {
-			return err
-		}
+	mainCopy := filepath.Join(metaDir, firstWorkingCopyName)
+	if err := os.MkdirAll(mainCopy, 0o755); err != nil {
+		return err
 	}
-
-	linked, err := project.LinkMetaIntoWorkingCopy(metaDir, workingCopy)
+	linked, err := project.LinkHarnessIntoWorkingCopy(metaDir, mainCopy)
 	if err != nil {
 		return err
 	}
 	for _, name := range linked {
-		r.OK(fmt.Sprintf("Linked %s -> ../%s/%s", filepath.Join(p.ProjectName, name), filepath.Base(metaDir), name))
+		r.OK(fmt.Sprintf("Linked %s/%s", firstWorkingCopyName, name))
 	}
 
+	var failed []string
 	for _, repo := range p.Repos {
-		target := filepath.Join(workingCopy, repo.Folder)
+		target := filepath.Join(mainCopy, repo.Folder)
 		if _, err := os.Stat(target); err == nil {
 			r.Info(fmt.Sprintf("Native repo %s already present, skipping clone", repo.Folder))
 			continue
@@ -364,40 +232,29 @@ func executeInit(ctx context.Context, r Reporter, p *initPlan) error {
 		r.Heading(fmt.Sprintf("Cloning %s ...", repo.Folder))
 		if err := git.Clone(ctx, repo.URL, target); err != nil {
 			r.Fail(fmt.Sprintf("%s: %v", repo.Folder, err))
+			failed = append(failed, repo.Folder)
 			continue
 		}
 		r.OK(fmt.Sprintf("Cloned %s", repo.Folder))
 	}
 
-	r.OK(fmt.Sprintf("Done. cd %s to start working.", workingCopy))
+	if anyEnvMapping(p.Repos) {
+		r.Info(fmt.Sprintf("Populate env files inside %s and run `mws stage-env %s` to capture them into staging.", mainCopy, firstWorkingCopyName))
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("init completed with errors: %d repo(s) failed to clone: %s", len(failed), strings.Join(failed, ", "))
+	}
+	r.OK(fmt.Sprintf("Done. cd %s to start working.", mainCopy))
 	return nil
 }
 
-// validateProjectName accepts a single path-safe segment: ASCII letters/digits/_-./
-// must start with a letter or digit, must not start with '.' or '-', and must not
-// contain path separators, spaces, or control characters.
-func validateProjectName(s string) error {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return errors.New("project name is required")
-	}
-	if strings.HasPrefix(s, ".") {
-		return errors.New("must not start with '.'")
-	}
-	if strings.HasPrefix(s, "-") {
-		return errors.New("must not start with '-'")
-	}
-	for _, r := range s {
-		switch {
-		case r >= 'A' && r <= 'Z':
-		case r >= 'a' && r <= 'z':
-		case r >= '0' && r <= '9':
-		case r == '-' || r == '_' || r == '.':
-		default:
-			return fmt.Errorf("invalid character %q (allowed: letters, digits, '-', '_', '.')", r)
+func anyEnvMapping(repos []config.Repo) bool {
+	for _, r := range repos {
+		if len(r.Envs) > 0 {
+			return true
 		}
 	}
-	return nil
+	return false
 }
 
 func validateExistingDir(s string) error {
