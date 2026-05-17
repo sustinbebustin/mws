@@ -14,16 +14,29 @@ The result: parallel agents work side-by-side without fighting over the same `.g
 
 ## Prerequisites
 
-- [Go](https://go.dev/) 1.24+ -- to install the CLI
-- [Git](https://git-scm.com/) -- the meta workspace and every native repo are git repositories
+- [Git](https://git-scm.com/) -- the meta workspace and every native repo are git repositories.
 
 ## Install
+
+### Homebrew (macOS, Linux)
+
+```bash
+brew install sustinbebustin/mws/mws
+```
+
+### Pre-built binary
+
+Download the archive for your OS and architecture from the [latest release](https://github.com/sustinbebustin/mws/releases/latest), extract it, and drop `mws` somewhere on your `PATH`. Releases include binaries for darwin and linux on amd64 and arm64, plus a `checksums.txt`.
+
+### Go install
+
+Requires [Go](https://go.dev/) 1.21+ (newer Go toolchain auto-fetched via `GOTOOLCHAIN=auto`).
 
 ```bash
 go install github.com/sustinbebustin/mws/cmd/mws@latest
 ```
 
-The harness skeleton ships embedded in the binary -- no separate template repo, no network at `init` time.
+The harness skeleton ships embedded in the binary -- no separate template repo, no network at `init` time. Run `mws version` to verify the install.
 
 ## Quick start
 
