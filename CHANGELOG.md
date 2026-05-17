@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-05-17
+
+### Changed
+- Homebrew formula now lives at the canonical `Formula/mws.rb` path in the tap. Existing `brew install sustinbebustin/mws/mws` continues to work unchanged.
+
 ## [0.1.0] - 2026-05-17
 
 ### Added
@@ -16,5 +21,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tag-driven release pipeline: pushing a `v*` tag publishes darwin and linux binaries (amd64 and arm64) to GitHub Releases via goreleaser, with checksums and a conventional-commit-grouped changelog.
 - Homebrew tap: every release pushes a formula to `sustinbebustin/homebrew-mws`, enabling `brew install sustinbebustin/mws/mws`.
 
-[Unreleased]: https://github.com/sustinbebustin/mws/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/sustinbebustin/mws/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/sustinbebustin/mws/releases/tag/v0.1.1
 [0.1.0]: https://github.com/sustinbebustin/mws/releases/tag/v0.1.0
