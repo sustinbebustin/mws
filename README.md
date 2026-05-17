@@ -57,25 +57,24 @@ mws list
 ## Layout
 
 ```
-~/dev/my-project/                # this directory IS a git repo (meta root)
-  .git/                          # tracks .gitignore, .mws.toml, .mws/, README.md
-  .gitignore                     # allowlist
-  .mws.toml                      # mws config (project name, repos, env mappings)
-  .mws/                          # harness; every entry symlinks into every working copy
-    CLAUDE.md
-    .claude/
-    .workspace/
-    justfile
-  .envs/                         # env-file staging, per-repo (untracked)
-  main/                          # first working copy, untracked
-    frontend/                    # independent native git clone
-    backend/                     # independent native git clone
-    CLAUDE.md -> ../.mws/CLAUDE.md
-    .claude/   -> ../.mws/.claude/
-    ...
-  feature-x/                     # any number of additional working copies
-    frontend/                    # independent clone (own .git/)
-    ...
+my-project/                       # this directory IS a git repo (meta root)
+├── .gitignore                    # allowlist
+├── .mws.toml                     # Project name, native repos, env mappings
+├── .mws/                         # Harness; every entry symlinks into every working copy
+│   ├── CLAUDE.md
+│   ├── .claude/
+│   ├── .workspace/
+│   └── justfile
+├── .envs/                        # Env-file staging, per repo (untracked)
+├── main/                         # First working copy (untracked)
+│   ├── frontend/                 # Independent native git clone
+│   ├── backend/                  # Independent native git clone
+│   ├── CLAUDE.md -> ../.mws/CLAUDE.md
+│   ├── .claude/   -> ../.mws/.claude/
+│   └── ...
+└── feature-x/                    # Additional working copy
+    ├── frontend/                 # Independent clone (own .git/)
+    └── ...
 ```
 
 Every top-level entry under `.mws/` is symlinked into each working copy -- discovered dynamically, no hardcoded list. New files created directly in a working copy stay local until `mws promote <path>` moves them into `.mws/` and backfills the symlink across every peer.
