@@ -173,8 +173,15 @@ func TestMigrateFromOldWorkingCopyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("planMigrate from working copy: %v", err)
 	}
-	if plan.OldMeta != oldMeta {
-		t.Fatalf("old meta: got %q want %q", plan.OldMeta, oldMeta)
+	// planMigrate resolves the .mws symlink with filepath.EvalSymlinks, which
+	// also collapses platform-level tempdir symlinks (macOS: /var -> /private/var).
+	// Normalise the expected path the same way so the assertion is platform-stable.
+	wantOldMeta, err := filepath.EvalSymlinks(oldMeta)
+	if err != nil {
+		t.Fatalf("EvalSymlinks oldMeta: %v", err)
+	}
+	if plan.OldMeta != wantOldMeta {
+		t.Fatalf("old meta: got %q want %q", plan.OldMeta, wantOldMeta)
 	}
 }
 
