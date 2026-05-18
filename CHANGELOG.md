@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `mws clone` now retargets the new working copy's `origin` to the URL declared in `.mws.toml` after a `git clone --local` from a sibling. Previously the new clone's `origin` pointed at the local sibling directory, so `git push`/`pull`/`fetch` missed the canonical remote.
+
+### Added
+- Root `.gitignore` covering goreleaser output, the root-level `mws` binary, test/coverage artifacts, per-user agent dirs, and editor/OS cruft.
+
 ## [0.1.1] - 2026-05-17
 
 ### Changed
