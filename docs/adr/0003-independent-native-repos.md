@@ -1,6 +1,6 @@
 # Independent native repos with `git clone --local` for peer copies
 
-Each **Working copy** holds its own clone of each **Native repo** with its own `.git/` directory (independent HEAD, index, branches). `mws clone <new-peer>` populates the new peer's native repos with `git clone --local <invoking-peer>/<folder> <new-peer>/<folder>`, falling back to a remote clone (URL from `.mws/config.toml`) if `--local` fails. The new peer's native repos check out each repo's default branch, not the invoking peer's current branch.
+Each **Working copy** holds its own clone of each **Native repo** with its own `.git/` directory (independent HEAD, index, branches). `mws clone <new-peer>` populates the new peer's native repos with `git clone --local <invoking-peer>/<folder> <new-peer>/<folder>`, falling back to a remote clone (URL from `.mws/config.toml`) if `--local` fails. After a successful local clone, the new peer's `origin` is rewritten to the URL from `.mws.toml` so `git push`/`pull`/`fetch` target the canonical remote, not the invoking peer's directory. The new peer's native repos check out each repo's default branch, not the invoking peer's current branch.
 
 ## Why
 
