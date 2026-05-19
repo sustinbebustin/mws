@@ -36,13 +36,12 @@ func newCloneCmd() *cobra.Command {
 		Use:   "clone <name>",
 		Short: "Create a new working copy inside this meta workspace",
 		Long: `clone creates a new working copy at <meta-root>/<name>/. It clones each
-registered native repo into the new working copy (using "git clone --local"
-from the invoking working copy when available, falling back to the configured
-URL), fans the harness symlinks out from .mws/, and copies any env files
-mapped in .mws.toml from env staging into the working copy.
+registered native repo from its configured URL into the new working copy,
+fans the harness symlinks out from .mws/, and copies any env files mapped in
+.mws.toml from env staging into the working copy.
 
-Native repos are checked out on each repo's default branch, not on the
-invoking copy's current branch -- a deliberate fresh-start semantic.
+Native repos are checked out on each repo's default branch -- a deliberate
+fresh-start semantic.
 
 After clone and env-copy succeed, any [[repos.setup]] commands run inside
 each cloned repo via sh -c. By default a single confirmation prompt summarises
@@ -121,14 +120,9 @@ func runClone(ctx context.Context, r Reporter, name string, choice setupChoice) 
 		r.OK(fmt.Sprintf("Linked %s/%s", name, n))
 	}
 
-	invoker, err := chooseInvokingCopy(ws)
-	if err != nil {
-		return err
-	}
-
 	var failed []string
 	for _, repo := range cfg.Repos {
-		if err := cloneNative(ctx, r, repo, invoker, target); err != nil {
+		if err := cloneNative(ctx, r, repo, target); err != nil {
 			r.Fail(fmt.Sprintf("%s: %v", repo.Folder, err))
 			failed = append(failed, repo.Folder)
 			continue
@@ -157,25 +151,6 @@ func runClone(ctx context.Context, r Reporter, name string, choice setupChoice) 
 	return nil
 }
 
-// chooseInvokingCopy picks a working copy whose native repo clones we should prefer for
-// `git clone --local`. Order:
-//  1. The working copy the user invoked from.
-//  2. The first peer alphabetically (so newer clones can bootstrap from any existing copy).
-//  3. None: fall back to URL clones.
-func chooseInvokingCopy(ws *project.Workspace) (string, error) {
-	if ws.WorkingCopy != "" {
-		return ws.WorkingCopy, nil
-	}
-	peers, err := ws.EnumerateCopies()
-	if err != nil {
-		return "", err
-	}
-	if len(peers) == 0 {
-		return "", nil
-	}
-	return peers[0], nil
-}
-
 // clonePromptDescription renders the help text shown under the "New working
 // copy name" prompt, reflecting the configured working_copies_dir (if any).
 func clonePromptDescription(ws *project.Workspace) string {
@@ -185,45 +160,20 @@ func clonePromptDescription(ws *project.Workspace) string {
 	return "Will be created at <meta-root>/<name>/."
 }
 
-// cloneNative populates target/<folder> with a clone of the repo. Tries
-// `git clone --local invoker/<folder>` first, then falls back to URL clone.
-// After cloning, checks out the repo's default branch.
-func cloneNative(ctx context.Context, r Reporter, repo config.Repo, invoker, target string) error {
+// cloneNative populates target/<folder> with a fresh `git clone <url>` of the
+// repo and then checks out its default branch. The URL is required: cloning
+// from a sibling working copy is intentionally not supported, so the new copy
+// never inherits divergent `.git/` state from a donor.
+func cloneNative(ctx context.Context, r Reporter, repo config.Repo, target string) error {
 	dst := filepath.Join(target, repo.Folder)
 	if _, err := os.Stat(dst); err == nil {
 		r.Info(fmt.Sprintf("%s: already present, skipping", repo.Folder))
 		return nil
 	}
-
-	r.Heading(fmt.Sprintf("Cloning %s ...", repo.Folder))
-
-	var lastErr error
-	if invoker != "" {
-		src := filepath.Join(invoker, repo.Folder)
-		if _, err := os.Stat(filepath.Join(src, ".git")); err == nil {
-			if err := git.CloneLocal(ctx, src, dst); err != nil {
-				lastErr = err
-				r.Warn(fmt.Sprintf("%s: --local clone failed (%v), falling back to remote", repo.Folder, err))
-			} else {
-				// --local left origin pointing at the sibling working copy. Rewrite it to
-				// the canonical URL from .mws.toml so push/pull/fetch hit the real remote.
-				if repo.URL != "" {
-					if err := git.SetRemoteURL(ctx, dst, "origin", repo.URL); err != nil {
-						r.Warn(fmt.Sprintf("%s: could not retarget origin to %s (%v); push/pull will target the sibling copy", repo.Folder, repo.URL, err))
-					}
-				}
-				return checkoutDefault(ctx, r, dst)
-			}
-		}
-	}
-
 	if repo.URL == "" {
-		if lastErr != nil {
-			return lastErr
-		}
-		return fmt.Errorf("no local source and no remote URL configured")
+		return fmt.Errorf("no remote URL configured in .mws.toml")
 	}
-
+	r.Heading(fmt.Sprintf("Cloning %s ...", repo.Folder))
 	if err := git.Clone(ctx, repo.URL, dst); err != nil {
 		return err
 	}

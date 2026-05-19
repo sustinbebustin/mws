@@ -100,7 +100,7 @@ Working copies can optionally be grouped under a single subdirectory by setting 
 |---|---|
 | `mws init [name]` | Create a new meta workspace with a first working copy at `<name>/main/`. |
 | `mws add-repo <url> [folder]` | Register a native repo in `.mws.toml` and clone it into every working copy. |
-| `mws clone <name>` | Create a new working copy. Native repos use `git clone --local` from a peer when possible (hardlinked objects), falling back to the configured URL. Each repo is checked out on its default branch. |
+| `mws clone <name>` | Create a new working copy. Native repos are freshly cloned from each configured URL and checked out on the default branch. |
 | `mws promote <path>` | Move a top-level file or directory from the current working copy into `.mws/`, symlink it back, and backfill the symlink into every other working copy. |
 | `mws list` | List working copies in the current meta workspace. |
 | `mws rm <name>` | Remove a working copy. Confirms before destruction. |

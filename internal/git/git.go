@@ -23,12 +23,6 @@ func Clone(ctx context.Context, src, dst string) error {
 	return runStreaming(ctx, "", "clone", src, dst)
 }
 
-// CloneLocal runs `git clone --local <src> <dst>`. Equivalent to Clone but instructs
-// git to hardlink objects from src for speed and disk efficiency.
-func CloneLocal(ctx context.Context, src, dst string) error {
-	return runStreaming(ctx, "", "clone", "--local", src, dst)
-}
-
 // CurrentBranch returns the abbreviated HEAD ref for repoDir.
 func CurrentBranch(ctx context.Context, repoDir string) (string, error) {
 	out, err := capture(ctx, repoDir, "rev-parse", "--abbrev-ref", "HEAD")
@@ -70,11 +64,6 @@ func DefaultBranch(ctx context.Context, repoDir, remote string) (string, error) 
 // Checkout runs `git checkout <ref>` in repoDir.
 func Checkout(ctx context.Context, repoDir, ref string) error {
 	return run(ctx, repoDir, "checkout", ref)
-}
-
-// SetRemoteURL runs `git remote set-url <remote> <url>` in repoDir.
-func SetRemoteURL(ctx context.Context, repoDir, remote, url string) error {
-	return run(ctx, repoDir, "remote", "set-url", remote, url)
 }
 
 // run executes `git <args...>` in cwd, capturing combined output into the error on failure.
