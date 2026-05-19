@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-19
+
 ### Changed
 - **Breaking.** `mws clone <name>` now always runs a fresh `git clone <url> <dst>` for every registered native repo. The `git clone --local` optimisation from a sibling working copy (with post-clone `origin` retarget) has been removed, so the new copy never inherits divergent `.git/` state from a donor. `repo.url` is strictly required at clone time; a missing URL is a per-repo error (`"<folder>: no remote URL configured in .mws.toml"`).
 
@@ -44,7 +46,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tag-driven release pipeline: pushing a `v*` tag publishes darwin and linux binaries (amd64 and arm64) to GitHub Releases via goreleaser, with checksums and a conventional-commit-grouped changelog.
 - Homebrew tap: every release pushes a formula to `sustinbebustin/homebrew-mws`, enabling `brew install sustinbebustin/mws/mws`.
 
-[Unreleased]: https://github.com/sustinbebustin/mws/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/sustinbebustin/mws/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/sustinbebustin/mws/releases/tag/v0.3.0
 [0.2.0]: https://github.com/sustinbebustin/mws/releases/tag/v0.2.0
 [0.1.2]: https://github.com/sustinbebustin/mws/releases/tag/v0.1.2
 [0.1.1]: https://github.com/sustinbebustin/mws/releases/tag/v0.1.1
