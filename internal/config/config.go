@@ -17,7 +17,13 @@ const ConfigFileName = ".mws.toml"
 type Config struct {
 	ProjectName string `toml:"project_name"`
 	Description string `toml:"description"`
-	Repos       []Repo `toml:"repos"`
+	// WorkingCopiesDir is an optional single path-safe segment under the meta
+	// root where `mws clone` and `mws init` place new working copies. Must
+	// satisfy project.ValidateName when non-empty (same alphabet as project
+	// and peer names). Empty means working copies live directly under the
+	// meta root.
+	WorkingCopiesDir string `toml:"working_copies_dir,omitempty"`
+	Repos            []Repo `toml:"repos"`
 }
 
 // Repo identifies one native git repo by its target folder and clone URL.

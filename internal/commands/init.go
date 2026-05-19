@@ -43,10 +43,11 @@ Prompts collect everything up front, then executes once confirmed.`,
 }
 
 type initPlan struct {
-	ParentDir   string
-	ProjectName string
-	Description string
-	Repos       []config.Repo
+	ParentDir        string
+	ProjectName      string
+	Description      string
+	WorkingCopiesDir string
+	Repos            []config.Repo
 }
 
 func runInit(ctx context.Context, r Reporter, arg string) error {
@@ -93,21 +94,29 @@ func collectInitPlan(arg, cwd string) (*initPlan, error) {
 			Validate(project.ValidateName).
 			Value(&p.ProjectName))
 	}
-	fields = append(fields, huh.NewInput().
-		Title("Description").
-		Description("Short one-line description -- shown in CLAUDE.md and README.md.").
-		Value(&p.Description))
 	parent := p.ParentDir
-	fields = append(fields, huh.NewInput().
-		Title("Parent directory").
-		Description("The meta workspace will be created here.").
-		Validate(validateExistingDir).
-		Value(&parent))
+	fields = append(fields,
+		huh.NewInput().
+			Title("Description").
+			Description("Short one-line description -- shown in CLAUDE.md and README.md.").
+			Value(&p.Description),
+		huh.NewInput().
+			Title("Subdirectory for working copies (optional)").
+			Description("Leave empty to keep working copies directly under the meta root.").
+			Validate(project.ValidateWorkingCopiesDir).
+			Value(&p.WorkingCopiesDir),
+		huh.NewInput().
+			Title("Parent directory").
+			Description("The meta workspace will be created here.").
+			Validate(validateExistingDir).
+			Value(&parent),
+	)
 
 	if err := huh.NewForm(huh.NewGroup(fields...)).Run(); err != nil {
 		return nil, err
 	}
 	p.ParentDir = strings.TrimSpace(parent)
+	p.WorkingCopiesDir = strings.TrimSpace(p.WorkingCopiesDir)
 
 	repos, err := promptRepoLoop("Register a native repo to clone into the working copy?")
 	if err != nil {
@@ -157,11 +166,14 @@ func promptRepoLoop(prompt string) ([]config.Repo, error) {
 
 func showSummary(r Reporter, p *initPlan) {
 	metaDir := filepath.Join(p.ParentDir, p.ProjectName)
-	mainCopy := filepath.Join(metaDir, firstWorkingCopyName)
+	mainCopy := filepath.Join(metaDir, p.WorkingCopiesDir, firstWorkingCopyName)
 
 	r.Heading("\nPlanned actions")
 	r.Info(fmt.Sprintf("  meta workspace : %s", metaDir))
 	r.Info(fmt.Sprintf("  working copy   : %s", mainCopy))
+	if p.WorkingCopiesDir != "" {
+		r.Info(fmt.Sprintf("  copies subdir  : %s/", p.WorkingCopiesDir))
+	}
 	r.Info(fmt.Sprintf("  description    : %s", or(p.Description, "(none)")))
 	if len(p.Repos) == 0 {
 		r.Info("  native repos   : (none)")
@@ -174,6 +186,12 @@ func showSummary(r Reporter, p *initPlan) {
 }
 
 func executeInit(ctx context.Context, r Reporter, p *initPlan) error {
+	// Validate before any on-disk writes: an invalid value here would otherwise
+	// leave a half-rendered meta directory behind after the error returns.
+	if err := project.ValidateWorkingCopiesDir(p.WorkingCopiesDir); err != nil {
+		return fmt.Errorf("invalid working_copies_dir %q: %w", p.WorkingCopiesDir, err)
+	}
+
 	metaDir := filepath.Join(p.ParentDir, p.ProjectName)
 
 	if _, err := os.Stat(metaDir); err == nil {
@@ -195,9 +213,10 @@ func executeInit(ctx context.Context, r Reporter, p *initPlan) error {
 		return err
 	}
 	if err := config.Save(metaDir, &config.Config{
-		ProjectName: p.ProjectName,
-		Description: p.Description,
-		Repos:       p.Repos,
+		ProjectName:      p.ProjectName,
+		Description:      p.Description,
+		WorkingCopiesDir: p.WorkingCopiesDir,
+		Repos:            p.Repos,
 	}); err != nil {
 		return err
 	}
@@ -206,7 +225,7 @@ func executeInit(ctx context.Context, r Reporter, p *initPlan) error {
 	}
 	r.OK(fmt.Sprintf("Created meta workspace at %s", metaDir))
 
-	mainCopy := filepath.Join(metaDir, firstWorkingCopyName)
+	mainCopy := filepath.Join(metaDir, p.WorkingCopiesDir, firstWorkingCopyName)
 	if err := os.MkdirAll(mainCopy, 0o755); err != nil {
 		return err
 	}

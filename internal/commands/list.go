@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/project"
 )
 
@@ -30,9 +31,15 @@ func runList(r Reporter) error {
 	if err != nil {
 		return err
 	}
+	// Locate tolerates a malformed .mws.toml so it can still report the meta
+	// root; surface the real parse error here before scanning the (possibly
+	// wrong) copies root.
+	if _, err := config.Load(ws.MetaRoot); err != nil {
+		return err
+	}
 
 	r.Heading(fmt.Sprintf("Meta workspace: %s", ws.MetaRoot))
-	peers, err := project.EnumerateWorkingCopies(ws.MetaRoot)
+	peers, err := ws.EnumerateCopies()
 	if err != nil {
 		return err
 	}

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/project"
 )
 
@@ -64,6 +65,36 @@ func TestRepairDivergedFilesPromptsAndPromotes(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(peer, ".mcp.json")); !os.IsNotExist(err) {
 		t.Fatalf("peer file should have been moved, got err=%v", err)
+	}
+}
+
+func TestRunRelinkVisitsCopiesUnderWorkingCopiesDir(t *testing.T) {
+	root := t.TempDir()
+	meta := filepath.Join(root, "demo")
+	harness := filepath.Join(meta, project.HarnessDirName)
+	mustMkdir(t, harness)
+	mustWriteFile(t, filepath.Join(harness, "CLAUDE.md"), "# harness")
+	if err := config.Save(meta, &config.Config{
+		ProjectName:      "demo",
+		WorkingCopiesDir: "copies",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	peer := filepath.Join(meta, "copies", "feature")
+	mustMkdir(t, peer)
+
+	withCwd(t, meta, func() {
+		if err := runRelink(nopReporter{}); err != nil {
+			t.Fatalf("runRelink: %v", err)
+		}
+	})
+
+	st, err := os.Lstat(filepath.Join(peer, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("expected CLAUDE.md symlink in peer under copies/: %v", err)
+	}
+	if st.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("peer CLAUDE.md is not a symlink")
 	}
 }
 

@@ -7,26 +7,28 @@ For the domain vocabulary, see [CONTEXT.md](../CONTEXT.md). For the design decis
 ## Schema
 
 ```toml
-project_name = "<string>"        # required; used in skeleton-rendered docs
-description  = "<string>"        # optional; free-form
+project_name        = "<string>"  # required; used in skeleton-rendered docs
+description         = "<string>"  # optional; free-form
+working_copies_dir  = "<segment>" # optional; single path segment under the meta root
 
-[[repos]]                        # zero or more
-  folder = "<relative dir>"      # required; folder name inside a working copy
-  url    = "<git URL>"           # required; remote used by `mws clone` fallback
+[[repos]]                         # zero or more
+  folder = "<relative dir>"       # required; folder name inside a working copy
+  url    = "<git URL>"            # required; remote used by `mws clone` fallback
 
-  [[repos.envs]]                 # optional; zero or more per repo
-    source = "<flat name>"       # file under .envs/<folder>/<source>
-    target = "<repo-relative>"   # destination inside the cloned repo
+  [[repos.envs]]                  # optional; zero or more per repo
+    source = "<flat name>"        # file under .envs/<folder>/<source>
+    target = "<repo-relative>"    # destination inside the cloned repo
 
-  [[repos.setup]]                # optional; zero or more per repo
-    cmd = "<shell string>"       # passed to `sh -c`, cwd = the cloned repo
+  [[repos.setup]]                 # optional; zero or more per repo
+    cmd = "<shell string>"        # passed to `sh -c`, cwd = the cloned repo
 ```
 
-| Top-level key  | Type              | Required | Notes |
-|----------------|-------------------|----------|-------|
-| `project_name` | string            | yes      | Used by `mws init` skeleton templates and surfaced in `mws list`. |
-| `description`  | string            | no       | Free-form. Empty by default. |
-| `repos`        | array of tables   | no       | Each entry adds one **Native repo** to every **Working copy**. |
+| Top-level key        | Type              | Required | Notes |
+|----------------------|-------------------|----------|-------|
+| `project_name`       | string            | yes      | Used by `mws init` skeleton templates and surfaced in `mws list`. |
+| `description`        | string            | no       | Free-form. Empty by default. |
+| `working_copies_dir` | string            | no       | Single path-safe segment validated by the same rules as `project_name` (letters, digits, `-`, `_`, `.`; no leading `.` or `-`; no `/`). When set, `mws clone` and `mws init` place working copies at `<meta>/<working_copies_dir>/<name>/` instead of `<meta>/<name>/`. Empty (the default) keeps working copies at the meta root. |
+| `repos`              | array of tables   | no       | Each entry adds one **Native repo** to every **Working copy**. |
 
 ### `[[repos]]`
 
@@ -116,6 +118,8 @@ Most fields are written by `mws` subcommands:
 
 `[[repos.envs]]` and `[[repos.setup]]` are hand-edited today; there are no dedicated subcommands. The schema is round-trip-safe: `mws` reads and writes the file using `BurntSushi/toml`, preserving every key it recognises. Unknown keys are ignored on parse but dropped on the next write -- avoid adding fields that mws does not understand.
 
+Changing `working_copies_dir` after the fact does **not** relocate any existing working copies. The new value only affects subsequent `mws clone` (and `mws init`'s first copy on a fresh workspace). Move existing peers by hand if you want them under the new prefix, then run `mws relink` from the meta root.
+
 The file is tracked by the meta workspace's git. Commit changes alongside the harness updates that motivate them.
 
 ## Related
@@ -125,3 +129,4 @@ The file is tracked by the meta workspace's git. Commit changes alongside the ha
 - [ADR-0004](./adr/0004-meta-at-root-architecture.md) - why the meta workspace sits at the project root
 - [ADR-0005](./adr/0005-env-staging-via-copy.md) - env staging design
 - [ADR-0006](./adr/0006-post-clone-setup-commands.md) - setup commands design
+- [ADR-0007](./adr/0007-working-copies-subdir.md) - configurable working-copies subdirectory

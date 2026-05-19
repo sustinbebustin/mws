@@ -120,7 +120,7 @@ func runPromote(r Reporter, arg string) error {
 	}
 	r.OK(fmt.Sprintf("Promoted %s into harness", rel))
 
-	peers, err := project.EnumerateWorkingCopies(ws.MetaRoot)
+	peers, err := ws.EnumerateCopies()
 	if err != nil {
 		return err
 	}

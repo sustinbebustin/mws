@@ -59,3 +59,35 @@ func TestRunRmRemovesValidWorkingCopy(t *testing.T) {
 		t.Fatalf("working copy still exists after rm")
 	}
 }
+
+func TestRunRmRemovesWorkingCopyUnderCopiesDir(t *testing.T) {
+	root := t.TempDir()
+	meta := filepath.Join(root, "demo")
+	harness := filepath.Join(meta, project.HarnessDirName)
+	mustMkdir(t, harness)
+	mustWriteFile(t, filepath.Join(harness, "CLAUDE.md"), "# harness")
+	if err := config.Save(meta, &config.Config{
+		ProjectName:      "demo",
+		WorkingCopiesDir: "copies",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	wc := filepath.Join(meta, "copies", "feature")
+	mustMkdir(t, wc)
+	if _, err := project.LinkHarnessIntoWorkingCopy(meta, wc); err != nil {
+		t.Fatalf("LinkHarnessIntoWorkingCopy: %v", err)
+	}
+
+	withCwd(t, meta, func() {
+		if err := runRm(nopReporter{}, "feature", true); err != nil {
+			t.Fatalf("runRm: %v", err)
+		}
+	})
+	if _, err := os.Stat(wc); err == nil {
+		t.Fatalf("working copy at %s still exists after rm", wc)
+	}
+	// The copies subdir itself remains.
+	if _, err := os.Stat(filepath.Join(meta, "copies")); err != nil {
+		t.Fatalf("copies subdir was removed unexpectedly: %v", err)
+	}
+}

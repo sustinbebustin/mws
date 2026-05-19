@@ -106,6 +106,78 @@ func TestRunCloneRetargetsOriginToConfigURL(t *testing.T) {
 	}
 }
 
+func TestRunClonePlacesPeerUnderWorkingCopiesDir(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+
+	root := t.TempDir()
+	metaRoot := filepath.Join(root, "demo")
+	mustMkdir(t, filepath.Join(metaRoot, ".mws"))
+
+	const canonicalURL = "git@example.invalid:owner/frontend.git"
+	cfg := &config.Config{
+		ProjectName:      "demo",
+		WorkingCopiesDir: "copies",
+		Repos: []config.Repo{{
+			Folder: "frontend",
+			URL:    canonicalURL,
+		}},
+	}
+	if err := config.Save(metaRoot, cfg); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	// Donor working copy lives under copies/ to mirror the configured layout.
+	donor := filepath.Join(metaRoot, "copies", "donor")
+	donorRepo := filepath.Join(donor, "frontend")
+	mustMkdir(t, donorRepo)
+	for _, args := range [][]string{
+		{"-C", donorRepo, "init", "-q"},
+		{"-C", donorRepo, "config", "user.email", "t@e.com"},
+		{"-C", donorRepo, "config", "user.name", "t"},
+		{"-C", donorRepo, "remote", "add", "origin", "/some/local/junk/path"},
+	} {
+		if err := exec.Command("git", args...).Run(); err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(donorRepo, "x"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"-C", donorRepo, "add", "x"},
+		{"-C", donorRepo, "commit", "-q", "-m", "init"},
+	} {
+		if err := exec.Command("git", args...).Run(); err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+	}
+
+	withCwd(t, donor, func() {
+		if err := runClone(context.Background(), nopReporter{}, "peer", setupSkip); err != nil {
+			t.Fatalf("runClone: %v", err)
+		}
+	})
+
+	peerRepo := filepath.Join(metaRoot, "copies", "peer", "frontend")
+	if _, err := os.Stat(peerRepo); err != nil {
+		t.Fatalf("peer repo not at copies/peer/frontend: %v", err)
+	}
+	// Peer must NOT have been created at the meta root next to .mws/.
+	if _, err := os.Stat(filepath.Join(metaRoot, "peer")); err == nil {
+		t.Fatalf("peer should not exist at meta root when working_copies_dir is set")
+	}
+
+	out, err := exec.Command("git", "-C", peerRepo, "remote", "get-url", "origin").Output()
+	if err != nil {
+		t.Fatalf("git remote get-url: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); got != canonicalURL {
+		t.Fatalf("peer origin: got %q want %q", got, canonicalURL)
+	}
+}
+
 func TestRunCloneSkipsSetupWhenClonePhaseFailed(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")

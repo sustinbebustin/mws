@@ -62,3 +62,48 @@ func TestExecuteInitGreenfieldNoRepos(t *testing.T) {
 		t.Fatalf("config not populated: %+v", c)
 	}
 }
+
+func TestExecuteInitPlacesMainCopyUnderWorkingCopiesDir(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+
+	parent := t.TempDir()
+	p := &initPlan{
+		ParentDir:        parent,
+		ProjectName:      "demo",
+		Description:      "demo project",
+		WorkingCopiesDir: "copies",
+	}
+	if err := executeInit(context.Background(), nopReporter{}, p); err != nil {
+		t.Fatalf("executeInit: %v", err)
+	}
+
+	metaDir := filepath.Join(parent, "demo")
+	mainCopy := filepath.Join(metaDir, "copies", "main")
+
+	if _, err := os.Stat(mainCopy); err != nil {
+		t.Fatalf("expected main copy at %s: %v", mainCopy, err)
+	}
+	// And NOT at the meta root.
+	if _, err := os.Stat(filepath.Join(metaDir, "main")); err == nil {
+		t.Fatalf("main copy should not exist at meta root when working_copies_dir is set")
+	}
+
+	// Harness symlink fanned out into the nested copy.
+	st, err := os.Lstat(filepath.Join(mainCopy, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("missing CLAUDE.md symlink in main copy: %v", err)
+	}
+	if st.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("CLAUDE.md in nested main copy is not a symlink")
+	}
+
+	c, err := config.Load(metaDir)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if c.WorkingCopiesDir != "copies" {
+		t.Fatalf("config.WorkingCopiesDir: got %q want %q", c.WorkingCopiesDir, "copies")
+	}
+}

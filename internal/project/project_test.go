@@ -98,11 +98,113 @@ func TestLocateNotInWorkspace(t *testing.T) {
 	}
 }
 
-func TestEnumerateWorkingCopies(t *testing.T) {
-	meta, main, peer := setupWorkspace(t)
-	peers, err := EnumerateWorkingCopies(meta)
+// setupWorkspaceWithCopiesDir builds a meta workspace whose working copies
+// live under a "copies" subdirectory:
+//
+//	root/demo/
+//	  .mws.toml          (working_copies_dir = "copies")
+//	  .mws/
+//	  copies/
+//	    main/            # working copy
+//	    feature-x/       # peer working copy
+func setupWorkspaceWithCopiesDir(t *testing.T) (metaRoot, copiesRoot, main, peer string) {
+	t.Helper()
+	root := t.TempDir()
+	metaRoot = filepath.Join(root, "demo")
+	if err := os.MkdirAll(filepath.Join(metaRoot, ".mws"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Save(metaRoot, &config.Config{
+		ProjectName:      "demo",
+		WorkingCopiesDir: "copies",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	copiesRoot = filepath.Join(metaRoot, "copies")
+	main = filepath.Join(copiesRoot, "main")
+	peer = filepath.Join(copiesRoot, "feature-x")
+	for _, p := range []string{main, peer} {
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return metaRoot, copiesRoot, main, peer
+}
+
+func TestLocateLoadsWorkingCopiesDirFromConfig(t *testing.T) {
+	meta, _, main, _ := setupWorkspaceWithCopiesDir(t)
+	ws, err := Locate(main)
 	if err != nil {
-		t.Fatalf("EnumerateWorkingCopies: %v", err)
+		t.Fatalf("Locate: %v", err)
+	}
+	if ws.MetaRoot != meta {
+		t.Fatalf("MetaRoot: got %q want %q", ws.MetaRoot, meta)
+	}
+	if ws.WorkingCopiesDir != "copies" {
+		t.Fatalf("WorkingCopiesDir: got %q want %q", ws.WorkingCopiesDir, "copies")
+	}
+	if ws.WorkingCopy != main {
+		t.Fatalf("WorkingCopy: got %q want %q", ws.WorkingCopy, main)
+	}
+	if got, want := ws.CopiesRoot(), filepath.Join(meta, "copies"); got != want {
+		t.Fatalf("CopiesRoot: got %q want %q", got, want)
+	}
+}
+
+func TestLocateResolvesNestedDirInWorkingCopyUnderSubdir(t *testing.T) {
+	meta, _, main, _ := setupWorkspaceWithCopiesDir(t)
+	nested := filepath.Join(main, "frontend", "src")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ws, err := Locate(nested)
+	if err != nil {
+		t.Fatalf("Locate: %v", err)
+	}
+	if ws.MetaRoot != meta {
+		t.Fatalf("MetaRoot: got %q want %q", ws.MetaRoot, meta)
+	}
+	if ws.WorkingCopy != main {
+		t.Fatalf("WorkingCopy: got %q want %q", ws.WorkingCopy, main)
+	}
+}
+
+func TestLocateLeavesWorkingCopyEmptyWhenStartedAtCopiesRoot(t *testing.T) {
+	meta, copiesRoot, _, _ := setupWorkspaceWithCopiesDir(t)
+	ws, err := Locate(copiesRoot)
+	if err != nil {
+		t.Fatalf("Locate: %v", err)
+	}
+	if ws.MetaRoot != meta {
+		t.Fatalf("MetaRoot: got %q want %q", ws.MetaRoot, meta)
+	}
+	// "copies/" itself is not a working copy; we have no peer name to claim.
+	if ws.WorkingCopy != "" {
+		t.Fatalf("WorkingCopy: got %q want empty (cwd is the copies root, not a peer)", ws.WorkingCopy)
+	}
+	if ws.WorkingCopiesDir != "copies" {
+		t.Fatalf("WorkingCopiesDir: got %q want %q", ws.WorkingCopiesDir, "copies")
+	}
+}
+
+func TestEnumerateCopiesUsesWorkingCopiesDir(t *testing.T) {
+	meta, _, main, peer := setupWorkspaceWithCopiesDir(t)
+	ws := &Workspace{MetaRoot: meta, WorkingCopiesDir: "copies"}
+	peers, err := ws.EnumerateCopies()
+	if err != nil {
+		t.Fatalf("EnumerateCopies: %v", err)
+	}
+	if len(peers) != 2 || peers[0] != peer || peers[1] != main {
+		t.Fatalf("peers: got %v want [%s %s]", peers, peer, main)
+	}
+}
+
+func TestEnumerateCopies(t *testing.T) {
+	meta, main, peer := setupWorkspace(t)
+	ws := &Workspace{MetaRoot: meta}
+	peers, err := ws.EnumerateCopies()
+	if err != nil {
+		t.Fatalf("EnumerateCopies: %v", err)
 	}
 	if len(peers) != 2 {
 		t.Fatalf("got %d peers, want 2: %v", len(peers), peers)
@@ -113,7 +215,7 @@ func TestEnumerateWorkingCopies(t *testing.T) {
 	}
 }
 
-func TestEnumerateWorkingCopiesFiltersDotfileDirs(t *testing.T) {
+func TestEnumerateCopiesFiltersDotfileDirs(t *testing.T) {
 	meta, _, _ := setupWorkspace(t)
 	// Extra dotfile dir at meta root must not appear as a peer.
 	if err := os.MkdirAll(filepath.Join(meta, ".extra"), 0o755); err != nil {
@@ -123,9 +225,10 @@ func TestEnumerateWorkingCopiesFiltersDotfileDirs(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(meta, "README.md"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	peers, err := EnumerateWorkingCopies(meta)
+	ws := &Workspace{MetaRoot: meta}
+	peers, err := ws.EnumerateCopies()
 	if err != nil {
-		t.Fatalf("EnumerateWorkingCopies: %v", err)
+		t.Fatalf("EnumerateCopies: %v", err)
 	}
 	for _, p := range peers {
 		base := filepath.Base(p)

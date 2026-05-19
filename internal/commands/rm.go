@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 
+	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/project"
 )
 
@@ -42,8 +43,13 @@ func runRm(r Reporter, name string, yes bool) error {
 	if err != nil {
 		return err
 	}
+	// Locate tolerates a malformed .mws.toml; surface the parse error here so
+	// the rm guard doesn't compare against a wrong copies root.
+	if _, err := config.Load(ws.MetaRoot); err != nil {
+		return err
+	}
 
-	peers, err := project.EnumerateWorkingCopies(ws.MetaRoot)
+	peers, err := ws.EnumerateCopies()
 	if err != nil {
 		return err
 	}
@@ -65,7 +71,7 @@ func runRm(r Reporter, name string, yes bool) error {
 		}
 	}
 
-	target := filepath.Join(ws.MetaRoot, name)
+	target := filepath.Join(ws.CopiesRoot(), name)
 	if !slices.Contains(peers, target) {
 		return fmt.Errorf("%s is not a working copy of %s", target, ws.MetaRoot)
 	}

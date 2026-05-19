@@ -71,21 +71,6 @@ to skip entirely.`,
 }
 
 func runClone(ctx context.Context, r Reporter, name string, choice setupChoice) error {
-	if name == "" {
-		if err := huh.NewInput().
-			Title("New working copy name").
-			Description("Will be created at <meta-root>/<name>/.").
-			Validate(project.ValidateName).
-			Value(&name).
-			Run(); err != nil {
-			return err
-		}
-		name = strings.TrimSpace(name)
-	}
-	if err := project.ValidateName(name); err != nil {
-		return err
-	}
-
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -98,8 +83,26 @@ func runClone(ctx context.Context, r Reporter, name string, choice setupChoice) 
 	if err != nil {
 		return err
 	}
+	if err := project.ValidateWorkingCopiesDir(ws.WorkingCopiesDir); err != nil {
+		return fmt.Errorf("invalid working_copies_dir %q in .mws.toml: %w", ws.WorkingCopiesDir, err)
+	}
 
-	target := filepath.Join(ws.MetaRoot, name)
+	if name == "" {
+		if err := huh.NewInput().
+			Title("New working copy name").
+			Description(clonePromptDescription(ws)).
+			Validate(project.ValidateName).
+			Value(&name).
+			Run(); err != nil {
+			return err
+		}
+		name = strings.TrimSpace(name)
+	}
+	if err := project.ValidateName(name); err != nil {
+		return err
+	}
+
+	target := filepath.Join(ws.CopiesRoot(), name)
 	if _, err := os.Stat(target); err == nil {
 		return fmt.Errorf("path already exists: %s", target)
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -163,7 +166,7 @@ func chooseInvokingCopy(ws *project.Workspace) (string, error) {
 	if ws.WorkingCopy != "" {
 		return ws.WorkingCopy, nil
 	}
-	peers, err := project.EnumerateWorkingCopies(ws.MetaRoot)
+	peers, err := ws.EnumerateCopies()
 	if err != nil {
 		return "", err
 	}
@@ -171,6 +174,15 @@ func chooseInvokingCopy(ws *project.Workspace) (string, error) {
 		return "", nil
 	}
 	return peers[0], nil
+}
+
+// clonePromptDescription renders the help text shown under the "New working
+// copy name" prompt, reflecting the configured working_copies_dir (if any).
+func clonePromptDescription(ws *project.Workspace) string {
+	if ws.WorkingCopiesDir != "" {
+		return fmt.Sprintf("Will be created at <meta-root>/%s/<name>/.", ws.WorkingCopiesDir)
+	}
+	return "Will be created at <meta-root>/<name>/."
 }
 
 // cloneNative populates target/<folder> with a clone of the repo. Tries

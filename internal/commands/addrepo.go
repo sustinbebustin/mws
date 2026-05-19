@@ -84,7 +84,7 @@ func runAddRepo(ctx context.Context, r Reporter, repoURL, folder string) error {
 	}
 	r.OK(fmt.Sprintf("Registered %s -> %s", folder, repoURL))
 
-	peers, err := project.EnumerateWorkingCopies(ws.MetaRoot)
+	peers, err := ws.EnumerateCopies()
 	if err != nil {
 		return err
 	}
