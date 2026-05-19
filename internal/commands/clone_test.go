@@ -41,71 +41,6 @@ func TestConfirmSetupFlagsBypassPrompt(t *testing.T) {
 	}
 }
 
-func TestRunCloneRetargetsOriginToConfigURL(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not on PATH")
-	}
-
-	root := t.TempDir()
-	metaRoot := filepath.Join(root, "demo")
-	mustMkdir(t, filepath.Join(metaRoot, ".mws"))
-
-	const canonicalURL = "git@example.invalid:owner/frontend.git"
-	cfg := &config.Config{
-		ProjectName: "demo",
-		Repos: []config.Repo{{
-			Folder: "frontend",
-			URL:    canonicalURL,
-		}},
-	}
-	if err := config.Save(metaRoot, cfg); err != nil {
-		t.Fatalf("config.Save: %v", err)
-	}
-
-	// Donor working copy with a real git repo whose origin points at a junk path.
-	// After mws clone, the new peer's origin must be retargeted to canonicalURL
-	// even though --local cloned from this donor.
-	donor := filepath.Join(metaRoot, "donor")
-	donorRepo := filepath.Join(donor, "frontend")
-	mustMkdir(t, donorRepo)
-	for _, args := range [][]string{
-		{"-C", donorRepo, "init", "-q"},
-		{"-C", donorRepo, "config", "user.email", "t@e.com"},
-		{"-C", donorRepo, "config", "user.name", "t"},
-		{"-C", donorRepo, "remote", "add", "origin", "/some/local/junk/path"},
-	} {
-		if err := exec.Command("git", args...).Run(); err != nil {
-			t.Fatalf("git %v: %v", args, err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(donorRepo, "x"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{
-		{"-C", donorRepo, "add", "x"},
-		{"-C", donorRepo, "commit", "-q", "-m", "init"},
-	} {
-		if err := exec.Command("git", args...).Run(); err != nil {
-			t.Fatalf("git %v: %v", args, err)
-		}
-	}
-
-	withCwd(t, donor, func() {
-		if err := runClone(context.Background(), nopReporter{}, "peer", setupSkip); err != nil {
-			t.Fatalf("runClone: %v", err)
-		}
-	})
-
-	out, err := exec.Command("git", "-C", filepath.Join(metaRoot, "peer", "frontend"), "remote", "get-url", "origin").Output()
-	if err != nil {
-		t.Fatalf("git remote get-url: %v", err)
-	}
-	got := strings.TrimSpace(string(out))
-	if got != canonicalURL {
-		t.Fatalf("peer origin: got %q, want %q", got, canonicalURL)
-	}
-}
-
 func TestRunClonePlacesPeerUnderWorkingCopiesDir(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
@@ -115,46 +50,48 @@ func TestRunClonePlacesPeerUnderWorkingCopiesDir(t *testing.T) {
 	metaRoot := filepath.Join(root, "demo")
 	mustMkdir(t, filepath.Join(metaRoot, ".mws"))
 
-	const canonicalURL = "git@example.invalid:owner/frontend.git"
+	// Stand up a bare upstream repo with one commit so `git clone <url>` succeeds.
+	upstream := filepath.Join(root, "upstream-frontend.git")
+	if err := exec.Command("git", "init", "-q", "--bare", upstream).Run(); err != nil {
+		t.Fatalf("git init --bare: %v", err)
+	}
+	seed := filepath.Join(root, "seed")
+	mustMkdir(t, seed)
+	for _, args := range [][]string{
+		{"-C", seed, "init", "-q"},
+		{"-C", seed, "config", "user.email", "t@e.com"},
+		{"-C", seed, "config", "user.name", "t"},
+	} {
+		if err := exec.Command("git", args...).Run(); err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(seed, "x"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"-C", seed, "add", "x"},
+		{"-C", seed, "commit", "-q", "-m", "init"},
+		{"-C", seed, "push", "-q", upstream, "HEAD:refs/heads/main"},
+	} {
+		if err := exec.Command("git", args...).Run(); err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+	}
+
 	cfg := &config.Config{
 		ProjectName:      "demo",
 		WorkingCopiesDir: "copies",
 		Repos: []config.Repo{{
 			Folder: "frontend",
-			URL:    canonicalURL,
+			URL:    upstream,
 		}},
 	}
 	if err := config.Save(metaRoot, cfg); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
 
-	// Donor working copy lives under copies/ to mirror the configured layout.
-	donor := filepath.Join(metaRoot, "copies", "donor")
-	donorRepo := filepath.Join(donor, "frontend")
-	mustMkdir(t, donorRepo)
-	for _, args := range [][]string{
-		{"-C", donorRepo, "init", "-q"},
-		{"-C", donorRepo, "config", "user.email", "t@e.com"},
-		{"-C", donorRepo, "config", "user.name", "t"},
-		{"-C", donorRepo, "remote", "add", "origin", "/some/local/junk/path"},
-	} {
-		if err := exec.Command("git", args...).Run(); err != nil {
-			t.Fatalf("git %v: %v", args, err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(donorRepo, "x"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{
-		{"-C", donorRepo, "add", "x"},
-		{"-C", donorRepo, "commit", "-q", "-m", "init"},
-	} {
-		if err := exec.Command("git", args...).Run(); err != nil {
-			t.Fatalf("git %v: %v", args, err)
-		}
-	}
-
-	withCwd(t, donor, func() {
+	withCwd(t, metaRoot, func() {
 		if err := runClone(context.Background(), nopReporter{}, "peer", setupSkip); err != nil {
 			t.Fatalf("runClone: %v", err)
 		}
@@ -173,8 +110,52 @@ func TestRunClonePlacesPeerUnderWorkingCopiesDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("git remote get-url: %v", err)
 	}
-	if got := strings.TrimSpace(string(out)); got != canonicalURL {
-		t.Fatalf("peer origin: got %q want %q", got, canonicalURL)
+	if got := strings.TrimSpace(string(out)); got != upstream {
+		t.Fatalf("peer origin: got %q want %q", got, upstream)
+	}
+}
+
+// recordingReporter captures Fail messages so tests can assert on per-repo
+// error wording, which `runClone` only surfaces through the reporter (the
+// returned error just lists folder names).
+type recordingReporter struct {
+	nopReporter
+	fails []string
+}
+
+func (r *recordingReporter) Fail(msg string) { r.fails = append(r.fails, msg) }
+
+func TestRunCloneFailsWhenRepoURLMissing(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+
+	root := t.TempDir()
+	metaRoot := filepath.Join(root, "demo")
+	mustMkdir(t, filepath.Join(metaRoot, ".mws"))
+
+	cfg := &config.Config{
+		ProjectName: "demo",
+		Repos: []config.Repo{{
+			Folder: "frontend",
+			URL:    "",
+		}},
+	}
+	if err := config.Save(metaRoot, cfg); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	rep := &recordingReporter{}
+	withCwd(t, metaRoot, func() {
+		err := runClone(context.Background(), rep, "peer", setupSkip)
+		if err == nil {
+			t.Fatalf("expected error when repo URL is empty")
+		}
+	})
+
+	const wantMsg = "frontend: no remote URL configured in .mws.toml"
+	if len(rep.fails) != 1 || rep.fails[0] != wantMsg {
+		t.Fatalf("Fail messages: got %v, want [%q]", rep.fails, wantMsg)
 	}
 }
 
