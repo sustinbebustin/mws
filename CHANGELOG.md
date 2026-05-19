@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Breaking.** `mws clone <name>` now always runs a fresh `git clone <url> <dst>` for every registered native repo. The `git clone --local` optimisation from a sibling working copy (with post-clone `origin` retarget) has been removed, so the new copy never inherits divergent `.git/` state from a donor. `repo.url` is strictly required at clone time; a missing URL is a per-repo error (`"<folder>: no remote URL configured in .mws.toml"`).
+
+### Removed
+- Internal helpers `git.CloneLocal` and `git.SetRemoteURL`, and the donor-selection logic in `mws clone`, are gone with the `--local` optimisation. Recorded as an inline update on ADR 0003.
+
 ## [0.2.0] - 2026-05-19
 
 ### Added
