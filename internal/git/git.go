@@ -72,6 +72,11 @@ func Checkout(ctx context.Context, repoDir, ref string) error {
 	return run(ctx, repoDir, "checkout", ref)
 }
 
+// SetRemoteURL runs `git remote set-url <remote> <url>` in repoDir.
+func SetRemoteURL(ctx context.Context, repoDir, remote, url string) error {
+	return run(ctx, repoDir, "remote", "set-url", remote, url)
+}
+
 // run executes `git <args...>` in cwd, capturing combined output into the error on failure.
 func run(ctx context.Context, cwd string, args ...string) error {
 	cmd := exec.CommandContext(ctx, "git", args...)

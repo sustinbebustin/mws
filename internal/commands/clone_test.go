@@ -41,6 +41,71 @@ func TestConfirmSetupFlagsBypassPrompt(t *testing.T) {
 	}
 }
 
+func TestRunCloneRetargetsOriginToConfigURL(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+
+	root := t.TempDir()
+	metaRoot := filepath.Join(root, "demo")
+	mustMkdir(t, filepath.Join(metaRoot, ".mws"))
+
+	const canonicalURL = "git@example.invalid:owner/frontend.git"
+	cfg := &config.Config{
+		ProjectName: "demo",
+		Repos: []config.Repo{{
+			Folder: "frontend",
+			URL:    canonicalURL,
+		}},
+	}
+	if err := config.Save(metaRoot, cfg); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	// Donor working copy with a real git repo whose origin points at a junk path.
+	// After mws clone, the new peer's origin must be retargeted to canonicalURL
+	// even though --local cloned from this donor.
+	donor := filepath.Join(metaRoot, "donor")
+	donorRepo := filepath.Join(donor, "frontend")
+	mustMkdir(t, donorRepo)
+	for _, args := range [][]string{
+		{"-C", donorRepo, "init", "-q"},
+		{"-C", donorRepo, "config", "user.email", "t@e.com"},
+		{"-C", donorRepo, "config", "user.name", "t"},
+		{"-C", donorRepo, "remote", "add", "origin", "/some/local/junk/path"},
+	} {
+		if err := exec.Command("git", args...).Run(); err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(donorRepo, "x"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"-C", donorRepo, "add", "x"},
+		{"-C", donorRepo, "commit", "-q", "-m", "init"},
+	} {
+		if err := exec.Command("git", args...).Run(); err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+	}
+
+	withCwd(t, donor, func() {
+		if err := runClone(context.Background(), nopReporter{}, "peer", setupSkip); err != nil {
+			t.Fatalf("runClone: %v", err)
+		}
+	})
+
+	out, err := exec.Command("git", "-C", filepath.Join(metaRoot, "peer", "frontend"), "remote", "get-url", "origin").Output()
+	if err != nil {
+		t.Fatalf("git remote get-url: %v", err)
+	}
+	got := strings.TrimSpace(string(out))
+	if got != canonicalURL {
+		t.Fatalf("peer origin: got %q, want %q", got, canonicalURL)
+	}
+}
+
 func TestRunCloneSkipsSetupWhenClonePhaseFailed(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")

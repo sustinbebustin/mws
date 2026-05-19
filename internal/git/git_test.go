@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -80,5 +81,32 @@ func TestCloneLocal(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dst, "x")); err != nil {
 		t.Fatalf("cloned file missing: %v", err)
+	}
+}
+
+func TestSetRemoteURL(t *testing.T) {
+	gitAvailable(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+	if err := InitQuiet(ctx, dir); err != nil {
+		t.Fatal(err)
+	}
+	const initialURL = "https://example.invalid/initial.git"
+	const newURL = "git@example.invalid:owner/repo.git"
+	if err := exec.Command("git", "-C", dir, "remote", "add", "origin", initialURL).Run(); err != nil {
+		t.Fatalf("git remote add: %v", err)
+	}
+
+	if err := SetRemoteURL(ctx, dir, "origin", newURL); err != nil {
+		t.Fatalf("SetRemoteURL: %v", err)
+	}
+
+	out, err := exec.Command("git", "-C", dir, "remote", "get-url", "origin").Output()
+	if err != nil {
+		t.Fatalf("git remote get-url: %v", err)
+	}
+	got := strings.TrimSpace(string(out))
+	if got != newURL {
+		t.Fatalf("origin url: got %q, want %q", got, newURL)
 	}
 }

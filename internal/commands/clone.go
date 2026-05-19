@@ -193,6 +193,13 @@ func cloneNative(ctx context.Context, r Reporter, repo config.Repo, invoker, tar
 				lastErr = err
 				r.Warn(fmt.Sprintf("%s: --local clone failed (%v), falling back to remote", repo.Folder, err))
 			} else {
+				// --local left origin pointing at the sibling working copy. Rewrite it to
+				// the canonical URL from .mws.toml so push/pull/fetch hit the real remote.
+				if repo.URL != "" {
+					if err := git.SetRemoteURL(ctx, dst, "origin", repo.URL); err != nil {
+						r.Warn(fmt.Sprintf("%s: could not retarget origin to %s (%v); push/pull will target the sibling copy", repo.Folder, repo.URL, err))
+					}
+				}
 				return checkoutDefault(ctx, r, dst)
 			}
 		}
