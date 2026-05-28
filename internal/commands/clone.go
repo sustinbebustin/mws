@@ -148,6 +148,17 @@ func runClone(ctx context.Context, r Reporter, name string, choice setupChoice) 
 	}
 
 	r.OK(fmt.Sprintf("Working copy ready at %s", target))
+
+	// Shell-integration handoff: if the user's mws shell function set MWS_CD_FILE,
+	// drop the absolute target path there so the parent shell can cd into it.
+	// Otherwise emit a copy-pasteable hint -- a child process can't chdir its parent.
+	if cdFile := os.Getenv("MWS_CD_FILE"); cdFile != "" {
+		if err := os.WriteFile(cdFile, []byte(target), 0o600); err != nil {
+			r.Warn(fmt.Sprintf("could not write MWS_CD_FILE %s: %v", cdFile, err))
+		}
+	} else {
+		r.Info(fmt.Sprintf("Next: cd %s", target))
+	}
 	return nil
 }
 

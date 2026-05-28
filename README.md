@@ -38,6 +38,18 @@ go install github.com/sustinbebustin/mws/cmd/mws@latest
 
 The harness skeleton ships embedded in the binary -- no separate template repo, no network at `init` time. Run `mws version` to verify the install.
 
+### Shell integration (optional)
+
+With a small shell function installed, `mws clone <name>` cds your shell into the new working copy on success. Without it, `mws clone` prints a copy-pasteable `cd <path>` hint instead -- a child process can't change its parent shell's directory.
+
+```bash
+eval "$(mws shell-init zsh)"     # add to ~/.zshrc
+eval "$(mws shell-init bash)"    # add to ~/.bashrc
+mws shell-init fish | source     # add to ~/.config/fish/config.fish
+```
+
+The wrapper only intercepts `mws clone`; every other subcommand is a pure passthrough. See [docs/adr/0008-shell-integration-for-auto-cd.md](docs/adr/0008-shell-integration-for-auto-cd.md) for the design.
+
 ## Quick start
 
 1. Create a meta workspace.

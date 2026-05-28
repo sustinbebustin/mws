@@ -51,6 +51,7 @@ linters:
         - G302  # file perms -- 0o644 is correct for skeleton output
         - G304  # file inclusion via variable -- core to mws path manipulation
         - G306  # file perms -- same as G302
+        - G703  # taint via env var -- MWS_CD_FILE is a documented contract (ADR 0008)
         - G704  # duplicate of errcheck
 
     gocritic:
