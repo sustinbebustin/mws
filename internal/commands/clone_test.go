@@ -79,6 +79,13 @@ func TestRunClonePlacesPeerUnderWorkingCopiesDir(t *testing.T) {
 			t.Fatalf("git %v: %v", args, err)
 		}
 	}
+	// Point the bare upstream's HEAD at the branch we actually pushed. git init
+	// seeds HEAD from the host's init.defaultBranch (often "master" in CI), which
+	// need not match "main" -- leaving origin/HEAD unresolvable after clone and
+	// making checkoutDefault warn. Real remotes always have a valid HEAD.
+	if err := exec.Command("git", "-C", upstream, "symbolic-ref", "HEAD", "refs/heads/main").Run(); err != nil {
+		t.Fatalf("git symbolic-ref HEAD: %v", err)
+	}
 
 	cfg := &config.Config{
 		ProjectName:      "demo",
@@ -303,6 +310,13 @@ func seedWorkingRepo(t *testing.T) string {
 		if err := exec.Command("git", args...).Run(); err != nil {
 			t.Fatalf("git %v: %v", args, err)
 		}
+	}
+	// Point the bare upstream's HEAD at the branch we actually pushed. git init
+	// seeds HEAD from the host's init.defaultBranch (often "master" in CI), which
+	// need not match "main" -- leaving origin/HEAD unresolvable after clone and
+	// making checkoutDefault warn. Real remotes always have a valid HEAD.
+	if err := exec.Command("git", "-C", upstream, "symbolic-ref", "HEAD", "refs/heads/main").Run(); err != nil {
+		t.Fatalf("git symbolic-ref HEAD: %v", err)
 	}
 
 	cfg := &config.Config{
