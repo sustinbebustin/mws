@@ -283,6 +283,14 @@ func seedWorkingRepo(t *testing.T) string {
 	root := t.TempDir()
 	metaRoot := filepath.Join(root, "demo")
 	mustMkdir(t, filepath.Join(metaRoot, ".mws"))
+	// Canonicalise the meta root: runClone derives the emitted target path from
+	// os.Getwd(), which returns the symlink-resolved cwd (macOS maps /var ->
+	// /private/var). t.TempDir() hands back the unresolved path, so tests that
+	// compare against the emitted path must resolve too.
+	metaRoot, err := filepath.EvalSymlinks(metaRoot)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(meta root): %v", err)
+	}
 
 	upstream := filepath.Join(root, "upstream-frontend.git")
 	if err := exec.Command("git", "init", "-q", "--bare", upstream).Run(); err != nil {
