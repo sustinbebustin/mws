@@ -24,6 +24,10 @@ _Avoid_: share, sync (overloaded), publish.
 An independent git repository (e.g., `frontend/`, `backend/`) cloned inside a **Working copy**. Has its own `.git/`; never a submodule, never sharing storage with peers in a way that affects refs/index.
 _Avoid_: subrepo, nested repo (implies submodule), child repo.
 
+**Optional repo**:
+A **Native repo** registered in the **mws config** under `[[optional_repos]]` that mws does *not* clone into every **Working copy**. Instead it is pulled into a specific copy on demand: chosen at `mws clone` time (the multiselect prompt or `--with <folder>`) or added later with `mws include <folder>`. Shares the **Native repo** shape (folder, URL, **Env staging** mappings, **Setup commands**); once cloned into a copy it is an ordinary **Native repo**. The "optional" qualifier names the clone *policy*, not the repo's nature. Registered with `mws add-repo --optional`.
+_Avoid_: extra repo, addon, side repo.
+
 **Peer working copies**:
 Multiple **Working copies** living side-by-side inside the same **Meta workspace**, all symlinking the same **Harness dir**. Created via `mws clone` for parallel work.
 _Avoid_: duplicates, branches (overloaded with git).
@@ -49,6 +53,7 @@ _Avoid_: hooks (implies a broader lifecycle that does not exist), scripts (overl
 - A **Meta workspace** is a git repository at its root, containing the **Harness dir** and **mws config** as tracked content, and zero or more **Working copies** as untracked children.
 - A **Working copy** symlinks every top-level entry of its parent meta's **Harness dir**. New entries in the harness are picked up by subsequent `mws clone` runs (and `mws relink` for existing copies).
 - A **Working copy** contains zero or more **Native repos**, each an independent git clone.
+- An **Optional repo** is registered in the **mws config** but cloned only into the **Working copies** that ask for it (via the `mws clone` prompt/`--with` or `mws include`), unlike a default **Native repo** which lands in every copy.
 - **Peer working copies** share one **Harness dir** but each has its own **Native repo** clones.
 - The **mws config** is reachable from any **Working copy** by walking up to the **Meta workspace** root.
 - **Env staging** is owned by the **Meta workspace** and copied into a **Working copy**'s **Native repos** on `mws clone` per the mappings in the **mws config**. Env files in a working copy are independent of staging after the copy -- edits do not flow back.

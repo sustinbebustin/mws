@@ -100,7 +100,7 @@ func TestRunClonePlacesPeerUnderWorkingCopiesDir(t *testing.T) {
 	}
 
 	withCwd(t, metaRoot, func() {
-		if err := runClone(context.Background(), nopReporter{}, "peer", setupSkip); err != nil {
+		if err := runClone(context.Background(), nopReporter{}, "peer", setupSkip, nil); err != nil {
 			t.Fatalf("runClone: %v", err)
 		}
 	})
@@ -177,7 +177,7 @@ func TestRunCloneFailsWhenRepoURLMissing(t *testing.T) {
 
 	rep := &recordingReporter{}
 	withCwd(t, metaRoot, func() {
-		err := runClone(context.Background(), rep, "peer", setupSkip)
+		err := runClone(context.Background(), rep, "peer", setupSkip, nil)
 		if err == nil {
 			t.Fatalf("expected error when repo URL is empty")
 		}
@@ -213,7 +213,7 @@ func TestRunCloneSkipsSetupWhenClonePhaseFailed(t *testing.T) {
 	}
 
 	withCwd(t, metaRoot, func() {
-		err := runClone(context.Background(), nopReporter{}, "peer", setupForceRun)
+		err := runClone(context.Background(), nopReporter{}, "peer", setupForceRun, nil)
 		if err == nil {
 			t.Fatalf("expected clone phase to fail")
 		}
@@ -292,11 +292,27 @@ func seedWorkingRepo(t *testing.T) string {
 		t.Fatalf("EvalSymlinks(meta root): %v", err)
 	}
 
-	upstream := filepath.Join(root, "upstream-frontend.git")
-	if err := exec.Command("git", "init", "-q", "--bare", upstream).Run(); err != nil {
-		t.Fatalf("git init --bare: %v", err)
+	upstream := seedBareUpstream(t, root, "upstream-frontend")
+	cfg := &config.Config{
+		ProjectName: "demo",
+		Repos:       []config.Repo{{Folder: "frontend", URL: upstream}},
 	}
-	seed := filepath.Join(root, "seed")
+	if err := config.Save(metaRoot, cfg); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	return metaRoot
+}
+
+// seedBareUpstream stands up a bare git repo named <name>.git under dir with a
+// single commit pushed to refs/heads/main and origin/HEAD pointed at it.
+// Returns the bare repo path, usable as a config.Repo URL for cloning.
+func seedBareUpstream(t *testing.T, dir, name string) string {
+	t.Helper()
+	upstream := filepath.Join(dir, name+".git")
+	if err := exec.Command("git", "init", "-q", "--bare", upstream).Run(); err != nil {
+		t.Fatalf("git init --bare %s: %v", name, err)
+	}
+	seed := filepath.Join(dir, "seed-"+name)
 	mustMkdir(t, seed)
 	for _, args := range [][]string{
 		{"-C", seed, "init", "-q"},
@@ -326,15 +342,7 @@ func seedWorkingRepo(t *testing.T) string {
 	if err := exec.Command("git", "-C", upstream, "symbolic-ref", "HEAD", "refs/heads/main").Run(); err != nil {
 		t.Fatalf("git symbolic-ref HEAD: %v", err)
 	}
-
-	cfg := &config.Config{
-		ProjectName: "demo",
-		Repos:       []config.Repo{{Folder: "frontend", URL: upstream}},
-	}
-	if err := config.Save(metaRoot, cfg); err != nil {
-		t.Fatalf("config.Save: %v", err)
-	}
-	return metaRoot
+	return upstream
 }
 
 func TestRunCloneWritesMWSCDFileWhenSet(t *testing.T) {
@@ -344,7 +352,7 @@ func TestRunCloneWritesMWSCDFileWhenSet(t *testing.T) {
 
 	rep := &recordingReporter{}
 	withCwd(t, metaRoot, func() {
-		if err := runClone(context.Background(), rep, "peer", setupSkip); err != nil {
+		if err := runClone(context.Background(), rep, "peer", setupSkip, nil); err != nil {
 			t.Fatalf("runClone: %v", err)
 		}
 	})
@@ -382,7 +390,7 @@ func TestRunClonePrintsCDHintWhenMWSCDFileEmpty(t *testing.T) {
 
 	rep := &recordingReporter{}
 	withCwd(t, metaRoot, func() {
-		if err := runClone(context.Background(), rep, "peer", setupSkip); err != nil {
+		if err := runClone(context.Background(), rep, "peer", setupSkip, nil); err != nil {
 			t.Fatalf("runClone: %v", err)
 		}
 	})
@@ -399,7 +407,7 @@ func TestRunClonePrintsCDHintWhenMWSCDFileUnset(t *testing.T) {
 
 	rep := &recordingReporter{}
 	withCwd(t, metaRoot, func() {
-		if err := runClone(context.Background(), rep, "peer", setupSkip); err != nil {
+		if err := runClone(context.Background(), rep, "peer", setupSkip, nil); err != nil {
 			t.Fatalf("runClone: %v", err)
 		}
 	})
@@ -420,7 +428,7 @@ func TestRunCloneWarnsWhenMWSCDFileUnwritable(t *testing.T) {
 
 	rep := &recordingReporter{}
 	withCwd(t, metaRoot, func() {
-		if err := runClone(context.Background(), rep, "peer", setupSkip); err != nil {
+		if err := runClone(context.Background(), rep, "peer", setupSkip, nil); err != nil {
 			t.Fatalf("runClone should succeed despite handoff failure: %v", err)
 		}
 	})
@@ -461,7 +469,7 @@ func TestCollectSetupOrderAndOmits(t *testing.T) {
 		},
 	}
 
-	got := collectSetup(cfg)
+	got := collectSetup(cfg.Repos)
 	want := []setupItem{
 		{Folder: "a", Cmd: "cmd1"},
 		{Folder: "a", Cmd: "cmd2"},
@@ -474,5 +482,129 @@ func TestCollectSetupOrderAndOmits(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("item %d: got %+v want %+v", i, got[i], want[i])
 		}
+	}
+}
+
+func TestResolveOptional(t *testing.T) {
+	// No optional repos registered: returns nil without opening a prompt.
+	got, err := resolveOptional(&config.Config{}, nil)
+	if err != nil || got != nil {
+		t.Fatalf("no optional repos: got %v err %v", got, err)
+	}
+
+	cfg := &config.Config{OptionalRepos: []config.Repo{
+		{Folder: "worker", URL: "u"},
+		{Folder: "lib", URL: "v"},
+	}}
+
+	// --with selects the named repos non-interactively (no prompt).
+	got, err = resolveOptional(cfg, []string{"worker"})
+	if err != nil {
+		t.Fatalf("--with worker: %v", err)
+	}
+	if len(got) != 1 || got[0].Folder != "worker" || got[0].URL != "u" {
+		t.Fatalf("--with worker: got %+v", got)
+	}
+
+	// Unknown --with name is rejected, listing the registered folders.
+	_, err = resolveOptional(cfg, []string{"nope"})
+	if err == nil {
+		t.Fatal("expected error for unknown --with folder")
+	}
+	if !strings.Contains(err.Error(), "worker") || !strings.Contains(err.Error(), "lib") {
+		t.Fatalf("error should list registered optional repos: %v", err)
+	}
+}
+
+// seedMetaWithOptional builds a meta workspace with one default repo (frontend)
+// and one optional repo (worker), each backed by its own bare upstream.
+func seedMetaWithOptional(t *testing.T) string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	root := t.TempDir()
+	metaRoot := filepath.Join(root, "demo")
+	mustMkdir(t, filepath.Join(metaRoot, ".mws"))
+	metaRoot, err := filepath.EvalSymlinks(metaRoot)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(meta root): %v", err)
+	}
+	cfg := &config.Config{
+		ProjectName:   "demo",
+		Repos:         []config.Repo{{Folder: "frontend", URL: seedBareUpstream(t, root, "upstream-frontend")}},
+		OptionalRepos: []config.Repo{{Folder: "worker", URL: seedBareUpstream(t, root, "upstream-worker")}},
+	}
+	if err := config.Save(metaRoot, cfg); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	return metaRoot
+}
+
+func TestRunCloneWithIncludesOptionalRepo(t *testing.T) {
+	metaRoot := seedMetaWithOptional(t)
+	withCwd(t, metaRoot, func() {
+		if err := runClone(context.Background(), nopReporter{}, "peer", setupSkip, []string{"worker"}); err != nil {
+			t.Fatalf("runClone: %v", err)
+		}
+	})
+	for _, folder := range []string{"frontend", "worker"} {
+		if _, err := os.Stat(filepath.Join(metaRoot, "peer", folder)); err != nil {
+			t.Fatalf("expected peer/%s to be cloned: %v", folder, err)
+		}
+	}
+}
+
+func TestRunCloneWithUnknownOptionalFailsBeforeMkdir(t *testing.T) {
+	metaRoot := seedMetaWithOptional(t)
+	var err error
+	withCwd(t, metaRoot, func() {
+		err = runClone(context.Background(), nopReporter{}, "peer", setupSkip, []string{"nope"})
+	})
+	if err == nil {
+		t.Fatal("expected error for unknown --with folder")
+	}
+	if !strings.Contains(err.Error(), "no optional repo registered") {
+		t.Fatalf("error wording: %v", err)
+	}
+	// The invalid selection must fail before any working copy is created.
+	if _, statErr := os.Stat(filepath.Join(metaRoot, "peer")); statErr == nil {
+		t.Fatal("peer dir should not exist after an invalid --with")
+	}
+}
+
+func TestRunCloneWithRunsOptionalSetup(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not on PATH")
+	}
+	root := t.TempDir()
+	metaRoot := filepath.Join(root, "demo")
+	mustMkdir(t, filepath.Join(metaRoot, ".mws"))
+	metaRoot, err := filepath.EvalSymlinks(metaRoot)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(meta root): %v", err)
+	}
+	cfg := &config.Config{
+		ProjectName: "demo",
+		OptionalRepos: []config.Repo{{
+			Folder: "worker",
+			URL:    seedBareUpstream(t, root, "upstream-worker"),
+			Setup:  []config.SetupCommand{{Cmd: "touch ran-setup"}},
+		}},
+	}
+	if err := config.Save(metaRoot, cfg); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	withCwd(t, metaRoot, func() {
+		if err := runClone(context.Background(), nopReporter{}, "peer", setupForceRun, []string{"worker"}); err != nil {
+			t.Fatalf("runClone: %v", err)
+		}
+	})
+	if _, err := os.Stat(filepath.Join(metaRoot, "peer", "worker", "ran-setup")); err != nil {
+		t.Fatalf("selected optional repo's setup did not run: %v", err)
 	}
 }

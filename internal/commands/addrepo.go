@@ -16,12 +16,17 @@ import (
 )
 
 func newAddRepoCmd() *cobra.Command {
-	return &cobra.Command{
+	var optional bool
+	cmd := &cobra.Command{
 		Use:   "add-repo [url] [folder]",
 		Short: "Register a native repo and clone it into every working copy",
 		Long: `add-repo appends a native repo to the meta workspace's .mws.toml and clones
 it into every existing working copy. If folder is omitted it is derived from
-the repo URL. With no arguments, prompts interactively.`,
+the repo URL. With no arguments, prompts interactively.
+
+With --optional the repo is registered under [[optional_repos]] instead and is
+NOT cloned into existing working copies. Pull it into a copy on demand with
+'mws clone --with <folder>' (or the clone prompt) or 'mws include <folder>'.`,
 		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			repoURL := ""
@@ -32,12 +37,14 @@ the repo URL. With no arguments, prompts interactively.`,
 			if len(args) == 2 {
 				folder = args[1]
 			}
-			return runAddRepo(cmd.Context(), newConsoleReporter(), repoURL, folder)
+			return runAddRepo(cmd.Context(), newConsoleReporter(), repoURL, folder, optional)
 		},
 	}
+	cmd.Flags().BoolVar(&optional, "optional", false, "register under [[optional_repos]] without cloning into existing working copies")
+	return cmd
 }
 
-func runAddRepo(ctx context.Context, r Reporter, repoURL, folder string) error {
+func runAddRepo(ctx context.Context, r Reporter, repoURL, folder string, optional bool) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -76,11 +83,20 @@ func runAddRepo(ctx context.Context, r Reporter, repoURL, folder string) error {
 		return fmt.Errorf("could not derive folder from URL %q; provide one explicitly", repoURL)
 	}
 
-	if !cfg.AddRepo(config.Repo{Folder: folder, URL: repoURL}) {
+	added := cfg.AddRepo
+	if optional {
+		added = cfg.AddOptionalRepo
+	}
+	if !added(config.Repo{Folder: folder, URL: repoURL}) {
 		return fmt.Errorf("repo with folder %q is already registered", folder)
 	}
 	if err := config.Save(ws.MetaRoot, cfg); err != nil {
 		return err
+	}
+	if optional {
+		r.OK(fmt.Sprintf("Registered optional repo %s -> %s", folder, repoURL))
+		r.Info(fmt.Sprintf("Pull it into a working copy with `mws clone --with %s` or `mws include %s`.", folder, folder))
+		return nil
 	}
 	r.OK(fmt.Sprintf("Registered %s -> %s", folder, repoURL))
 

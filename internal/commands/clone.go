@@ -32,6 +32,7 @@ const (
 
 func newCloneCmd() *cobra.Command {
 	var doSetup, noSetup bool
+	var with []string
 	cmd := &cobra.Command{
 		Use:   "clone <name>",
 		Short: "Create a new working copy inside this meta workspace",
@@ -42,6 +43,10 @@ fans the harness symlinks out from .mws/, and copies any env files mapped in
 
 Native repos are checked out on each repo's default branch -- a deliberate
 fresh-start semantic.
+
+When [[optional_repos]] are registered, clone offers them in a multiselect
+prompt (default none). Use --with <folder> (repeatable) to include specific
+optional repos non-interactively and skip the prompt.
 
 After clone and env-copy succeed, any [[repos.setup]] commands run inside
 each cloned repo via sh -c. By default a single confirmation prompt summarises
@@ -60,16 +65,17 @@ to skip entirely.`,
 			case noSetup:
 				choice = setupSkip
 			}
-			return runClone(cmd.Context(), newConsoleReporter(), name, choice)
+			return runClone(cmd.Context(), newConsoleReporter(), name, choice, with)
 		},
 	}
 	cmd.Flags().BoolVar(&doSetup, "setup", false, "run [[repos.setup]] commands without prompting")
 	cmd.Flags().BoolVar(&noSetup, "no-setup", false, "skip [[repos.setup]] commands without prompting")
+	cmd.Flags().StringSliceVar(&with, "with", nil, "include named optional repo(s) in this working copy (repeatable)")
 	cmd.MarkFlagsMutuallyExclusive("setup", "no-setup")
 	return cmd
 }
 
-func runClone(ctx context.Context, r Reporter, name string, choice setupChoice) error {
+func runClone(ctx context.Context, r Reporter, name string, choice setupChoice, with []string) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -101,6 +107,13 @@ func runClone(ctx context.Context, r Reporter, name string, choice setupChoice) 
 		return err
 	}
 
+	// Resolve optional repos before any filesystem mutation: an unknown --with
+	// name or a cancelled prompt must fail without leaving a half-built copy.
+	selected, err := resolveOptional(cfg, with)
+	if err != nil {
+		return err
+	}
+
 	target := filepath.Join(ws.CopiesRoot(), name)
 	if _, err := os.Stat(target); err == nil {
 		return fmt.Errorf("path already exists: %s", target)
@@ -121,7 +134,7 @@ func runClone(ctx context.Context, r Reporter, name string, choice setupChoice) 
 	}
 
 	var failed []string
-	for _, repo := range cfg.Repos {
+	for _, repo := range append(append([]config.Repo{}, cfg.Repos...), selected...) {
 		if err := cloneNative(ctx, r, repo, target); err != nil {
 			r.Fail(fmt.Sprintf("%s: %v", repo.Folder, err))
 			failed = append(failed, repo.Folder)
@@ -134,7 +147,7 @@ func runClone(ctx context.Context, r Reporter, name string, choice setupChoice) 
 		return fmt.Errorf("clone completed with errors: %d repo(s) failed: %s", len(failed), strings.Join(failed, ", "))
 	}
 
-	items := collectSetup(cfg)
+	items := collectSetup(append(append([]config.Repo{}, cfg.Repos...), selected...))
 	run, err := confirmSetup(choice, items)
 	if err != nil {
 		return err
@@ -169,6 +182,63 @@ func clonePromptDescription(ws *project.Workspace) string {
 		return fmt.Sprintf("Will be created at <meta-root>/%s/<name>/.", ws.WorkingCopiesDir)
 	}
 	return "Will be created at <meta-root>/<name>/."
+}
+
+// resolveOptional decides which [[optional_repos]] to include in this clone.
+// With no optional repos registered it returns nil without prompting. When
+// --with names are supplied they select non-interactively: each must match a
+// registered optional folder or the clone fails before any optional repo is
+// cloned. Otherwise the user is offered a multiselect defaulting to none.
+func resolveOptional(cfg *config.Config, with []string) ([]config.Repo, error) {
+	if len(cfg.OptionalRepos) == 0 {
+		return nil, nil
+	}
+	if len(with) > 0 {
+		out := make([]config.Repo, 0, len(with))
+		for _, name := range with {
+			folder := strings.TrimSpace(name)
+			repo, ok := cfg.OptionalRepo(folder)
+			if !ok {
+				return nil, fmt.Errorf("--with %q: no optional repo registered with that folder (registered: %s)", folder, listOptionalFolders(cfg))
+			}
+			out = append(out, repo)
+		}
+		return out, nil
+	}
+	opts := make([]huh.Option[string], 0, len(cfg.OptionalRepos))
+	for _, repo := range cfg.OptionalRepos {
+		opts = append(opts, huh.NewOption(fmt.Sprintf("%s (%s)", repo.Folder, repo.URL), repo.Folder))
+	}
+	var picked []string
+	if err := huh.NewMultiSelect[string]().
+		Title("Include optional repos?").
+		Description("Native repos to clone into this working copy. None by default.").
+		Options(opts...).
+		Value(&picked).
+		Run(); err != nil {
+		return nil, err
+	}
+	out := make([]config.Repo, 0, len(picked))
+	for _, folder := range picked {
+		if repo, ok := cfg.OptionalRepo(folder); ok {
+			out = append(out, repo)
+		}
+	}
+	return out, nil
+}
+
+// listOptionalFolders renders the registered optional-repo folders as a
+// comma-separated list, or "(none)" when there are none. Used in error and
+// guidance messages for `mws clone --with` and `mws include`.
+func listOptionalFolders(cfg *config.Config) string {
+	if len(cfg.OptionalRepos) == 0 {
+		return "(none)"
+	}
+	folders := make([]string, 0, len(cfg.OptionalRepos))
+	for _, repo := range cfg.OptionalRepos {
+		folders = append(folders, repo.Folder)
+	}
+	return strings.Join(folders, ", ")
 }
 
 // cloneNative populates target/<folder> with a fresh `git clone <url>` of the
@@ -265,13 +335,15 @@ type setupItem struct {
 	Cmd    string
 }
 
-// collectSetup returns the [[repos.setup]] commands across cfg as a flat,
+// collectSetup returns the [[repos.setup]] commands across repos as a flat,
 // ordered slice. Each cmd is trimmed; entries that are empty after trimming
 // are dropped. Repos with no setup contribute nothing. An empty return means
-// callers should short-circuit without prompting or executing.
-func collectSetup(cfg *config.Config) []setupItem {
+// callers should short-circuit without prompting or executing. Callers pass
+// the repos to schedule (default repos, optionally plus included optional
+// repos), so the same routine serves both `mws clone` and `mws include`.
+func collectSetup(repos []config.Repo) []setupItem {
 	var out []setupItem
-	for _, repo := range cfg.Repos {
+	for _, repo := range repos {
 		for _, sc := range repo.Setup {
 			cmd := strings.TrimSpace(sc.Cmd)
 			if cmd == "" {

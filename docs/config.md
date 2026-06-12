@@ -21,6 +21,11 @@ working_copies_dir  = "<segment>" # optional; single path segment under the meta
 
   [[repos.setup]]                 # optional; zero or more per repo
     cmd = "<shell string>"        # passed to `sh -c`, cwd = the cloned repo
+
+[[optional_repos]]                # zero or more; NOT cloned into every copy
+  folder = "<relative dir>"       # required; unique across repos + optional_repos
+  url    = "<git URL>"            # required
+  # supports the same [[optional_repos.envs]] and [[optional_repos.setup]] tables
 ```
 
 | Top-level key        | Type              | Required | Notes |
@@ -29,6 +34,7 @@ working_copies_dir  = "<segment>" # optional; single path segment under the meta
 | `description`        | string            | no       | Free-form. Empty by default. |
 | `working_copies_dir` | string            | no       | Single path-safe segment validated by the same rules as `project_name` (letters, digits, `-`, `_`, `.`; no leading `.` or `-`; no `/`). When set, `mws clone` and `mws init` place working copies at `<meta>/<working_copies_dir>/<name>/` instead of `<meta>/<name>/`. Empty (the default) keeps working copies at the meta root. |
 | `repos`              | array of tables   | no       | Each entry adds one **Native repo** to every **Working copy**. |
+| `optional_repos`     | array of tables   | no       | On-demand **Native repos** that are *not* cloned into every copy. Pulled into a specific copy via the `mws clone` prompt, `mws clone --with <folder>`, or `mws include <folder>`. Same shape as `[[repos]]`. |
 
 ### `[[repos]]`
 
@@ -69,6 +75,17 @@ Behavior:
 
 Design rationale: [ADR-0006](./adr/0006-post-clone-setup-commands.md).
 
+### `[[optional_repos]]`
+
+An **Optional repo** registered for on-demand inclusion. It is *not* cloned by `mws clone` into every working copy; instead it is pulled into a specific copy when asked for:
+
+- During `mws clone`, when any `[[optional_repos]]` exist, a multiselect prompt offers them (defaulting to none). `mws clone --with <folder>` (repeatable) selects specific ones non-interactively and skips the prompt.
+- `mws include <folder> [working-copy]` clones one into an existing copy (the current copy by default).
+
+Each entry uses the **same keys** as `[[repos]]` (`folder`, `url`, plus optional `[[optional_repos.envs]]` and `[[optional_repos.setup]]` tables). `folder` must be unique across both `[[repos]]` and `[[optional_repos]]` -- it maps to a single clone-target directory. Register entries with `mws add-repo --optional <url> [folder]`, which appends here without cloning into existing copies.
+
+Design rationale: [ADR-0009](./adr/0009-optional-repos.md).
+
 ## Worked example
 
 ```toml
@@ -100,21 +117,27 @@ description  = ""
     cmd = "pnpm install --frozen-lockfile"
   [[repos.setup]]
     cmd = "pnpm build"
+
+[[optional_repos]]
+  folder = "worker"
+  url    = "git@github.com:lgcypower/lgcy-worker.git"
 ```
 
 What `mws clone peer` does with this config:
 
 1. Creates `<meta>/peer/` and symlinks every entry of `<meta>/.mws/` into it.
-2. Clones `backend` and `frontend` into `peer/` (preferring `git clone --local` from an existing peer when available).
+2. Clones `backend` and `frontend` into `peer/` from their configured URLs.
 3. Copies the three frontend env files from `<meta>/.envs/frontend/*` into `peer/frontend/apps/...` and `peer/frontend/supabase/`.
-4. Prompts: "Run setup commands?" listing all three commands. On confirm: runs `go build ./...` in `peer/backend/`, runs `pnpm install --frozen-lockfile` then `pnpm build` in `peer/frontend/`.
+4. Offers `worker` in an "Include optional repos?" prompt (none selected by default). `mws clone peer --with worker` would clone it without prompting; `mws include worker peer` would add it to an existing `peer/`.
+5. Prompts: "Run setup commands?" listing all three commands. On confirm: runs `go build ./...` in `peer/backend/`, runs `pnpm install --frozen-lockfile` then `pnpm build` in `peer/frontend/`.
 
 ## Editing the config
 
 Most fields are written by `mws` subcommands:
 
 - `mws init <name>` writes the initial file with `project_name` and an empty `[[repos]]` list.
-- `mws addrepo` appends a `[[repos]]` entry interactively.
+- `mws add-repo` appends a `[[repos]]` entry interactively (and clones it into every working copy).
+- `mws add-repo --optional` appends an `[[optional_repos]]` entry without cloning it anywhere; pull it into a copy later with `mws clone --with` or `mws include`.
 
 `[[repos.envs]]` and `[[repos.setup]]` are hand-edited today; there are no dedicated subcommands. The schema is round-trip-safe: `mws` reads and writes the file using `BurntSushi/toml`, preserving every key it recognises. Unknown keys are ignored on parse but dropped on the next write -- avoid adding fields that mws does not understand.
 
@@ -130,3 +153,4 @@ The file is tracked by the meta workspace's git. Commit changes alongside the ha
 - [ADR-0005](./adr/0005-env-staging-via-copy.md) - env staging design
 - [ADR-0006](./adr/0006-post-clone-setup-commands.md) - setup commands design
 - [ADR-0007](./adr/0007-working-copies-subdir.md) - configurable working-copies subdirectory
+- [ADR-0009](./adr/0009-optional-repos.md) - optional repos pulled into copies on demand
