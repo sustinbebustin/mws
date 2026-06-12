@@ -73,6 +73,14 @@ mws add-repo git@github.com:org/backend.git
 mws clone feature-x
 ```
 
+Optionally register repos you only need in some copies, then pull them in on demand:
+
+```bash
+mws add-repo --optional git@github.com:org/worker.git   # register, don't clone
+mws clone feature-y --with worker                        # include at clone time
+mws include worker feature-x                             # add to an existing copy
+```
+
 4. See what working copies exist.
 
 ```bash
@@ -111,8 +119,9 @@ Working copies can optionally be grouped under a single subdirectory by setting 
 | Command | What it does |
 |---|---|
 | `mws init [name]` | Create a new meta workspace with a first working copy at `<name>/main/`. |
-| `mws add-repo <url> [folder]` | Register a native repo in `.mws.toml` and clone it into every working copy. |
-| `mws clone <name>` | Create a new working copy. Native repos are freshly cloned from each configured URL and checked out on the default branch. |
+| `mws add-repo <url> [folder]` | Register a native repo in `.mws.toml` and clone it into every working copy. With `--optional`, register it under `[[optional_repos]]` without cloning anywhere. |
+| `mws clone <name>` | Create a new working copy. Native repos are freshly cloned from each configured URL and checked out on the default branch. When optional repos exist, prompts to include them; `--with <folder>` (repeatable) includes specific ones non-interactively. |
+| `mws include <folder> [copy]` | Clone a registered optional repo into a working copy (the current one by default). |
 | `mws promote <path>` | Move a top-level file or directory from the current working copy into `.mws/`, symlink it back, and backfill the symlink into every other working copy. |
 | `mws list` | List working copies in the current meta workspace. |
 | `mws rm <name>` | Remove a working copy. Confirms before destruction. |

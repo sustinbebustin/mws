@@ -24,6 +24,11 @@ type Config struct {
 	// meta root.
 	WorkingCopiesDir string `toml:"working_copies_dir,omitempty"`
 	Repos            []Repo `toml:"repos"`
+	// OptionalRepos lists native repos that are NOT cloned into every working
+	// copy. They are pulled into a specific copy on demand: chosen at
+	// `mws clone` time (the prompt or --with) or added later with
+	// `mws include`. Same shape as Repos; omitted from TOML when empty.
+	OptionalRepos []Repo `toml:"optional_repos,omitempty"`
 }
 
 // Repo identifies one native git repo by its target folder and clone URL.
@@ -85,14 +90,49 @@ func Save(metaRoot string, c *Config) error {
 	return nil
 }
 
-// AddRepo appends a repo to the config if a repo with the same folder is not already present.
-// Returns true if the repo was added, false if it was a duplicate.
-func (c *Config) AddRepo(r Repo) bool {
-	for _, existing := range c.Repos {
-		if existing.Folder == r.Folder {
-			return false
+// folderRegistered reports whether folder is already used by any repo in the
+// config, default or optional. A folder maps to a single clone-target dir name
+// inside a working copy, so it must be unique across the whole config.
+func (c *Config) folderRegistered(folder string) bool {
+	for _, r := range c.Repos {
+		if r.Folder == folder {
+			return true
 		}
+	}
+	for _, r := range c.OptionalRepos {
+		if r.Folder == folder {
+			return true
+		}
+	}
+	return false
+}
+
+// AddRepo appends a repo to the config if its folder is not already registered
+// (in either Repos or OptionalRepos). Returns true if added, false on duplicate.
+func (c *Config) AddRepo(r Repo) bool {
+	if c.folderRegistered(r.Folder) {
+		return false
 	}
 	c.Repos = append(c.Repos, r)
 	return true
+}
+
+// AddOptionalRepo appends a repo to OptionalRepos if its folder is not already
+// registered (in either list). Returns true if added, false on duplicate.
+func (c *Config) AddOptionalRepo(r Repo) bool {
+	if c.folderRegistered(r.Folder) {
+		return false
+	}
+	c.OptionalRepos = append(c.OptionalRepos, r)
+	return true
+}
+
+// OptionalRepo returns the registered optional repo with the given folder.
+func (c *Config) OptionalRepo(folder string) (Repo, bool) {
+	for _, r := range c.OptionalRepos {
+		if r.Folder == folder {
+			return r, true
+		}
+	}
+	return Repo{}, false
 }
