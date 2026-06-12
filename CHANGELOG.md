@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Optional repos: register native repos under `[[optional_repos]]` in `.mws.toml` that are not cloned into every working copy. Pull one into a copy on demand -- at `mws clone` time via a multiselect prompt or `--with <folder>` (repeatable), or into an existing copy with the new `mws include <folder> [copy]`. Register them with `mws add-repo --optional <url> [folder]`, which appends without cloning into existing copies. Optional repos reuse the repo shape, so `[[optional_repos.envs]]` and `[[optional_repos.setup]]` work as for `[[repos]]`. See ADR 0009.
 - `mws shell-init <zsh|bash|fish>` prints a shell function that wraps `mws` and auto-cds the parent shell into the new working copy after a successful `mws clone`. Opt-in via `eval "$(mws shell-init zsh)"` (or the equivalent for bash/fish). Without the wrapper, `mws clone` prints a copy-pasteable `Next: cd <path>` hint instead. The handoff uses `MWS_CD_FILE` -- a documented contract any IDE or script can also use. See ADR 0008.
 
 ## [0.3.0] - 2026-05-19
