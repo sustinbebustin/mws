@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-12
+
 ### Added
 - Optional repos: register native repos under `[[optional_repos]]` in `.mws.toml` that are not cloned into every working copy. Pull one into a copy on demand -- at `mws clone` time via a multiselect prompt or `--with <folder>` (repeatable), or into an existing copy with the new `mws include <folder> [copy]`. Register them with `mws add-repo --optional <url> [folder]`, which appends without cloning into existing copies. Optional repos reuse the repo shape, so `[[optional_repos.envs]]` and `[[optional_repos.setup]]` work as for `[[repos]]`. See ADR 0009.
 - `mws shell-init <zsh|bash|fish>` prints a shell function that wraps `mws` and auto-cds the parent shell into the new working copy after a successful `mws clone`. Opt-in via `eval "$(mws shell-init zsh)"` (or the equivalent for bash/fish). Without the wrapper, `mws clone` prints a copy-pasteable `Next: cd <path>` hint instead. The handoff uses `MWS_CD_FILE` -- a documented contract any IDE or script can also use. See ADR 0008.
@@ -50,7 +52,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tag-driven release pipeline: pushing a `v*` tag publishes darwin and linux binaries (amd64 and arm64) to GitHub Releases via goreleaser, with checksums and a conventional-commit-grouped changelog.
 - Homebrew tap: every release pushes a formula to `sustinbebustin/homebrew-mws`, enabling `brew install sustinbebustin/mws/mws`.
 
-[Unreleased]: https://github.com/sustinbebustin/mws/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/sustinbebustin/mws/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/sustinbebustin/mws/releases/tag/v0.4.0
 [0.3.0]: https://github.com/sustinbebustin/mws/releases/tag/v0.3.0
 [0.2.0]: https://github.com/sustinbebustin/mws/releases/tag/v0.2.0
 [0.1.2]: https://github.com/sustinbebustin/mws/releases/tag/v0.1.2
