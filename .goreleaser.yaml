@@ -76,7 +76,7 @@ brews:
   - name: mws
     repository:
       owner: sustinbebustin
-      name: homebrew-mws
+      name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     directory: Formula
     homepage: "https://github.com/sustinbebustin/mws"

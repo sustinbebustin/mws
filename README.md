@@ -21,7 +21,7 @@ The result: parallel agents work side-by-side without fighting over the same `.g
 ### Homebrew (macOS, Linux)
 
 ```bash
-brew install sustinbebustin/mws/mws
+brew install sustinbebustin/tap/mws
 ```
 
 ### Pre-built binary

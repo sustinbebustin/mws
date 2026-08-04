@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Homebrew formula now publishes to the shared tap `sustinbebustin/homebrew-tap` instead of the project-specific `sustinbebustin/homebrew-mws`. Install with `brew install sustinbebustin/tap/mws`. GitHub redirects the old tap name, so existing installs keep working until they re-tap.
+
 ## [0.4.1] - 2026-08-04
 
 ### Changed
