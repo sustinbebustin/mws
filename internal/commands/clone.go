@@ -207,15 +207,18 @@ func resolveOptional(cfg *config.Config, with []string) ([]config.Repo, error) {
 	}
 	opts := make([]huh.Option[string], 0, len(cfg.OptionalRepos))
 	for _, repo := range cfg.OptionalRepos {
-		opts = append(opts, huh.NewOption(fmt.Sprintf("%s (%s)", repo.Folder, repo.URL), repo.Folder))
+		opts = append(opts, huh.NewOption(repo.Folder, repo.Folder))
 	}
 	var picked []string
-	if err := huh.NewMultiSelect[string]().
+	ms := huh.NewMultiSelect[string]().
 		Title("Include optional repos?").
-		Description("Native repos to clone into this working copy. None by default.").
+		Description("Space to select, enter to confirm. Select none to skip.").
 		Options(opts...).
-		Value(&picked).
-		Run(); err != nil {
+		Value(&picked)
+	// Build the form explicitly so the keybinding help footer shows: the field's
+	// own .Run() shortcut forces WithShowHelp(false), hiding how to toggle a
+	// choice or skip the prompt.
+	if err := huh.NewForm(huh.NewGroup(ms)).WithShowHelp(true).Run(); err != nil {
 		return nil, err
 	}
 	out := make([]config.Repo, 0, len(picked))

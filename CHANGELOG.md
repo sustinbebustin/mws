@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- The `mws clone` optional-repos prompt now shows the keybinding help footer (space to select, enter to confirm, none to skip) and labels each repo by folder name only, dropping the URL.
+
 ## [0.4.0] - 2026-06-12
 
 ### Added
