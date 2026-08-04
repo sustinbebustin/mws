@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-04
+
 ### Changed
 - The `mws clone` optional-repos prompt now shows the keybinding help footer (space to select, enter to confirm, none to skip) and labels each repo by folder name only, dropping the URL.
 
@@ -55,7 +57,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tag-driven release pipeline: pushing a `v*` tag publishes darwin and linux binaries (amd64 and arm64) to GitHub Releases via goreleaser, with checksums and a conventional-commit-grouped changelog.
 - Homebrew tap: every release pushes a formula to `sustinbebustin/homebrew-mws`, enabling `brew install sustinbebustin/mws/mws`.
 
-[Unreleased]: https://github.com/sustinbebustin/mws/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/sustinbebustin/mws/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/sustinbebustin/mws/releases/tag/v0.4.1
 [0.4.0]: https://github.com/sustinbebustin/mws/releases/tag/v0.4.0
 [0.3.0]: https://github.com/sustinbebustin/mws/releases/tag/v0.3.0
 [0.2.0]: https://github.com/sustinbebustin/mws/releases/tag/v0.2.0
