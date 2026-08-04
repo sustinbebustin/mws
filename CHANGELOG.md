@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-08-04
+
 ### Changed
 - Homebrew formula now publishes to the shared tap `sustinbebustin/homebrew-tap` instead of the project-specific `sustinbebustin/homebrew-mws`. Install with `brew install sustinbebustin/tap/mws`. GitHub redirects the old tap name, so existing installs keep working until they re-tap.
 
@@ -60,7 +62,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tag-driven release pipeline: pushing a `v*` tag publishes darwin and linux binaries (amd64 and arm64) to GitHub Releases via goreleaser, with checksums and a conventional-commit-grouped changelog.
 - Homebrew tap: every release pushes a formula to `sustinbebustin/homebrew-mws`, enabling `brew install sustinbebustin/mws/mws`.
 
-[Unreleased]: https://github.com/sustinbebustin/mws/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/sustinbebustin/mws/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/sustinbebustin/mws/releases/tag/v0.4.2
 [0.4.1]: https://github.com/sustinbebustin/mws/releases/tag/v0.4.1
 [0.4.0]: https://github.com/sustinbebustin/mws/releases/tag/v0.4.0
 [0.3.0]: https://github.com/sustinbebustin/mws/releases/tag/v0.3.0
