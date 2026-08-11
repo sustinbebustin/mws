@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 
+	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/project"
 )
 
@@ -40,6 +41,11 @@ func runPromote(r Reporter, arg string) error {
 	}
 	ws, err := project.Locate(cwd)
 	if err != nil {
+		return err
+	}
+	// Locate tolerates an unreadable .mws.toml. Load it explicitly, as the other
+	// commands do, so a malformed config is an error here rather than silence.
+	if _, err := config.Load(ws.MetaRoot); err != nil {
 		return err
 	}
 	if ws.WorkingCopy == "" {

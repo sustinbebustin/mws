@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Soft-delete for working copies. `mws rm` now moves a working copy into `<meta>/.trash/` instead of deleting it, so an accidental removal no longer costs uncommitted work or staged env files. The move is a single rename -- instant, and file modes and symlinks are preserved exactly. See ADR 0010.
+- `mws restore [name]` brings a trashed working copy back and repairs its harness symlinks. `--as <newname>` restores under a different name; restore never overwrites an existing copy. With no name, it prompts with the contents of the trash.
+- `mws trash` (alias `mws trash list`) shows what is in the trash and when each entry expires. `mws trash prune` purges entries past their retention window; `mws trash empty` purges everything.
+- Optional `[trash]` table in `.mws.toml`: `retention_days` (default `7`, `0` means keep forever) and `disabled` (`true` restores the old delete-outright behaviour). A config that omits the table round-trips unchanged.
+
+### Changed
+- `mws rm` gained `--purge` to delete a working copy outright, skipping the trash. Its confirmation prompt now states which of the two it is about to do.
+- Trashed entries are purged opportunistically, when `mws rm`, `mws restore`, or `mws trash` runs -- there is no background timer, so an entry outlives its retention until mws is next run in that workspace. `mws trash prune` forces a sweep.
+
 ## [0.4.2] - 2026-08-04
 
 ### Changed

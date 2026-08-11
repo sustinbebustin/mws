@@ -99,6 +99,7 @@ my-project/                       # this directory IS a git repo (meta root)
 │   ├── .workspace/
 │   └── justfile
 ├── .envs/                        # Env-file staging, per repo (untracked)
+├── .trash/                       # Working copies removed by `mws rm` (untracked)
 ├── main/                         # First working copy (untracked)
 │   ├── frontend/                 # Independent native git clone
 │   ├── backend/                  # Independent native git clone
@@ -114,6 +115,8 @@ Every top-level entry under `.mws/` is symlinked into each working copy -- disco
 
 Working copies can optionally be grouped under a single subdirectory by setting `working_copies_dir` in `.mws.toml` (e.g. `working_copies_dir = "copies"`); subsequent `mws clone`s land at `<meta>/copies/<name>/` instead of `<meta>/<name>/`. See [`docs/config.md`](./docs/config.md) for the rules and caveats.
 
+`mws rm` moves a working copy into `.trash/` rather than deleting it, so a mistaken removal costs nothing: `mws restore <name>` puts it back with its uncommitted work and env files intact. Trashed copies are purged automatically once they pass the retention window (7 days by default, configurable via `[trash]`). Note that the sweep is opportunistic -- it runs when an mws command touches the trash, not on a timer.
+
 ## Commands
 
 | Command | What it does |
@@ -124,7 +127,9 @@ Working copies can optionally be grouped under a single subdirectory by setting 
 | `mws include <folder> [copy]` | Clone a registered optional repo into a working copy (the current one by default). |
 | `mws promote <path>` | Move a top-level file or directory from the current working copy into `.mws/`, symlink it back, and backfill the symlink into every other working copy. |
 | `mws list` | List working copies in the current meta workspace. |
-| `mws rm <name>` | Remove a working copy. Confirms before destruction. |
+| `mws rm <name>` | Remove a working copy. Confirms first, then moves it to `.trash/` so it can be brought back; `--purge` deletes outright. |
+| `mws restore [name]` | Bring a trashed working copy back and repair its harness symlinks. `--as <newname>` restores under a different name. |
+| `mws trash [list\|prune\|empty]` | Inspect the trash, purge entries past their retention window, or empty it completely. |
 | `mws relink` | Refresh harness symlinks across every working copy; handles diverged content interactively. |
 | `mws sync-env [name]` | Copy staged env files from `.envs/` into a working copy (overwrites). |
 | `mws stage-env [name]` | Inverse of `sync-env`: capture a working copy's env files into staging as the new default. |
