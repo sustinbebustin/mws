@@ -26,6 +26,10 @@ working_copies_dir  = "<segment>" # optional; single path segment under the meta
   folder = "<relative dir>"       # required; unique across repos + optional_repos
   url    = "<git URL>"            # required
   # supports the same [[optional_repos.envs]] and [[optional_repos.setup]] tables
+
+[trash]                           # optional; whole table may be omitted
+  retention_days = 7              # days a trashed copy is kept; 0 = forever
+  disabled       = false          # true = `mws rm` deletes outright
 ```
 
 | Top-level key        | Type              | Required | Notes |
@@ -35,6 +39,7 @@ working_copies_dir  = "<segment>" # optional; single path segment under the meta
 | `working_copies_dir` | string            | no       | Single path-safe segment validated by the same rules as `project_name` (letters, digits, `-`, `_`, `.`; no leading `.` or `-`; no `/`). When set, `mws clone` and `mws init` place working copies at `<meta>/<working_copies_dir>/<name>/` instead of `<meta>/<name>/`. Empty (the default) keeps working copies at the meta root. |
 | `repos`              | array of tables   | no       | Each entry adds one **Native repo** to every **Working copy**. |
 | `optional_repos`     | array of tables   | no       | On-demand **Native repos** that are *not* cloned into every copy. Pulled into a specific copy via the `mws clone` prompt, `mws clone --with <folder>`, or `mws include <folder>`. Same shape as `[[repos]]`. |
+| `trash`              | table             | no       | Tunes the soft-delete behaviour of `mws rm`. See [`[trash]`](#trash). Omit the table for the defaults. |
 
 ### `[[repos]]`
 
@@ -85,6 +90,25 @@ An **Optional repo** registered for on-demand inclusion. It is *not* cloned by `
 Each entry uses the **same keys** as `[[repos]]` (`folder`, `url`, plus optional `[[optional_repos.envs]]` and `[[optional_repos.setup]]` tables). `folder` must be unique across both `[[repos]]` and `[[optional_repos]]` -- it maps to a single clone-target directory. Register entries with `mws add-repo --optional <url> [folder]`, which appends here without cloning into existing copies.
 
 Design rationale: [ADR-0009](./adr/0009-optional-repos.md).
+
+### `[trash]`
+
+`mws rm` does not delete a **Working copy**. It moves it into `<meta>/.trash/`, where `mws restore <name>` can bring it back and an automatic sweep purges it once it passes the retention window. Omit the table entirely for the defaults below.
+
+| Key              | Type | Required | Notes |
+|------------------|------|----------|-------|
+| `retention_days` | int  | no       | How many days a trashed working copy is kept. Defaults to `7`. `0` means keep forever -- nothing is ever purged automatically. Negative values are rejected at load time. |
+| `disabled`       | bool | no       | `true` makes `mws rm` delete a working copy outright instead of trashing it. Defaults to `false`. `mws restore` and `mws trash` still operate on anything trashed earlier. |
+
+Behavior:
+
+- Purging is **opportunistic**: the sweep runs when `mws rm`, `mws restore`, or a `mws trash` subcommand touches the trash. A trashed copy therefore outlives its retention for as long as you do not run `mws` in that workspace. Force a sweep with `mws trash prune`.
+- Trashing and restoring are single renames, so they are instant and preserve file modes, symlinks, and git object files exactly. The copy is not compressed.
+- Harness symlinks inside a working copy are relative, so they dangle while the copy sits in `.trash/` at a different depth. `mws restore` repairs them on the way out; a dangling `ls -l` inside `.trash/` is expected, not corruption.
+- `.trash/` sits at the meta root next to `.mws/` and `.envs/`, regardless of `working_copies_dir`, and the meta-root allowlist `.gitignore` keeps it untracked.
+- `mws rm --purge` skips the trash for a single removal without changing the config. `mws trash empty` purges everything regardless of age.
+
+Design rationale: [ADR-0010](./adr/0010-soft-delete-working-copies.md).
 
 ## Worked example
 
@@ -154,3 +178,4 @@ The file is tracked by the meta workspace's git. Commit changes alongside the ha
 - [ADR-0006](./adr/0006-post-clone-setup-commands.md) - setup commands design
 - [ADR-0007](./adr/0007-working-copies-subdir.md) - configurable working-copies subdirectory
 - [ADR-0009](./adr/0009-optional-repos.md) - optional repos pulled into copies on demand
+- [ADR-0010](./adr/0010-soft-delete-working-copies.md) - why `mws rm` trashes instead of deleting
