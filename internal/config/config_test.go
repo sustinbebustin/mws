@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPath(t *testing.T) {
@@ -224,5 +225,127 @@ func TestOptionalRepoLookup(t *testing.T) {
 func TestLoadMissing(t *testing.T) {
 	if _, err := Load(t.TempDir()); err == nil {
 		t.Fatal("expected error for missing config")
+	}
+}
+
+func TestTrashPolicyDefaults(t *testing.T) {
+	got := (&Config{}).TrashPolicy()
+	if !got.Enabled {
+		t.Fatal("trash should be enabled when [trash] is absent")
+	}
+	if got.Retention != DefaultTrashRetention {
+		t.Fatalf("retention = %v, want %v", got.Retention, DefaultTrashRetention)
+	}
+}
+
+func days(n int) *int { return &n }
+
+func TestTrashPolicyExplicit(t *testing.T) {
+	got := (&Config{Trash: &Trash{RetentionDays: days(30)}}).TrashPolicy()
+	if !got.Enabled || got.Retention != 30*24*time.Hour {
+		t.Fatalf("got %+v, want enabled with 30d retention", got)
+	}
+
+	// An explicit 0 means keep forever, which is distinct both from disabled
+	// and from omitting the key.
+	forever := (&Config{Trash: &Trash{RetentionDays: days(0)}}).TrashPolicy()
+	if !forever.Enabled || forever.Retention != 0 {
+		t.Fatalf("got %+v, want enabled with no expiry", forever)
+	}
+
+	off := (&Config{Trash: &Trash{Disabled: true}}).TrashPolicy()
+	if off.Enabled {
+		t.Fatal("trash.disabled should disable the trash")
+	}
+}
+
+// A [trash] table that omits retention_days must still get the default. The
+// table is easy to materialise by setting any other key, and silently
+// switching such a workspace to "keep forever" would grow the trash unbounded.
+func TestTrashPolicyPartialTableKeepsDefaultRetention(t *testing.T) {
+	for name, c := range map[string]*Config{
+		"disabled false": {Trash: &Trash{Disabled: false}},
+		"disabled true":  {Trash: &Trash{Disabled: true}},
+	} {
+		if got := c.TrashPolicy().Retention; got != DefaultTrashRetention {
+			t.Fatalf("%s: retention = %v, want %v", name, got, DefaultTrashRetention)
+		}
+	}
+}
+
+func TestLoadPartialTrashTableFromDisk(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(Path(dir), []byte("project_name = \"demo\"\n\n[trash]\ndisabled = false\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Trash == nil || c.Trash.RetentionDays != nil {
+		t.Fatalf("retention_days should decode as absent, got %+v", c.Trash)
+	}
+	if got := c.TrashPolicy().Retention; got != DefaultTrashRetention {
+		t.Fatalf("retention = %v, want %v", got, DefaultTrashRetention)
+	}
+}
+
+// An explicit retention_days = 0 must survive a save/load cycle as "keep
+// forever" rather than being dropped back to the default.
+func TestSaveRoundTripsExplicitZeroRetention(t *testing.T) {
+	dir := t.TempDir()
+	if err := Save(dir, &Config{ProjectName: "demo", Trash: &Trash{RetentionDays: days(0)}}); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Trash == nil || c.Trash.RetentionDays == nil || *c.Trash.RetentionDays != 0 {
+		t.Fatalf("explicit zero retention was lost: %+v", c.Trash)
+	}
+	if c.TrashPolicy().Retention != 0 {
+		t.Fatal("explicit zero should resolve to keep-forever")
+	}
+}
+
+// A config that never mentions [trash] must round-trip without gaining one, so
+// upgrading mws doesn't rewrite every existing .mws.toml.
+func TestSaveOmitsAbsentTrashTable(t *testing.T) {
+	dir := t.TempDir()
+	if err := Save(dir, &Config{ProjectName: "demo"}); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(Path(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "trash") {
+		t.Fatalf("Save wrote a trash table for a config that had none:\n%s", body)
+	}
+
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Trash != nil {
+		t.Fatalf("Load invented a trash table: %+v", loaded.Trash)
+	}
+	if loaded.TrashPolicy().Retention != DefaultTrashRetention {
+		t.Fatal("round-tripped config lost the default retention")
+	}
+}
+
+func TestLoadRejectsNegativeRetention(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(Path(dir), []byte("project_name = \"demo\"\n\n[trash]\nretention_days = -1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("negative retention_days should be a load error")
+	}
+	if !strings.Contains(err.Error(), "retention_days") {
+		t.Fatalf("error should name the offending key: %v", err)
 	}
 }

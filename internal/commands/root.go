@@ -24,6 +24,8 @@ func NewRootCmd() *cobra.Command {
 		newPromoteCmd(),
 		newListCmd(),
 		newRmCmd(),
+		newRestoreCmd(),
+		newTrashCmd(),
 		newRelinkCmd(),
 		newMigrateCmd(),
 		newSyncEnvCmd(),
