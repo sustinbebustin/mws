@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-11
+
 ### Added
 - Soft-delete for working copies. `mws rm` now moves a working copy into `<meta>/.trash/` instead of deleting it, so an accidental removal no longer costs uncommitted work or staged env files. The move is a single rename -- instant, and file modes and symlinks are preserved exactly. See ADR 0010.
 - `mws restore [name]` brings a trashed working copy back and repairs its harness symlinks. `--as <newname>` restores under a different name; restore never overwrites an existing copy. With no name, it prompts with the contents of the trash.
@@ -72,7 +74,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tag-driven release pipeline: pushing a `v*` tag publishes darwin and linux binaries (amd64 and arm64) to GitHub Releases via goreleaser, with checksums and a conventional-commit-grouped changelog.
 - Homebrew tap: every release pushes a formula to `sustinbebustin/homebrew-mws`, enabling `brew install sustinbebustin/mws/mws`.
 
-[Unreleased]: https://github.com/sustinbebustin/mws/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/sustinbebustin/mws/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/sustinbebustin/mws/releases/tag/v0.5.0
 [0.4.2]: https://github.com/sustinbebustin/mws/releases/tag/v0.4.2
 [0.4.1]: https://github.com/sustinbebustin/mws/releases/tag/v0.4.1
 [0.4.0]: https://github.com/sustinbebustin/mws/releases/tag/v0.4.0
