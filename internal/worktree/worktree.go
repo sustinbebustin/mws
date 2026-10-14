@@ -314,16 +314,18 @@ type builder struct {
 	ctx    context.Context
 	meta   string
 	target string
-	undo   []func() error
+	undo   []func(context.Context) error
 }
 
-func (b *builder) onRollback(fn func() error) { b.undo = append(b.undo, fn) }
+func (b *builder) onRollback(fn func(context.Context) error) { b.undo = append(b.undo, fn) }
 
 // rollback runs the recorded undo steps newest first and joins their errors.
+// It ignores cancellation: an interrupted create must still clean up.
 func (b *builder) rollback() error {
+	ctx := context.WithoutCancel(b.ctx)
 	var errs []error
 	for i := len(b.undo) - 1; i >= 0; i-- {
-		errs = append(errs, b.undo[i]())
+		errs = append(errs, b.undo[i](ctx))
 	}
 	return errors.Join(errs...)
 }
@@ -335,7 +337,7 @@ func (b *builder) build(r Reporter, opts NewOptions, plan []plannedRepo, branch 
 			return nil, failuref("create %s: %w", parent, err)
 		}
 		// Remove only if still empty: a concurrent `new` may share it.
-		b.onRollback(func() error {
+		b.onRollback(func(context.Context) error {
 			if err := os.Remove(parent); err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, syscall.ENOTEMPTY) {
 				return fmt.Errorf("remove %s: %w", parent, err)
 			}
@@ -345,11 +347,11 @@ func (b *builder) build(r Reporter, opts NewOptions, plan []plannedRepo, branch 
 
 	if err := git.AddDetachedNoCheckout(b.ctx, b.meta, b.target); err != nil {
 		// git may have created the directory before failing.
-		b.onRollback(func() error { return os.RemoveAll(b.target) })
+		b.onRollback(func(context.Context) error { return os.RemoveAll(b.target) })
 		return nil, failuref("anchor %s to the meta repo at %s (it must be a git repository with at least one commit): %w", b.target, b.meta, err)
 	}
-	b.onRollback(func() error {
-		err := git.RemoveWorktreeForce(b.ctx, b.meta, b.target)
+	b.onRollback(func(ctx context.Context) error {
+		err := git.RemoveWorktreeForce(ctx, b.meta, b.target)
 		return errors.Join(err, os.RemoveAll(b.target))
 	})
 	if err := git.SparseCheckoutOnly(b.ctx, b.target, "/.gitignore"); err != nil {
@@ -366,19 +368,19 @@ func (b *builder) build(r Reporter, opts NewOptions, plan []plannedRepo, branch 
 		} else {
 			// Registered before the attempt: a failing checkout hook leaves the
 			// branch and registration behind even though git reports failure.
-			b.onRollback(func() error {
-				if !git.BranchExists(b.ctx, p.src, branch) {
+			b.onRollback(func(ctx context.Context) error {
+				if !git.BranchExists(ctx, p.src, branch) {
 					return nil
 				}
-				return git.DeleteBranch(b.ctx, p.src, branch)
+				return git.DeleteBranch(ctx, p.src, branch)
 			})
 			err = git.AddWorktreeNewBranch(b.ctx, p.src, dst, branch, p.base)
 		}
-		b.onRollback(func() error {
+		b.onRollback(func(ctx context.Context) error {
 			if _, statErr := os.Lstat(dst); errors.Is(statErr, os.ErrNotExist) {
 				return nil
 			}
-			return git.RemoveWorktreeForce(b.ctx, p.src, dst)
+			return git.RemoveWorktreeForce(ctx, p.src, dst)
 		})
 		if err != nil {
 			return nil, failuref("%s: add worktree on %s: %w", p.folder, branch, err)
