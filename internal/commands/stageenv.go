@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/sustinbebustin/mws/internal/atomicfile"
 	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/project"
 )
@@ -62,7 +63,7 @@ func runStageEnv(r Reporter, name string) error {
 				r.Warn(fmt.Sprintf("%s: live %s missing, skipping", repo.Folder, env.Target))
 				continue
 			}
-			if err := copyFile(src, dst); err != nil {
+			if err := atomicfile.Copy(src, dst); err != nil {
 				r.Fail(fmt.Sprintf("%s: %s -> %s: %v", repo.Folder, env.Target, env.Source, err))
 				continue
 			}
