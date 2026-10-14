@@ -42,4 +42,12 @@ func TestWtExecErrors(t *testing.T) {
 			t.Fatalf("%s: exit %d, want %d\nstderr: %s", name, res.code, tc.code, res.stderr)
 		}
 	}
+
+	res := runWt(t, f.copy, "exec", "x", "--json", "--", "no-such-command-mws")
+	if res.code != 1 {
+		t.Fatalf("--json not executable: exit %d, want 1\nstderr: %s", res.code, res.stderr)
+	}
+	if e := decodeError(t, res); e.Code != "failure" || !strings.Contains(e.Message, "no-such-command-mws") {
+		t.Fatalf("error = %+v, want a failure naming the command", e)
+	}
 }

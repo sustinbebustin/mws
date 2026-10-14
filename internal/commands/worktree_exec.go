@@ -42,7 +42,12 @@ func runWorktreeExec(ctx context.Context, o wtOutput, in io.Reader, name string,
 	if err != nil {
 		return o.fail(err)
 	}
-	return runIn(ctx, root, argv, in, o.stdout, o.stderr)
+	err = runIn(ctx, root, argv, in, o.stdout, o.stderr)
+	var exitErr *exitStatusError
+	if err == nil || errors.As(err, &exitErr) {
+		return err // the command's own exit code passes through unreported
+	}
+	return o.fail(err)
 }
 
 // runIn runs argv in dir with the given stdio and turns a non-zero exit into
