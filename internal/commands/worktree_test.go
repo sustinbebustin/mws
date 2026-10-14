@@ -246,3 +246,102 @@ func TestWtNewCreatesLayout(t *testing.T) {
 		t.Fatalf("wt path: exit %d stdout %q stderr %s", p.code, p.stdout, p.stderr)
 	}
 }
+
+// mustNew runs `wt new` and fails the test unless it exits 0.
+func mustNew(t *testing.T, cwd string, args ...string) wtResult {
+	t.Helper()
+	res := runWt(t, cwd, append([]string{"new"}, args...)...)
+	if res.code != 0 {
+		t.Fatalf("wt new %v: exit %d\nstderr: %s", args, res.code, res.stderr)
+	}
+	return res
+}
+
+func TestWtNewBranchAndBaseFlags(t *testing.T) {
+	f := seedWtWorkspace(t)
+	mustNew(t, f.copy, "b", "--branch", "feat/b", "--base", "main", "--no-setup")
+
+	for _, folder := range []string{"backend", "frontend"} {
+		inner := filepath.Join(f.wtPath("b"), folder)
+		if got := gitT(t, inner, "branch", "--show-current"); got != "feat/b" {
+			t.Fatalf("%s branch = %q, want feat/b", folder, got)
+		}
+		if got, want := gitT(t, inner, "rev-parse", "HEAD"), gitT(t, f.repo(folder), "rev-parse", "main"); got != want {
+			t.Fatalf("%s at %s, want main %s", folder, got, want)
+		}
+	}
+}
+
+func TestWtNewUnknownBaseIsUsageErrorAndCreatesNothing(t *testing.T) {
+	f := seedWtWorkspace(t)
+	res := runWt(t, f.copy, "new", "b", "--base", "no-such-ref", "--no-setup")
+	if res.code != 2 {
+		t.Fatalf("exit %d, want 2\nstderr: %s", res.code, res.stderr)
+	}
+	if _, err := os.Lstat(filepath.Join(f.copy, ".wt")); err == nil {
+		t.Fatal("a refused create must not leave the worktrees dir behind")
+	}
+}
+
+// Run from inside a worktree, a new worktree is based on that worktree's
+// checkouts and still lands as a sibling under the copy.
+func TestWtNewFromInsideWorktreeBasesOnIt(t *testing.T) {
+	f := seedWtWorkspace(t)
+	mustNew(t, f.copy, "x", "--no-setup")
+	xFront := filepath.Join(f.wtPath("x"), "frontend")
+	writeFileAll(t, filepath.Join(xFront, "feature.txt"), "x work")
+	gitT(t, xFront, "add", "feature.txt")
+	gitT(t, xFront, "commit", "-q", "-m", "x work")
+
+	res := mustNew(t, filepath.Join(xFront, ".."), "y", "--no-setup")
+	if res.lastLine() != f.wtPath("y") {
+		t.Fatalf("nested worktree at %q, want sibling %q", res.lastLine(), f.wtPath("y"))
+	}
+	if got, want := gitT(t, filepath.Join(f.wtPath("y"), "frontend"), "rev-parse", "HEAD"), gitT(t, xFront, "rev-parse", "HEAD"); got != want {
+		t.Fatalf("y/frontend based on %s, want x's HEAD %s", got, want)
+	}
+	if got := gitT(t, filepath.Join(f.wtPath("y"), "frontend"), "branch", "--show-current"); got != "wt/y" {
+		t.Fatalf("y/frontend branch = %q, want wt/y", got)
+	}
+}
+
+func TestWtNewIncludesOptionalRepoPresentInCopy(t *testing.T) {
+	f := seedWtWorkspace(t)
+	gitT(t, "", "clone", "-q", f.cfg.OptionalRepos[0].URL, f.repo("extra"))
+
+	mustNew(t, f.copy, "x", "--no-setup")
+	if got := gitT(t, filepath.Join(f.wtPath("x"), "extra"), "branch", "--show-current"); got != "wt/x" {
+		t.Fatalf("extra branch = %q, want wt/x", got)
+	}
+}
+
+func TestWtNewWarnsOnMissingEnvTarget(t *testing.T) {
+	f := seedWtWorkspace(t)
+	if err := os.Remove(filepath.Join(f.repo("frontend"), "app.env")); err != nil {
+		t.Fatal(err)
+	}
+
+	res := mustNew(t, f.copy, "x", "--no-setup")
+	if !strings.Contains(res.stderr, "app.env") {
+		t.Fatalf("stderr should warn about the missing env target:\n%s", res.stderr)
+	}
+	if _, err := os.Stat(filepath.Join(f.wtPath("x"), "frontend", "app.env")); err == nil {
+		t.Fatal("env target must not be invented, e.g. from staging")
+	}
+}
+
+// An existing branch that no worktree holds is checked out as is, in the
+// repos that have it; the others branch from HEAD.
+func TestWtNewReusesUnattachedBranch(t *testing.T) {
+	f := seedWtWorkspace(t)
+	gitT(t, f.repo("frontend"), "branch", "wt/r", "main")
+	mainSHA := gitT(t, f.repo("frontend"), "rev-parse", "main")
+
+	mustNew(t, f.copy, "r", "--no-setup")
+	if got := gitT(t, filepath.Join(f.wtPath("r"), "frontend"), "rev-parse", "HEAD"); got != mainSHA {
+		t.Fatalf("frontend at %s, want the reused branch tip %s", got, mainSHA)
+	}
+	if got, want := gitT(t, filepath.Join(f.wtPath("r"), "backend"), "rev-parse", "HEAD"), gitT(t, f.repo("backend"), "rev-parse", "HEAD"); got != want {
+		t.Fatalf("backend at %s, want copy HEAD %s", got, want)
+	}
+}
