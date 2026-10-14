@@ -43,6 +43,7 @@ func newWorktreeCmd() *cobra.Command {
 		newWorktreePathCmd(&jsonOut),
 		newWorktreeRmCmd(&jsonOut),
 		newWorktreeExecCmd(&jsonOut),
+		newWorktreeLsCmd(&jsonOut),
 	)
 	return cmd
 }

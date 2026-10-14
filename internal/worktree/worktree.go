@@ -89,7 +89,7 @@ func Path(copyPath string, policy config.WorktreePolicy, name string) string {
 // IsManaged reports whether root is both marked and registered as a linked
 // worktree of the meta repo -- the only shape mws treats as its own.
 func IsManaged(ctx context.Context, metaRoot, root string) (bool, error) {
-	if st, err := os.Stat(filepath.Join(root, project.WorktreeMarkerFileName)); err != nil || !st.Mode().IsRegular() {
+	if !hasMarker(root) {
 		return false, nil
 	}
 	list, err := git.Worktrees(ctx, metaRoot)
