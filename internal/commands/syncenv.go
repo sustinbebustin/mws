@@ -21,7 +21,12 @@ staged file from <meta>/.envs/<repo>/<source> into <working-copy>/<repo>/<target
 Targets are overwritten. Missing staged sources are skipped with a warning.
 
 With no argument, defaults to the working copy that contains cwd. Run from
-the meta root and pass a name to target a specific copy.`,
+the meta root and pass a name to target a specific copy.
+
+Worktrees are not refreshed: a worktree gets copies of the working copy's env
+targets when it is created and keeps them. Run from inside a worktree,
+sync-env updates its working copy, not the worktree; copy a changed file into
+the worktree by hand.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var name string
