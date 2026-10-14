@@ -1,8 +1,10 @@
 package skeleton
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -71,6 +73,37 @@ func TestRenderEmbeddedSkeleton(t *testing.T) {
 	// Verbatim harness file copied through.
 	if _, err := os.Stat(filepath.Join(dst, ".mws", ".claude", "settings.json")); err != nil {
 		t.Fatalf(".mws/.claude/settings.json missing: %v", err)
+	}
+
+	// Claude's worktree hooks are wired to the mws adapters.
+	raw, err := os.ReadFile(filepath.Join(dst, ".mws", ".claude", "settings.json"))
+	if err != nil {
+		t.Fatalf("read settings.json: %v", err)
+	}
+	var settings struct {
+		Hooks map[string][]struct {
+			Hooks []struct {
+				Command string `json:"command"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(raw, &settings); err != nil {
+		t.Fatalf("settings.json is not valid JSON: %v", err)
+	}
+	for event, want := range map[string]string{
+		"WorktreeCreate": "mws wt hook create",
+		"WorktreeRemove": "mws wt hook remove",
+		"SubagentStop":   "mws wt hook subagent-stop",
+	} {
+		var got []string
+		for _, group := range settings.Hooks[event] {
+			for _, h := range group.Hooks {
+				got = append(got, h.Command)
+			}
+		}
+		if !slices.Contains(got, want) {
+			t.Fatalf("settings.json hooks.%s = %q; want it to contain %q", event, got, want)
+		}
 	}
 
 	// CLAUDE.md should NOT appear at meta root -- it lives in .mws/ for fan-out.

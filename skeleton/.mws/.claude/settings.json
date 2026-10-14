@@ -22,6 +22,36 @@
           }
         ]
       }
+    ],
+    "WorktreeCreate": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "mws wt hook create"
+          }
+        ]
+      }
+    ],
+    "WorktreeRemove": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "mws wt hook remove"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "mws wt hook subagent-stop"
+          }
+        ]
+      }
     ]
   },
   "plansDirectory": "./.workspace/work/_plans"
