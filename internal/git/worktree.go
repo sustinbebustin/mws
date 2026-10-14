@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -66,6 +67,50 @@ func AddWorktreeNewBranch(ctx context.Context, repoDir, path, branch, base strin
 func RemoveWorktreeForce(ctx context.Context, repoDir, path string) error {
 	removeErr := run(ctx, repoDir, "worktree", "remove", "--force", "--force", path)
 	return errors.Join(removeErr, run(ctx, repoDir, "worktree", "prune"))
+}
+
+// RemoveWorktree unregisters the linked worktree at path and deletes its
+// files. git refuses when the worktree has local changes or is locked.
+func RemoveWorktree(ctx context.Context, repoDir, path string) error {
+	return run(ctx, repoDir, "worktree", "remove", path)
+}
+
+// PruneWorktrees drops registrations of linked worktrees whose directories
+// are gone.
+func PruneWorktrees(ctx context.Context, repoDir string) error {
+	return run(ctx, repoDir, "worktree", "prune")
+}
+
+// RepairWorktree reconnects repoDir's registration of the linked worktree at
+// path after either side moved.
+func RepairWorktree(ctx context.Context, repoDir, path string) error {
+	return run(ctx, repoDir, "worktree", "repair", path)
+}
+
+// IsDirty reports whether the checkout at dir has modified, staged or
+// untracked (not ignored) files.
+func IsDirty(ctx context.Context, dir string) (bool, error) {
+	out, err := capture(ctx, dir, "status", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) != "", nil
+}
+
+// UniqueCommits counts the commits on branch that no other local branch,
+// tag or remote-tracking branch reaches: the work lost if branch is deleted.
+// Worktree HEADs are deliberately not counted as other refs.
+func UniqueCommits(ctx context.Context, repoDir, branch string) (int, error) {
+	out, err := capture(ctx, repoDir, "rev-list", "--count", "refs/heads/"+branch,
+		"--not", "--exclude="+branch, "--branches", "--tags", "--remotes")
+	if err != nil {
+		return 0, err
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return 0, fmt.Errorf("git rev-list --count printed %q: %w", strings.TrimSpace(out), err)
+	}
+	return n, nil
 }
 
 // DeleteBranch force-deletes a local branch.
