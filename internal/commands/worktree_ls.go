@@ -70,7 +70,11 @@ func printWorktrees(w io.Writer, entries []worktree.Entry, all bool) error {
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", name, e.State, e.Path, e.Detail)
 			continue
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", name, describeRepos(e.Repos), describeLive(e.Live), describeAge(e))
+		repos := describeRepos(e.Repos)
+		if len(e.RootFiles) > 0 {
+			repos += ", root:" + strings.Join(e.RootFiles, ",")
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", name, repos, describeLive(e.Live), describeAge(e))
 	}
 	return tw.Flush()
 }

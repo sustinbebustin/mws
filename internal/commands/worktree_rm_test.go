@@ -137,6 +137,48 @@ func TestWtRmReportsRemovalsBeforeAFailure(t *testing.T) {
 	assertRemoved(t, f, "x")
 }
 
+// The root's .gitignore hides every root entry from git, so mws itself must
+// notice work there: new files and directories, and edited copies.
+func TestWtRmRefusesRootFilesUnlessForced(t *testing.T) {
+	for name, change := range map[string]func(root string){
+		"new file":    func(root string) { writeFileAll(t, filepath.Join(root, "plan.md"), "plan") },
+		"new dir":     func(root string) { writeFileAll(t, filepath.Join(root, "notes", "a.md"), "a") },
+		"edited copy": func(root string) { writeFileAll(t, filepath.Join(root, ".ports.env"), "PITCH_SLOT=9\n") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := seedWtWorkspace(t)
+			mustNew(t, f.copy, "x", "--no-setup")
+			change(f.wtPath("x"))
+
+			res := runWt(t, f.copy, "rm", "x", "--json")
+			if res.code != 3 {
+				t.Fatalf("exit %d, want 3\nstderr: %s", res.code, res.stderr)
+			}
+			if e := decodeError(t, res); e.Code != "refused" || !strings.Contains(e.Message, "root") || !strings.Contains(e.Message, "--force") {
+				t.Fatalf("error = %+v, want refused naming the root and --force", e)
+			}
+
+			if res := runWt(t, f.copy, "rm", "x", "--force"); res.code != 0 {
+				t.Fatalf("--force: exit %d\nstderr: %s", res.code, res.stderr)
+			}
+			assertRemoved(t, f, "x")
+		})
+	}
+}
+
+// A copy-root file that changes after creation leaves the worktree's own,
+// untouched copy pristine.
+func TestWtRmIgnoresChangesInTheCopyRoot(t *testing.T) {
+	f := seedWtWorkspace(t)
+	mustNew(t, f.copy, "x", "--no-setup")
+	writeFileAll(t, filepath.Join(f.copy, ".ports.env"), "PITCH_SLOT=9\n")
+
+	if res := runWt(t, f.copy, "rm", "x"); res.code != 0 {
+		t.Fatalf("exit %d\nstderr: %s", res.code, res.stderr)
+	}
+	assertRemoved(t, f, "x")
+}
+
 // A detached HEAD's commits live only in that worktree's HEAD and reflog,
 // which git deletes along with the worktree.
 func TestWtRmRefusesDetachedCommitsUnlessForced(t *testing.T) {

@@ -15,9 +15,10 @@ import (
 // copy root: regular files are copied, non-repo directories (except the
 // worktrees dir) are linked. A copy-root entry shadows a harness entry of the
 // same name, as it does in the copy; the anchor's checked-out .gitignore is
-// never replaced.
-func carryRoot(r Reporter, metaRoot, copyPath, target, worktreesDir string) error {
-	return mirrorRoot(r, metaRoot, copyPath, target, worktreesDir, true)
+// never replaced. It returns the SHA-256 of each copied file by name.
+func carryRoot(r Reporter, metaRoot, copyPath, target, worktreesDir string) (map[string]string, error) {
+	copied := map[string]string{}
+	return copied, mirrorRoot(r, metaRoot, copyPath, target, worktreesDir, copied)
 }
 
 // Relink refreshes the links of the worktree at root: harness entries and the
@@ -25,7 +26,7 @@ func carryRoot(r Reporter, metaRoot, copyPath, target, worktreesDir string) erro
 // harness ones. Files copied into the root at creation are left alone; they
 // are the worktree's own from then on.
 func Relink(metaRoot, copyPath, root string, policy config.WorktreePolicy) error {
-	return mirrorRoot(silent{}, metaRoot, copyPath, root, policy.Dir, false)
+	return mirrorRoot(silent{}, metaRoot, copyPath, root, policy.Dir, nil)
 }
 
 // silent discards progress lines.
@@ -34,9 +35,10 @@ type silent struct{}
 func (silent) OK(string)   {}
 func (silent) Warn(string) {}
 
-// mirrorRoot is carryRoot, with copying the copy root's regular files
-// optional so a relink never overwrites the worktree's own copies.
-func mirrorRoot(r Reporter, metaRoot, copyPath, target, worktreesDir string, copyFiles bool) error {
+// mirrorRoot is carryRoot, copying the copy root's regular files only when
+// copied is non-nil (recording each copy's hash there), so a relink never
+// overwrites the worktree's own copies.
+func mirrorRoot(r Reporter, metaRoot, copyPath, target, worktreesDir string, copied map[string]string) error {
 	if _, err := project.LinkHarnessIntoWorkingCopy(metaRoot, target); err != nil {
 		return err
 	}
@@ -78,13 +80,16 @@ func mirrorRoot(r Reporter, metaRoot, copyPath, target, worktreesDir string, cop
 			r.OK(fmt.Sprintf("Linked %s", name))
 			continue
 		}
-		if !copyFiles {
+		if copied == nil {
 			continue
 		}
 		if err := os.Remove(dst); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 		if err := atomicfile.Copy(src, dst); err != nil {
+			return err
+		}
+		if copied[name], err = fileSHA256(dst); err != nil {
 			return err
 		}
 		r.OK(fmt.Sprintf("Copied %s", name))

@@ -114,6 +114,22 @@ func TestWtPruneKeepsAWorktreeWithADetachedRepo(t *testing.T) {
 	}
 }
 
+func TestWtPruneKeepsAWorktreeWithRootFiles(t *testing.T) {
+	f := seedWtWorkspace(t)
+	mustNew(t, f.copy, "x", "--no-setup")
+	writeFileAll(t, filepath.Join(f.wtPath("x"), "plan.md"), "plan")
+
+	for _, args := range [][]string{{"--dry-run"}, nil} {
+		out := runPrune(t, f.copy, args...)
+		if len(out.Removed) != 0 {
+			t.Fatalf("prune %v removed %+v, want x kept for its plan.md", args, out.Removed)
+		}
+		if reasons := strings.Join(out.keptReasons("x"), "; "); !strings.Contains(reasons, "plan.md") {
+			t.Fatalf("prune %v kept x for %q, want a reason naming plan.md", args, reasons)
+		}
+	}
+}
+
 func TestWtPruneKeepsTheWorktreeItRunsIn(t *testing.T) {
 	f := seedWtWorkspace(t)
 	mustNew(t, f.copy, "x", "--no-setup")

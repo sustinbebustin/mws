@@ -118,6 +118,9 @@ func keepReasons(e *Entry, callerWorktree string) []string {
 	if len(dirty) > 0 {
 		reasons = append(reasons, "modified or untracked files in "+strings.Join(dirty, ", "))
 	}
+	if len(e.RootFiles) > 0 {
+		reasons = append(reasons, "untracked or changed files at the root: "+strings.Join(e.RootFiles, ", "))
+	}
 	if len(e.Live) > 0 {
 		reasons = append(reasons, "in use by process(es) "+e.Live.Join(", "))
 	}

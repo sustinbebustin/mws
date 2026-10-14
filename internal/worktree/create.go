@@ -316,14 +316,15 @@ func (b *builder) build(ctx context.Context, r Reporter, opts NewOptions, plan [
 
 	copyPath := opts.Workspace.WorkingCopy
 	policy := opts.Config.WorktreePolicy()
-	if err := carryRoot(r, opts.Workspace.MetaRoot, copyPath, b.target, policy.Dir); err != nil {
+	copied, err := carryRoot(r, opts.Workspace.MetaRoot, copyPath, b.target, policy.Dir)
+	if err != nil {
 		return nil, failuref("carry working-copy state into %s: %w", b.target, err)
 	}
 	if err := carryEnvs(r, opts.Config, copyPath, b.target, plan); err != nil {
 		return nil, failuref("carry env files into %s: %w", b.target, err)
 	}
 
-	if err := writeMarker(b.target, Marker{Copy: copyPath, Name: opts.Name, Created: time.Now().UTC().Truncate(time.Second), MWSVersion: opts.Version}); err != nil {
+	if err := writeMarker(b.target, Marker{Copy: copyPath, Name: opts.Name, Created: time.Now().UTC().Truncate(time.Second), MWSVersion: opts.Version, Copied: copied}); err != nil {
 		return nil, failuref("write marker: %w", err)
 	}
 	return repos, nil

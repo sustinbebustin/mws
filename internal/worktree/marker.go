@@ -18,6 +18,10 @@ type Marker struct {
 	Name       string    `toml:"name"`
 	Created    time.Time `toml:"created"`
 	MWSVersion string    `toml:"mws_version"`
+	// Copied maps each root file copied from the copy at creation to the
+	// SHA-256 of its content, so removal can tell an edited copy from a
+	// pristine one.
+	Copied map[string]string `toml:"copied"`
 }
 
 // writeMarker creates the marker file of the worktree at root; it fails if

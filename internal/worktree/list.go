@@ -39,16 +39,19 @@ type RepoStatus struct {
 // Entry is one listed worktree. Repos, Live and Created are filled for
 // Managed entries; Detail explains an Orphan or Unmanaged one.
 type Entry struct {
-	Name       string       `json:"name"`
-	Path       string       `json:"path"`
-	Copy       string       `json:"copy"`
-	State      State        `json:"state"`
-	Detail     string       `json:"detail,omitempty"`
-	Repos      []RepoStatus `json:"repos"`
-	Dirty      bool         `json:"dirty"`
-	Live       PIDs         `json:"live"`
-	Created    *time.Time   `json:"created,omitempty"`
-	AgeSeconds int64        `json:"age_seconds,omitempty"`
+	Name   string       `json:"name"`
+	Path   string       `json:"path"`
+	Copy   string       `json:"copy"`
+	State  State        `json:"state"`
+	Detail string       `json:"detail,omitempty"`
+	Repos  []RepoStatus `json:"repos"`
+	// RootFiles lists root entries removal would lose (see rootChanges).
+	RootFiles []string `json:"root_files"`
+	// Dirty is set when a repo is dirty or RootFiles is not empty.
+	Dirty      bool       `json:"dirty"`
+	Live       PIDs       `json:"live"`
+	Created    *time.Time `json:"created,omitempty"`
+	AgeSeconds int64      `json:"age_seconds,omitempty"`
 }
 
 // UniqueCommits sums the unmerged commits across the entry's repos.
@@ -195,6 +198,10 @@ func (l lister) inspect(ctx context.Context, e *Entry) error {
 		e.Dirty = e.Dirty || ir.dirty
 		e.Repos = append(e.Repos, rs)
 	}
+	if e.RootFiles, err = rootChanges(e.Path, folderNames(repos)); err != nil {
+		return fmt.Errorf("inspect the root: %w", err)
+	}
+	e.Dirty = e.Dirty || len(e.RootFiles) > 0
 	if l.live.supported {
 		e.Live = append(e.Live, l.live.in(e.Path)...)
 	}

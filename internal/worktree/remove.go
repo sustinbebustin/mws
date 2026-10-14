@@ -75,7 +75,8 @@ type RemoveOptions struct {
 	Config    *config.Config
 	Names     []string
 	// Force discards modified and untracked files, and commits on a detached
-	// HEAD that no ref reaches, in the inner repos.
+	// HEAD that no ref reaches, in the inner repos, plus root files mws did
+	// not create or that changed since creation.
 	Force bool
 	// KeepBranch keeps every branch, merged or not.
 	KeepBranch bool
@@ -131,6 +132,13 @@ func Remove(ctx context.Context, r Reporter, opts RemoveOptions) ([]Removed, err
 			if dirty := dirtyFolders(repos); len(dirty) > 0 {
 				return nil, refusedf("worktree %s has modified or untracked files in %s; nothing was removed; commit or stash them there, or rerun with --force to discard them", name, strings.Join(dirty, ", "))
 			}
+			changed, err := rootChanges(root, folderNames(repos))
+			if err != nil {
+				return nil, failuref("inspect the root of worktree %s: %w", name, err)
+			}
+			if len(changed) > 0 {
+				return nil, refusedf("worktree %s has files at its root that mws did not put there or that changed since creation (%s), and no git repo tracks them; nothing was removed; move them out of %s, or rerun with --force to discard them", name, strings.Join(changed, ", "), root)
+			}
 			detached, err := detachedWork(ctx, repos)
 			if err != nil {
 				return nil, failuref("inspect worktree %s: %w", name, err)
@@ -168,6 +176,14 @@ func Remove(ctx context.Context, r Reporter, opts RemoveOptions) ([]Removed, err
 		out = append(out, removed)
 	}
 	return out, nil
+}
+
+func folderNames(repos []innerRepo) []string {
+	names := make([]string, len(repos))
+	for i, ir := range repos {
+		names[i] = ir.folder
+	}
+	return names
 }
 
 func dirtyFolders(repos []innerRepo) []string {
