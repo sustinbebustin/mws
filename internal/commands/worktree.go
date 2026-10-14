@@ -31,7 +31,7 @@ func newWorktreeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "worktree",
 		Aliases: []string{"wt"},
-		Short:   "Create and locate worktrees of a working copy",
+		Short:   "Create, list, run in and remove worktrees of a working copy",
 		Long:    worktreeLong,
 	}
 	cmd.PersistentFlags().BoolVar(&jsonOut, "json", false, "print results as JSON")
