@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/huh"
@@ -206,11 +205,7 @@ func refuseLiveWorktrees(copyPath string, wts []worktree.Entry) error {
 		if len(e.Live) == 0 {
 			continue
 		}
-		pids := make([]string, len(e.Live))
-		for i, pid := range e.Live {
-			pids[i] = strconv.Itoa(pid)
-		}
-		live = append(live, fmt.Sprintf("%s (process %s)", e.Name, strings.Join(pids, ", ")))
+		live = append(live, fmt.Sprintf("%s (process %s)", e.Name, joinPIDs(e.Live, ", ")))
 	}
 	if len(live) == 0 {
 		return nil
