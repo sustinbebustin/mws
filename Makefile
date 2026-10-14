@@ -17,7 +17,7 @@ lint:
 	golangci-lint run
 
 vuln:
-	$(GO) run golang.org/x/vuln/cmd/govulncheck@latest ./...
+	$(GO) run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
 # Mirror of the .github/workflows/ci.yml jobs. Run before pushing.
 ci: build test lint vuln
