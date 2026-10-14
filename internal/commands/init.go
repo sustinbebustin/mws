@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
@@ -18,6 +19,7 @@ import (
 	"github.com/sustinbebustin/mws/internal/git"
 	"github.com/sustinbebustin/mws/internal/project"
 	"github.com/sustinbebustin/mws/internal/skeleton"
+	"github.com/sustinbebustin/mws/internal/ui"
 )
 
 // firstWorkingCopyName is the conventional name for the working copy created
@@ -178,7 +180,7 @@ func collectInitPlan(arg, cwd string, f initFlags) (*initPlan, error) {
 			Value(&p.ParentDir))
 	}
 	if len(fields) > 0 {
-		if err := huh.NewForm(huh.NewGroup(fields...)).Run(); err != nil {
+		if err := runForm(huh.NewGroup(fields...)); err != nil {
 			return nil, err
 		}
 	}
@@ -249,19 +251,18 @@ func promptRepoLoop(prompt string) ([]config.Repo, error) {
 	var repos []config.Repo
 	for {
 		var add bool
-		if err := huh.NewConfirm().
+		if err := runField(huh.NewConfirm().
 			Title(prompt).
 			Affirmative("Add another").
 			Negative("Done").
-			Value(&add).
-			Run(); err != nil {
+			Value(&add)); err != nil {
 			return nil, err
 		}
 		if !add {
 			return repos, nil
 		}
 		var repoURL, folder string
-		if err := huh.NewForm(huh.NewGroup(
+		if err := runForm(huh.NewGroup(
 			huh.NewInput().
 				Title("Repo URL").
 				Description("git@host:org/name.git or https://host/org/name").
@@ -271,7 +272,7 @@ func promptRepoLoop(prompt string) ([]config.Repo, error) {
 				Title("Local folder").
 				Description("Defaults to the repo name from the URL.").
 				Value(&folder),
-		)).Run(); err != nil {
+		)); err != nil {
 			return nil, err
 		}
 		repoURL = strings.TrimSpace(repoURL)
@@ -284,23 +285,22 @@ func promptRepoLoop(prompt string) ([]config.Repo, error) {
 }
 
 func showSummary(r Reporter, p *initPlan) {
-	metaDir, mainCopy := p.metaDir(), p.mainCopy()
-
-	r.Heading("\nPlanned actions")
-	r.Info(fmt.Sprintf("  meta workspace : %s", metaDir))
-	r.Info(fmt.Sprintf("  working copy   : %s", mainCopy))
-	if p.WorkingCopiesDir != "" {
-		r.Info(fmt.Sprintf("  copies subdir  : %s/", p.WorkingCopiesDir))
+	rows := []ui.KV{
+		{Key: "meta workspace", Value: p.metaDir()},
+		{Key: "working copy", Value: p.mainCopy()},
 	}
-	r.Info(fmt.Sprintf("  description    : %s", or(p.Description, "(none)")))
-	if len(p.Repos) == 0 {
-		r.Info("  native repos   : (none)")
-	} else {
-		r.Info("  native repos   :")
+	if p.WorkingCopiesDir != "" {
+		rows = append(rows, ui.KV{Key: "copies subdir", Value: p.WorkingCopiesDir + "/"})
+	}
+	rows = append(rows, ui.KV{Key: "description", Value: or(p.Description, "(none)")})
+	repos := ui.KV{Key: "native repos", Value: "(none)"}
+	if len(p.Repos) > 0 {
+		repos.Value = ""
 		for _, repo := range p.Repos {
-			r.Info(fmt.Sprintf("    - %s  %s", repo.Folder, repo.URL))
+			repos.Items = append(repos.Items, fmt.Sprintf("- %s  %s", repo.Folder, repo.URL))
 		}
 	}
+	r.Summary("Planned actions", append(rows, repos))
 }
 
 func executeInit(ctx context.Context, r Reporter, p *initPlan) error {
@@ -367,12 +367,13 @@ func executeInit(ctx context.Context, r Reporter, p *initPlan) error {
 			continue
 		}
 		r.Heading(fmt.Sprintf("Cloning %s ...", repo.Folder))
+		start := time.Now()
 		if err := git.Clone(ctx, repo.URL, target); err != nil {
 			r.Fail(fmt.Sprintf("%s: %v", repo.Folder, err))
 			failed = append(failed, repo.Folder)
 			continue
 		}
-		r.OK(fmt.Sprintf("Cloned %s", repo.Folder))
+		r.Done(fmt.Sprintf("Cloned %s", repo.Folder), time.Since(start))
 	}
 
 	if anyEnvMapping(p.Repos) {

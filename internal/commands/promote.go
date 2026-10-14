@@ -76,11 +76,10 @@ func runPromote(r Reporter, arg string) error {
 			opts = append(opts, huh.NewOption(name, name))
 		}
 		var picked string
-		if err := huh.NewSelect[string]().
+		if err := runField(huh.NewSelect[string]().
 			Title("Select entry to promote into the harness").
 			Options(opts...).
-			Value(&picked).
-			Run(); err != nil {
+			Value(&picked)); err != nil {
 			return err
 		}
 		arg = filepath.Join(ws.WorkingCopy, picked)

@@ -15,6 +15,7 @@ import (
 
 	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/project"
+	"github.com/sustinbebustin/mws/internal/ui"
 )
 
 // legacyMetaSuffix is the directory suffix the old sibling-meta layout used.
@@ -75,12 +76,11 @@ func runMigrate(r Reporter, arg string, f confirmFlags) error {
 		if !canPrompt() {
 			return noPrompt("no path to migrate given", "mws migrate <old-meta-dir> --dry-run", "mws migrate <old-meta-dir> --yes")
 		}
-		if err := huh.NewInput().
+		if err := runField(huh.NewInput().
 			Title("Path to migrate").
 			Description("Path to the old <name>-meta directory or any of its working copies.").
 			Validate(validateExistingDir).
-			Value(&arg).
-			Run(); err != nil {
+			Value(&arg)); err != nil {
 			return err
 		}
 	}
@@ -94,17 +94,18 @@ func runMigrate(r Reporter, arg string, f confirmFlags) error {
 		return err
 	}
 
-	r.Heading("Planned migration")
-	r.Info(fmt.Sprintf("  old meta : %s", plan.OldMeta))
-	r.Info(fmt.Sprintf("  new meta : %s", plan.NewMeta))
-	if len(plan.OldPeers) == 0 {
-		r.Info("  peers    : (none)")
-	} else {
-		r.Info("  peers:")
+	peers := ui.KV{Key: "peers", Value: "(none)"}
+	if len(plan.OldPeers) > 0 {
+		peers.Value = ""
 		for _, peer := range plan.OldPeers {
-			r.Info(fmt.Sprintf("    %s -> %s/", peer, plan.Renames[peer]))
+			peers.Items = append(peers.Items, fmt.Sprintf("%s -> %s/", peer, plan.Renames[peer]))
 		}
 	}
+	r.Summary("Planned migration", []ui.KV{
+		{Key: "old meta", Value: plan.OldMeta},
+		{Key: "new meta", Value: plan.NewMeta},
+		peers,
+	})
 
 	if f.dryRun {
 		r.Info("Dry run: nothing was changed.")

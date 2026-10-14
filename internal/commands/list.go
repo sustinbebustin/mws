@@ -6,8 +6,10 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
-
 	"github.com/sustinbebustin/mws/internal/clierr"
+	"github.com/sustinbebustin/mws/internal/config"
+	"github.com/sustinbebustin/mws/internal/project"
+	"github.com/sustinbebustin/mws/internal/ui"
 	"github.com/sustinbebustin/mws/internal/worktree"
 )
 
@@ -46,19 +48,9 @@ func runList(o output) error {
 	if err != nil {
 		return err
 	}
-	policy := cfg.WorktreePolicy()
-
-	peers, err := ws.EnumerateCopies()
+	copies, err := collectCopies(ws, cfg)
 	if err != nil {
-		return o.fail(clierr.Failuref("list the working copies of %s: %w", ws.MetaRoot, err))
-	}
-	copies := make([]copyJSON, 0, len(peers))
-	for _, peer := range peers {
-		roots, err := worktree.Roots(peer, policy)
-		if err != nil {
-			return o.fail(clierr.Failuref("count worktrees of %s: %w", peer, err))
-		}
-		copies = append(copies, copyJSON{Name: filepath.Base(peer), Path: peer, Current: peer == ws.WorkingCopy, Worktrees: len(roots)})
+		return o.fail(err)
 	}
 	return o.result(struct {
 		Meta   string     `json:"meta"`
@@ -70,6 +62,7 @@ func runList(o output) error {
 			r.Info("No working copies.")
 			return nil
 		}
+		s := ui.Detect(w)
 		for _, c := range copies {
 			marker := "  "
 			if c.Current {
@@ -79,10 +72,32 @@ func runList(o output) error {
 			if c.Worktrees > 0 {
 				line += fmt.Sprintf("  (+%d %s)", c.Worktrees, plural(c.Worktrees, "worktree", "worktrees"))
 			}
+			if c.Current {
+				line = s.Brand(line)
+			}
 			if _, err := fmt.Fprintln(w, line); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+}
+
+// collectCopies lists the working copies of ws with their worktree counts,
+// marking the one containing the current directory.
+func collectCopies(ws *project.Workspace, cfg *config.Config) ([]copyJSON, error) {
+	peers, err := ws.EnumerateCopies()
+	if err != nil {
+		return nil, clierr.Failuref("list the working copies of %s: %w", ws.MetaRoot, err)
+	}
+	policy := cfg.WorktreePolicy()
+	copies := make([]copyJSON, 0, len(peers))
+	for _, peer := range peers {
+		roots, err := worktree.Roots(peer, policy)
+		if err != nil {
+			return nil, clierr.Failuref("count worktrees of %s: %w", peer, err)
+		}
+		copies = append(copies, copyJSON{Name: filepath.Base(peer), Path: peer, Current: peer == ws.WorkingCopy, Worktrees: len(roots)})
+	}
+	return copies, nil
 }

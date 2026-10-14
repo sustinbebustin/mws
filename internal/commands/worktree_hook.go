@@ -78,7 +78,7 @@ func newWorktreeHookCmd() *cobra.Command {
 			// finishing, so even stray arguments must not fail it.
 			Args: cobra.ArbitraryArgs,
 			RunE: func(cmd *cobra.Command, _ []string) error {
-				r := consoleReporter{w: cmd.ErrOrStderr()}
+				r := reporterFor(cmd.ErrOrStderr())
 				if err := runHookSubagentStop(cmd.Context(), r, cmd.InOrStdin()); err != nil {
 					r.Warn(err.Error())
 				}
@@ -140,7 +140,7 @@ func runHookCreate(ctx context.Context, in io.Reader, out, errW io.Writer) error
 	err = runWorktreeNew(ctx, output{stdout: out, stderr: errW}, ws, cfg, p.Name, wtNewFlags{})
 	var se *setupFailedError
 	if errors.As(err, &se) {
-		consoleReporter{w: errW}.Warn(se.Error())
+		reporterFor(errW).Warn(se.Error())
 		return nil
 	}
 	return err
@@ -171,7 +171,7 @@ func runHookRemove(ctx context.Context, in io.Reader, errW io.Writer) error {
 	if name == "" || ws.Worktree != root {
 		return fmt.Errorf("%s is not the root of a worktree mws manages, so mws will not remove it; nothing was removed; inspect it and remove it by hand if it is yours", p.WorktreePath)
 	}
-	r := consoleReporter{w: errW}
+	r := reporterFor(errW)
 	removed, err := worktree.Remove(ctx, r, worktree.RemoveOptions{Workspace: ws, Config: cfg, Names: []string{name}})
 	if err != nil {
 		return err

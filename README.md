@@ -148,6 +148,8 @@ For parallel agents inside one working copy, `mws wt new <name>` creates a **wor
 
 Every command runs without prompts when given its arguments and flags, and `mws <command> --help` shows examples. Without a terminal on stdin mws never prompts: a missing input fails with exit `2` and the invocation that supplies it, and a confirmation needs `--yes`. Results go to stdout (paths, lists, `--json`), progress to stderr, so `cd "$(mws clone feature-x --no-optional --setup | tail -n1)"` works. Exit codes: `0` ok, `1` failure, `2` usage, `3` refused by a safety check, `4` not found. Re-running a command that half-succeeded finishes it, and removing something already gone exits `4` with a message saying so. See [ADR-0012](./docs/adr/0012-headless-cli-contract.md).
 
+Output is coloured only when the stream is a terminal, and colour is the only difference: piped output carries the same text, `--json` is untouched, and `NO_COLOR` is respected. See [ADR-0013](./docs/adr/0013-colour-on-a-terminal-only.md).
+
 ## Configuration
 
 The meta workspace's `.mws.toml` lists the native repos, optional env-file mappings, and optional setup commands. `mws clone` reads it to know what to clone, copy, and run.

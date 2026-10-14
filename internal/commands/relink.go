@@ -381,15 +381,14 @@ func applyDivergences(r Reporter, p relinkPlan, choose chooser) error {
 
 func huhDivergencePrompt(peerName, fileName string) (resolution, error) {
 	choice := resolveSkip
-	err := huh.NewSelect[resolution]().
+	err := runField(huh.NewSelect[resolution]().
 		Title(fmt.Sprintf("%s: %s differs from meta. Which to keep?", peerName, fileName)).
 		Options(
 			huh.NewOption("Peer (promote into meta, other peers will link to it)", resolvePeer),
 			huh.NewOption("Meta (discard peer edits, restore symlink)", resolveMeta),
 			huh.NewOption("Skip (leave diverged)", resolveSkip),
 		).
-		Value(&choice).
-		Run()
+		Value(&choice))
 	return choice, err
 }
 

@@ -106,11 +106,10 @@ func runRm(ctx context.Context, r Reporter, name string, f rmFlags) error {
 		for _, p := range peers {
 			opts = append(opts, huh.NewOption(filepath.Base(p), filepath.Base(p)))
 		}
-		if err := huh.NewSelect[string]().
+		if err := runField(huh.NewSelect[string]().
 			Title("Select working copy to remove").
 			Options(opts...).
-			Value(&name).
-			Run(); err != nil {
+			Value(&name)); err != nil {
 			return err
 		}
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/sustinbebustin/mws/internal/clierr"
 	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/project"
+	"github.com/sustinbebustin/mws/internal/ui"
 )
 
 // output is where a command reports: its result on stdout (one JSON object
@@ -26,7 +27,13 @@ func newOutput(cmd *cobra.Command, jsonOut bool) output {
 	return output{stdout: cmd.OutOrStdout(), stderr: cmd.ErrOrStderr(), json: jsonOut}
 }
 
-func (o output) reporter() consoleReporter { return consoleReporter{w: o.stderr} }
+func (o output) reporter() consoleReporter { return reporterFor(o.stderr) }
+
+// PrintError writes a command's final error to w, coloured when w is a
+// terminal.
+func PrintError(w io.Writer, err error) {
+	fmt.Fprintln(w, ui.Detect(w).Error(err))
+}
 
 // fail prints err as the JSON error object under --json and returns it for
 // the exit code and the stderr message.

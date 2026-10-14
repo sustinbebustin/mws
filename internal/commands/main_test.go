@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"testing"
 )
@@ -17,7 +16,7 @@ func TestMain(m *testing.M) {
 		root.SetArgs(os.Args[1:])
 		err := root.ExecuteContext(context.Background())
 		if err != nil && !Silent(err) {
-			fmt.Fprintln(os.Stderr, err)
+			PrintError(os.Stderr, err)
 		}
 		os.Exit(ExitCode(err))
 	}
