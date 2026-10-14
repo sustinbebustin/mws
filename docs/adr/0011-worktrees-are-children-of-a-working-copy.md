@@ -1,0 +1,41 @@
+# Worktrees are children of a working copy
+
+`mws worktree` (alias `mws wt`) creates a **Worktree** inside a **Working copy**, at `<copy>/.wt/<name>/`. It holds one `git worktree` of every **Native repo** in the copy, on branch `wt/<name>` started at the launching checkout's HEAD. It symlinks the same **Harness dir** entries, copies the copy's per-copy state (every regular file at the copy root, plus the `[[repos.envs]]` targets read from the copy's own repos), and runs setup. The worktree root is a detached, sparse linked worktree of the **Meta workspace** repo that checks out only `/.gitignore`; a marker file, `.mws-worktree.toml`, records copy, name, creation time and mws version.
+
+```
+<copy>/.wt/<name>/
+  .git                   # gitfile -> <meta>/.git/worktrees/<id> (detached anchor)
+  .gitignore             # the meta allowlist; the only checked-out file (sparse)
+  .mws-worktree.toml     # marker: copy, name, created, mws_version
+  frontend/ backend/     # git worktrees of the copy's repos, on wt/<name>
+  .claude CLAUDE.md ...  # relative symlinks into <meta>/.mws/
+  .ports.env .mcp.json   # copied from the copy root
+  .scratch               # non-repo directories at the copy root, symlinked
+```
+
+Three Claude Code hooks (`WorktreeCreate`, `WorktreeRemove`, `SubagentStop`) call the hidden `mws wt hook create|remove|subagent-stop`, so `claude -w`, `EnterWorktree` and `isolation: "worktree"` subagents all produce this layout. `mws init` writes the three entries into the skeleton's `.claude/settings.json`.
+
+## Why
+
+Parallel agents inside one working copy each need their own checkout of every native repo, with the copy's ports, env files, MCP config and dependencies. Without a shared answer, every run improvised a layout (a sibling `<copy>.wt/`, `<copy>/.worktrees/NN/`, ...) that lacked that state, so checks failed or pointed at the wrong stack. Claude Code's own worktree features cannot fill the gap as shipped: from a working copy they create a worktree of the meta workspace repo (which holds neither native repo), and their fallback removal force-deletes uncommitted work. mws already holds every input the job needs (the native repo list, env mappings, setup commands, harness fan-out, trash and restore), so it owns the lifecycle and Claude is reduced to calling it.
+
+## Considered options
+
+- **Sibling `<copy>.wt/` or a directory outside the meta workspace.** Rejected -- `mws rm` would orphan the worktrees instead of carrying them, and they would lose the copy's trust and local-scope MCP configuration, which Claude keys on the project path. Nested under the copy they move with `mws rm` and `mws restore`, inherit both, and stay invisible to `mws list` and `mws relink` because the directory name starts with a dot (listed instead as `(+N worktrees)` on the copy).
+- **A worktree root with no git identity, or a `--no-checkout` meta worktree.** Rejected. Claude refuses hook directories that resolve into the meta checkout, so the root needs its own git identity. A plain no-checkout root shows every tracked meta file as deleted, `git add -A` would stage the inner repos as embedded repositories, and git refuses the symlinked harness `.gitignore` on every command. A detached anchor sparse-checked-out to `/.gitignore` is clean, makes `git add -A` stage nothing, and leaves the real allowlist file in place. It is the only git identity at the root; bare `git` there is still the wrong tool and the harness denies it.
+- **Relying on the allowlist `.gitignore` for search.** Rejected. Checked out at a worktree root, the meta allowlist (`/*`) makes plain `rg` ignore everything, which blinds agents' grep. The harness `.ignore` (which ripgrep reads next to `.gitignore`) needs `!/*` first to re-include the root entries, and `.wt/` so searches from the copy root do not descend into worktrees. mws cannot fix this: `.ignore` lives in the harness, so the skeleton and each project own it.
+- **Branch names `<type>/<desc>` or renaming after the fact.** Rejected. Claude's `Agent` tool takes no name for `isolation: "worktree"`, so subagent worktrees are `agent-<hex>`. Every native repo gets `wt/<name>`, never renamed: no rename step in every implementer prompt, the directory-to-branch mapping stays truthful for `ls` and `rm`, and the `wt/` namespace keeps these branches apart from integration branches. `--branch` overrides it for named runs, and an override is never deleted by mws.
+- **Relying on Claude to clean up.** Rejected. Verified against Claude Code: without a create hook Claude makes a locked meta-repo worktree; without a remove hook its fallback `git worktree remove --force` deletes uncommitted work in the inner repos; `WorktreeRemove` never fires for finished subagents or `-p` runs. `SubagentStop` fires with `cwd` set to the subagent's worktree, so the stop hook removes worktrees that hold no work. Anything it keeps (dirty or with commits) waits for `mws wt rm` or `mws wt prune`.
+- **A Claude launcher or an mws PreToolUse isolation guard.** Rejected. `claude -p -w <name>` already gets Claude's isolation enforcement, and a guard cannot reproduce Claude's cwd analysis. `mws wt exec <name> -- <cmd>` is the generic "run in that worktree".
+- **Per-worktree ports and Supabase stacks.** Out of scope. Worktrees share the copy's ports and stack by copy; keeping them off that stack is a harness policy, not an mws one.
+
+## Consequences
+
+- **Removal never loses work.** `mws wt rm` refuses (exit 3) a directory that is not both marked and registered, a native repo with modified or untracked files (`--force` discards them), and a worktree some process outside its own process tree runs in. It checks every name before removing any. It deletes a branch named `<prefix><name>` only when no other branch, tag or remote-tracking branch reaches all of its commits; otherwise the branch is kept and reported, so a merger can still merge it after the directory is gone. `mws wt prune` is `rm` without `--force` applied to every clean, idle, fully merged worktree except the one it runs in.
+- **Liveness ignores the caller.** Hooks run with their cwd inside the worktree, so the `/proc` cwd scan skips mws's own pid and its ancestors, and `rm` changes to the meta root first. The scan needs `/proc`; elsewhere it is skipped with a warning.
+- **Create is atomic until the marker is written.** A failure removes the inner worktrees, created branches, anchor and directory. A setup failure after that keeps the worktree, prints its path and exits 1 (the create hook still exits 0, so the session proceeds). `mws wt new` is idempotent for an existing worktree, which absorbs Claude re-invoking the hook on name reuse.
+- **The hooks fail closed.** `hook create` and `hook remove` exit 1 on any error, including a refusal, so Claude creates no meta-repo worktree and keeps a directory that is not clean. `hook subagent-stop` always exits 0 (exit 2 would block the subagent from stopping) and removes only when every native repo is clean and no branch holds a commit no other ref reaches. A machine whose `mws` predates `wt hook` fails closed the same way.
+- **Trash and restore stay anchor-aware.** `mws rm` repairs the registrations to the trashed path, `mws restore` runs `git worktree repair` on the anchor and each inner worktree, and `mws trash prune|empty` finish with a meta `git worktree prune`. Without this a rename left both gitfiles dangling and the first prune dropped the anchor. `mws rm <copy>` refuses while a worktree has a live process. `mws sync-env` does not refresh worktrees.
+- **Exit codes distinguish refusals.** `0` ok, `1` failure, `2` usage, `3` refused by a safety check; `--json` prints `{"error": {"code", "message"}}` (`usage`, `refused`, `failure`, `setup_failed`).
+- **Known limit.** `EnterWorktree` allows `/` in names; mws names follow the working-copy alphabet, so such a create exits 1 and Claude creates nothing.
+- **Config.** An optional `[worktrees]` table (`dir`, `branch_prefix`, `repo_setup`, `[[worktrees.setup]]`) read through `Config.WorktreePolicy()`; an existing `.mws.toml` round-trips unchanged. See [config.md](../config.md#worktrees).
