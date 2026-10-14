@@ -27,6 +27,8 @@ Worktrees are not refreshed: a worktree gets copies of the working copy's env
 targets when it is created and keeps them. Run from inside a worktree,
 sync-env updates its working copy, not the worktree; copy a changed file into
 the worktree by hand.`,
+		Example: `  mws sync-env
+  mws sync-env feature-x`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var name string

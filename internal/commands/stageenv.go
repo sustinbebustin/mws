@@ -23,6 +23,8 @@ clones (and explicit sync-env calls) will reproduce.
 
 With no argument, defaults to the working copy that contains cwd. Run from
 the meta root and pass a name to target a specific copy.`,
+		Example: `  mws stage-env
+  mws stage-env feature-x`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var name string

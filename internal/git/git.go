@@ -79,11 +79,12 @@ func run(ctx context.Context, cwd string, args ...string) error {
 	return nil
 }
 
-// runStreaming executes `git <args...>` with stdout/stderr inherited so the user sees progress live.
+// runStreaming executes `git <args...>` with its output on stderr so the user
+// sees progress live and mws's stdout stays reserved for results.
 func runStreaming(ctx context.Context, cwd string, args ...string) error {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = cwd
-	cmd.Stdout = os.Stdout
+	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)

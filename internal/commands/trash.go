@@ -3,13 +3,14 @@ package commands
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
 
-	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 
+	"github.com/sustinbebustin/mws/internal/clierr"
 	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/project"
 	"github.com/sustinbebustin/mws/internal/trash"
@@ -17,6 +18,7 @@ import (
 )
 
 func newTrashCmd() *cobra.Command {
+	var jsonOut bool
 	cmd := &cobra.Command{
 		Use:   "trash",
 		Short: "Inspect and manage trashed working copies",
@@ -27,60 +29,94 @@ trash, the same as 'mws trash list'.
 Harness symlinks inside a trashed copy point at relative paths and therefore
 dangle while the copy sits in the trash. That is expected; 'mws restore'
 repairs them on the way out.`,
+		Example: `  mws trash
+  mws trash list --json
+  mws trash prune --dry-run
+  mws trash empty --yes`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTrashList(newConsoleReporter())
+			return runTrashList(newOutput(cmd, jsonOut))
 		},
 	}
-	cmd.AddCommand(newTrashListCmd(), newTrashPruneCmd(), newTrashEmptyCmd())
+	cmd.PersistentFlags().BoolVar(&jsonOut, "json", false, "print the entries as JSON (list only)")
+	cmd.AddCommand(newTrashListCmd(&jsonOut), newTrashPruneCmd(), newTrashEmptyCmd())
 	return cmd
 }
 
-func newTrashListCmd() *cobra.Command {
+func newTrashListCmd(jsonOut *bool) *cobra.Command {
 	return &cobra.Command{
-		Use:   "list",
-		Short: "List trashed working copies",
-		Args:  cobra.NoArgs,
+		Use:     "list",
+		Aliases: []string{"ls"},
+		Short:   "List trashed working copies",
+		Long: `list prints one line per trashed working copy on stdout: its name, how long
+ago it was trashed and when it purges. It first sweeps entries past their
+retention window, as rm and restore do. --json prints
+{"trash", "entries": [{"id", "name", "path", "deleted_at", "purges_at"}], "unreadable"}.`,
+		Example: `  mws trash list
+  mws trash list --json`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTrashList(newConsoleReporter())
+			return runTrashList(newOutput(cmd, *jsonOut))
 		},
 	}
 }
 
 func newTrashPruneCmd() *cobra.Command {
-	return &cobra.Command{
+	var dryRun bool
+	cmd := &cobra.Command{
 		Use:   "prune",
 		Short: "Purge trashed working copies past their retention window",
 		Long: `prune purges every trash entry older than trash.retention_days. This is the
 same sweep that 'mws rm', 'mws restore', and 'mws trash' run on their own; use
 it to force one without removing or restoring anything. It then drops the
-meta repo's registrations of worktrees whose directories are gone.`,
+meta repo's registrations of worktrees whose directories are gone.
+--dry-run names the entries it would purge and changes nothing.`,
+		Example: `  mws trash prune --dry-run
+  mws trash prune`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTrashPrune(cmd.Context(), newConsoleReporter())
+			return runTrashPrune(cmd.Context(), newConsoleReporter(), dryRun)
 		},
 	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "name the entries that would be purged; change nothing")
+	return cmd
 }
 
 func newTrashEmptyCmd() *cobra.Command {
-	yes := false
+	var f confirmFlags
 	cmd := &cobra.Command{
 		Use:   "empty",
 		Short: "Purge every trashed working copy, regardless of age",
 		Long: `empty purges every trash entry, including those still inside their
 retention window, then drops the meta repo's registrations of worktrees whose
-directories are gone.`,
+directories are gone. It asks for confirmation; --yes (required without a
+terminal) skips it, and --dry-run names what would be purged and stops.
+Emptying an empty trash succeeds.`,
+		Example: `  mws trash empty --dry-run
+  mws trash empty --yes`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTrashEmpty(cmd.Context(), newConsoleReporter(), yes)
+			return runTrashEmpty(cmd.Context(), newConsoleReporter(), f)
 		},
 	}
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation")
+	cmd.Flags().BoolVarP(&f.yes, "yes", "y", false, "skip confirmation")
+	cmd.Flags().BoolVar(&f.dryRun, "dry-run", false, "name what would be purged; change nothing")
 	return cmd
 }
 
-func runTrashList(r Reporter) error {
-	ws, cfg, err := locateForTrash()
+// trashEntryJSON is one entry of `mws trash list --json`. PurgesAt is absent
+// when the retention policy keeps entries forever.
+type trashEntryJSON struct {
+	ID        string     `json:"id"`
+	Name      string     `json:"name"`
+	Path      string     `json:"path"`
+	DeletedAt time.Time  `json:"deleted_at"`
+	PurgesAt  *time.Time `json:"purges_at,omitempty"`
+}
+
+func runTrashList(o output) error {
+	r := o.reporter()
+	ws, cfg, err := o.locate()
 	if err != nil {
 		return err
 	}
@@ -89,45 +125,73 @@ func runTrashList(r Reporter) error {
 
 	entries, skipped, err := trash.List(ws.MetaRoot)
 	if err != nil {
-		return err
+		return o.fail(clierr.Failuref("list the trash: %w", err))
 	}
 	reportSkipped(r, ws.MetaRoot, skipped)
-	if len(entries) == 0 {
-		r.Info(fmt.Sprintf("Trash is empty (%s).", trash.Root(ws.MetaRoot)))
+	list := make([]trashEntryJSON, len(entries))
+	for i, e := range entries {
+		list[i] = trashEntryJSON{ID: e.ID, Name: e.Name, Path: e.CopyPath, DeletedAt: e.DeletedAt}
+		if policy.Retention > 0 {
+			at := e.DeletedAt.Add(policy.Retention)
+			list[i].PurgesAt = &at
+		}
+	}
+	return o.result(struct {
+		Trash      string           `json:"trash"`
+		Entries    []trashEntryJSON `json:"entries"`
+		Unreadable []string         `json:"unreadable"`
+	}{trash.Root(ws.MetaRoot), list, append([]string{}, skipped...)}, func(w io.Writer) error {
+		if len(entries) == 0 {
+			r.Info(fmt.Sprintf("Trash is empty (%s).", trash.Root(ws.MetaRoot)))
+			return nil
+		}
+		r.Heading(fmt.Sprintf("Trashed working copies in %s", trash.Root(ws.MetaRoot)))
+		now := time.Now().UTC()
+		for _, e := range entries {
+			if _, err := fmt.Fprintf(w, "%-24s %s\n", e.Name, entryAgeLine(e, policy, now)); err != nil {
+				return err
+			}
+		}
 		return nil
-	}
-
-	r.Heading(fmt.Sprintf("Trashed working copies in %s", trash.Root(ws.MetaRoot)))
-	now := time.Now().UTC()
-	for _, e := range entries {
-		r.Info(fmt.Sprintf("%-24s %s", e.Name, entryAgeLine(e, policy, now)))
-	}
-	return nil
+	})
 }
 
-func runTrashPrune(ctx context.Context, r Reporter) error {
+func runTrashPrune(ctx context.Context, r Reporter, dryRun bool) error {
 	ws, cfg, err := locateForTrash()
 	if err != nil {
 		return err
 	}
 	policy := cfg.TrashPolicy()
-	if policy.Retention <= 0 {
+	switch {
+	case policy.Retention <= 0:
 		r.Info("trash.retention_days is 0, so nothing expires. Use `mws trash empty` to purge everything.")
+	case dryRun:
+		expired, err := trash.Expired(ws.MetaRoot, policy.Retention)
+		if err != nil {
+			return err
+		}
+		reportPurged(r, "Would purge", expired, policy)
+	default:
+		purged, err := trash.Sweep(ws.MetaRoot, policy.Retention)
+		reportPurged(r, "Purged", purged, policy)
+		if err != nil {
+			return err
+		}
+	}
+	if !dryRun {
 		pruneMetaWorktrees(ctx, r, ws.MetaRoot)
-		return nil
 	}
-	purged, err := trash.Sweep(ws.MetaRoot, policy.Retention)
-	for _, e := range purged {
-		r.OK(fmt.Sprintf("Purged %s (trashed %s ago)", e.Name, humanDuration(time.Since(e.DeletedAt))))
+	return nil
+}
+
+// reportPurged names each entry a prune purged (or would purge).
+func reportPurged(r Reporter, verb string, entries []trash.Entry, policy config.TrashPolicy) {
+	for _, e := range entries {
+		r.OK(fmt.Sprintf("%s %s (trashed %s ago)", verb, e.Name, humanDuration(time.Since(e.DeletedAt))))
 	}
-	if err != nil {
-		return err
-	}
-	if len(purged) == 0 {
+	if len(entries) == 0 {
 		r.Info(fmt.Sprintf("Nothing past the %s retention window.", humanDuration(policy.Retention)))
 	}
-	pruneMetaWorktrees(ctx, r, ws.MetaRoot)
-	return nil
 }
 
 // pruneMetaWorktrees drops the meta repo's registrations of the purged copies'
@@ -138,7 +202,7 @@ func pruneMetaWorktrees(ctx context.Context, r Reporter, metaRoot string) {
 	}
 }
 
-func runTrashEmpty(ctx context.Context, r Reporter, yes bool) error {
+func runTrashEmpty(ctx context.Context, r Reporter, f confirmFlags) error {
 	// empty ignores the retention policy on purpose -- it purges everything.
 	ws, _, err := locateForTrash()
 	if err != nil {
@@ -154,21 +218,24 @@ func runTrashEmpty(ctx context.Context, r Reporter, yes bool) error {
 		return nil
 	}
 
-	if !yes {
-		var ok bool
-		if err := huh.NewConfirm().
-			Title(emptyPromptTitle(len(entries), len(skipped))).
-			Description(fmt.Sprintf("This deletes everything under %s, including entries still inside their retention window. It cannot be undone.", trash.Root(ws.MetaRoot))).
-			Affirmative("Purge").
-			Negative("Cancel").
-			Value(&ok).
-			Run(); err != nil {
-			return err
+	if f.dryRun {
+		for _, e := range entries {
+			r.Info(fmt.Sprintf("Would purge %s", e.Name))
 		}
-		if !ok {
-			r.Warn("Cancelled.")
-			return nil
+		if len(skipped) > 0 {
+			r.Info(fmt.Sprintf("Would purge %d unreadable %s", len(skipped), plural(len(skipped), "entry", "entries")))
 		}
+		return nil
+	}
+	ok, err := confirm(r, f.yes, confirmation{
+		title:       emptyPromptTitle(len(entries), len(skipped)),
+		description: fmt.Sprintf("This deletes everything under %s, including entries still inside their retention window. It cannot be undone.", trash.Root(ws.MetaRoot)),
+		affirmative: "Purge",
+		missing:     "emptying the trash needs confirmation",
+		try:         []string{"mws trash empty --yes", "mws trash empty --dry-run"},
+	})
+	if err != nil || !ok {
+		return err
 	}
 
 	// Name what is going before clearing the directory, so the log says which

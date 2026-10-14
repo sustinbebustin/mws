@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/sustinbebustin/mws/internal/clierr"
 	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/project"
 	"github.com/sustinbebustin/mws/internal/worktree"
@@ -45,9 +46,12 @@ Wire them in .claude/settings.json as command hooks, e.g.
 
 func newWorktreeHookCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:    "hook",
-		Short:  "Claude Code hook adapters (create, remove, subagent-stop)",
-		Long:   worktreeHookLong,
+		Use:   "hook",
+		Short: "Claude Code hook adapters (create, remove, subagent-stop)",
+		Long:  worktreeHookLong,
+		Example: `  echo '{"name":"04","cwd":"'"$PWD"'"}' | mws wt hook create
+  echo '{"worktree_path":"'"$PWD"'/.wt/04"}' | mws wt hook remove
+  echo '{"cwd":"'"$PWD"'/.wt/agent-a1b2","agent_id":"a1b2"}' | mws wt hook subagent-stop`,
 		Hidden: true,
 	}
 	cmd.AddCommand(
@@ -133,7 +137,7 @@ func runHookCreate(ctx context.Context, in io.Reader, out, errW io.Writer) error
 	if err != nil {
 		return err
 	}
-	err = runWorktreeNew(ctx, wtOutput{stdout: out, stderr: errW}, ws, cfg, p.Name, wtNewFlags{})
+	err = runWorktreeNew(ctx, output{stdout: out, stderr: errW}, ws, cfg, p.Name, wtNewFlags{})
 	var se *setupFailedError
 	if errors.As(err, &se) {
 		consoleReporter{w: errW}.Warn(se.Error())
@@ -200,8 +204,7 @@ func runHookSubagentStop(ctx context.Context, r Reporter, in io.Reader) error {
 		return nil
 	}
 	ws, cfg, name, err := locateManagedRoot(p.Cwd)
-	var we *worktree.Error
-	if errors.As(err, &we) && we.Kind == worktree.Usage {
+	if err != nil && clierr.KindOf(err) == clierr.Usage {
 		return nil // outside every meta workspace: not ours
 	}
 	if err != nil {

@@ -18,7 +18,11 @@ func newVersionCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
 		Short: "Print mws version, commit, and build date",
-		Args:  cobra.NoArgs,
+		Long: `version prints three lines on stdout: "mws <version>", "commit: <sha>" and
+"built:  <date>".`,
+		Example: `  mws version
+  mws version | head -n1`,
+		Args: cobra.NoArgs,
 		Run: func(cmd *cobra.Command, _ []string) {
 			fmt.Fprintf(cmd.OutOrStdout(), "mws %s\ncommit: %s\nbuilt:  %s\n", version, commit, date)
 		},

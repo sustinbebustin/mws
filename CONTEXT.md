@@ -49,7 +49,7 @@ A dedicated directory inside the **Meta workspace** (`.envs/`, organized per **N
 _Avoid_: env vault (sounds like secrets management), env dir (ambiguous).
 
 **Setup commands**:
-Per-**Native repo** shell commands listed in the **mws config** under `[[repos.setup]]`. Executed at the end of `mws clone` (after clone + env-copy) via `sh -c`, with cwd set to the repo's directory in the new **Working copy**, so a fresh peer can be made ready-to-use in one step. Opt-in: the user is prompted before execution and can override the prompt with `--setup` / `--no-setup`.
+Per-**Native repo** shell commands listed in the **mws config** under `[[repos.setup]]`. Executed at the end of `mws clone` (after clone + env-copy) via `sh -c`, with cwd set to the repo's directory in the new **Working copy**, so a fresh peer can be made ready-to-use in one step. Opt-in: the user is prompted before execution and can override the prompt with `--setup` / `--no-setup`; without a terminal one of the two is required.
 _Avoid_: hooks (implies a broader lifecycle that does not exist), scripts (overloaded with package.json's name-keyed semantics).
 
 ## Relationships

@@ -7,19 +7,25 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 
+	"github.com/sustinbebustin/mws/internal/clierr"
 	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/project"
 	"github.com/sustinbebustin/mws/internal/trash"
 	"github.com/sustinbebustin/mws/internal/worktree"
 )
 
+// rmFlags is the command-line input of `mws rm`.
+type rmFlags struct {
+	yes, purge, dryRun bool
+}
+
 func newRmCmd() *cobra.Command {
-	yes := false
-	purge := false
+	var f rmFlags
 	cmd := &cobra.Command{
 		Use:   "rm <name>",
 		Short: "Remove a working copy",
@@ -33,23 +39,33 @@ touches the trash -- nothing purges in the background. Force one with
 Pass --purge to delete the working copy outright with no way back. Either way
 the meta workspace and harness are untouched.
 
-The copy's worktrees go with it. rm refuses while another process works inside
-one of them.`,
+The copy's worktrees go with it. rm refuses (exit 3) while another process
+works inside one of them.
+
+Without a terminal, the name and --yes are required. --dry-run runs every
+check and reports what would happen without changing anything (it does not
+sweep the trash either). A name that is no working copy exits 4 (not found);
+when it was trashed earlier, the message names the trash entry and its age,
+so a retried rm can tell "already removed" from a typo.`,
+		Example: `  mws rm feature-x
+  mws rm feature-x --yes
+  mws rm feature-x --purge --dry-run`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var name string
 			if len(args) == 1 {
 				name = args[0]
 			}
-			return runRm(cmd.Context(), newConsoleReporter(), name, yes, purge)
+			return runRm(cmd.Context(), newConsoleReporter(), name, f)
 		},
 	}
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation")
-	cmd.Flags().BoolVar(&purge, "purge", false, "delete immediately instead of moving to the trash")
+	cmd.Flags().BoolVarP(&f.yes, "yes", "y", false, "skip confirmation")
+	cmd.Flags().BoolVar(&f.purge, "purge", false, "delete immediately instead of moving to the trash")
+	cmd.Flags().BoolVar(&f.dryRun, "dry-run", false, "report what would be removed; change nothing")
 	return cmd
 }
 
-func runRm(ctx context.Context, r Reporter, name string, yes, purge bool) error {
+func runRm(ctx context.Context, r Reporter, name string, f rmFlags) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -65,18 +81,27 @@ func runRm(ctx context.Context, r Reporter, name string, yes, purge bool) error 
 		return err
 	}
 	policy := cfg.TrashPolicy()
-	sweepTrash(r, ws.MetaRoot, policy)
-	toTrash := policy.Enabled && !purge
+	if !f.dryRun {
+		sweepTrash(r, ws.MetaRoot, policy)
+	}
+	toTrash := policy.Enabled && !f.purge
 
 	peers, err := ws.EnumerateCopies()
 	if err != nil {
 		return err
 	}
-	if len(peers) == 0 {
-		return fmt.Errorf("no working copies to remove")
+	if name == "" && len(peers) == 0 {
+		return fmt.Errorf("no working copies to remove in %s", ws.MetaRoot)
 	}
 
 	if name == "" {
+		if !canPrompt() {
+			names := make([]string, len(peers))
+			for i, p := range peers {
+				names[i] = filepath.Base(p)
+			}
+			return noPrompt(fmt.Sprintf("no working copy named (working copies: %s)", strings.Join(names, ", ")), "mws rm <name> --yes")
+		}
 		opts := make([]huh.Option[string], 0, len(peers))
 		for _, p := range peers {
 			opts = append(opts, huh.NewOption(filepath.Base(p), filepath.Base(p)))
@@ -92,10 +117,10 @@ func runRm(ctx context.Context, r Reporter, name string, yes, purge bool) error 
 
 	target := filepath.Join(ws.CopiesRoot(), name)
 	if !slices.Contains(peers, target) {
-		return fmt.Errorf("%s is not a working copy of %s", target, ws.MetaRoot)
+		return notACopy(ws.MetaRoot, name, target)
 	}
 	if !looksLikeWorkingCopy(ws.MetaRoot, target) {
-		return fmt.Errorf("%s does not contain any harness symlinks pointing into %s/.mws/; refusing to remove. If this is genuinely a working copy whose symlinks are broken, run `mws relink` first, or remove it manually", target, ws.MetaRoot)
+		return clierr.Refusedf("%s does not contain any harness symlinks pointing into %s/.mws/; refusing to remove. If this is genuinely a working copy whose symlinks are broken, run `mws relink` first, or remove it manually", target, ws.MetaRoot)
 	}
 	wts, err := copyWorktrees(ctx, r, ws.MetaRoot, cfg, target)
 	if err != nil {
@@ -105,21 +130,19 @@ func runRm(ctx context.Context, r Reporter, name string, yes, purge bool) error 
 		return fmt.Errorf("refusing to remove working copy %s: %w", target, err)
 	}
 
-	if !yes {
-		var ok bool
-		if err := huh.NewConfirm().
-			Title(fmt.Sprintf("Remove working copy %s?", target)).
-			Description(rmConfirmDescription(ws.MetaRoot, name, toTrash, wts)).
-			Affirmative("Remove").
-			Negative("Cancel").
-			Value(&ok).
-			Run(); err != nil {
-			return err
-		}
-		if !ok {
-			r.Warn("Cancelled.")
-			return nil
-		}
+	if f.dryRun {
+		r.Info("Dry run: " + rmConfirmDescription(ws.MetaRoot, name, toTrash, wts))
+		return nil
+	}
+	ok, err := confirm(r, f.yes, confirmation{
+		title:       fmt.Sprintf("Remove working copy %s?", target),
+		description: rmConfirmDescription(ws.MetaRoot, name, toTrash, wts),
+		affirmative: "Remove",
+		missing:     "removing a working copy needs confirmation",
+		try:         []string{fmt.Sprintf("mws rm %s --yes", name), fmt.Sprintf("mws rm %s --dry-run", name)},
+	})
+	if err != nil || !ok {
+		return err
 	}
 
 	if !toTrash {
@@ -151,6 +174,21 @@ func runRm(ctx context.Context, r Reporter, name string, yes, purge bool) error 
 		r.Info(fmt.Sprintf("Kept until purged. Restore with `mws restore %s`.", entry.Name))
 	}
 	return nil
+}
+
+// notACopy is the not-found error for `mws rm name` when no working copy has
+// that name. A retried rm finds the copy in the trash; naming the entry and
+// its age lets the caller tell that apart from a typo.
+func notACopy(metaRoot, name, target string) error {
+	trashed, err := trash.Find(metaRoot, name)
+	if err != nil {
+		return clierr.Failuref("%s is not a working copy of %s, and the trash could not be read to say whether it was removed: %w", target, metaRoot, err)
+	}
+	if len(trashed) > 0 {
+		return clierr.NotFoundf("%s is not a working copy of %s; a copy of that name was trashed %s ago (%s), so a previous rm already removed it. Restore it with `mws restore %s`",
+			target, metaRoot, humanDuration(time.Since(trashed[0].DeletedAt)), trashed[0].ID, name)
+	}
+	return clierr.NotFoundf("%s is not a working copy of %s; `mws list` shows the working copies", target, metaRoot)
 }
 
 // rmConfirmDescription explains what removing the copy called name does,

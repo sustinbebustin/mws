@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/exec"
@@ -23,23 +24,65 @@ import (
 // alongside the meta on `mws init`.
 const firstWorkingCopyName = "main"
 
+// initFlags holds `mws init` input given on the command line. A nil value was
+// not given: it is prompted for on a terminal and defaulted without one.
+type initFlags struct {
+	description, copiesDir, parent *string
+	repos                          []string
+	yes                            bool
+}
+
+// givenString returns the value of the string flag name, or nil when it was
+// not set on the command line.
+func givenString(cmd *cobra.Command, name string) *string {
+	if !cmd.Flags().Changed(name) {
+		return nil
+	}
+	v, err := cmd.Flags().GetString(name)
+	if err != nil {
+		return nil
+	}
+	return &v
+}
+
 func newInitCmd() *cobra.Command {
-	return &cobra.Command{
+	var f initFlags
+	cmd := &cobra.Command{
 		Use:   "init [name]",
 		Short: "Create a new meta workspace with a first working copy",
 		Long: `init creates a meta-at-root workspace: a directory <parent>/<name>/ that
 is a git repo at its root, contains the AI harness under .mws/, the mws config
 at .mws.toml, an allowlist .gitignore, and a first working copy at <name>/main/.
-Prompts collect everything up front, then executes once confirmed.`,
+It prints the first working copy's path as the last stdout line.
+
+On a terminal, init prompts for every value not given as an argument or flag,
+then asks for confirmation. Without one, unset values take their defaults (no
+description, no copies subdir, the current directory as parent, no repos) and
+--yes is required.
+
+--repo takes a clone URL, or <folder>=<url> to choose the local folder; it is
+repeatable.`,
+		Example: `  mws init demo
+  mws init demo --repo git@github.com:org/api.git --repo web=https://github.com/org/web --yes
+  mws init demo --description "Pitch tooling" --copies-dir copies --parent ~/dev --yes`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var arg string
 			if len(args) == 1 {
 				arg = args[0]
 			}
-			return runInit(cmd.Context(), newConsoleReporter(), arg)
+			f.description = givenString(cmd, "description")
+			f.copiesDir = givenString(cmd, "copies-dir")
+			f.parent = givenString(cmd, "parent")
+			return runInit(cmd.Context(), newConsoleReporter(), cmd.OutOrStdout(), arg, f)
 		},
 	}
+	cmd.Flags().String("description", "", "one-line description shown in CLAUDE.md and README.md")
+	cmd.Flags().String("copies-dir", "", "subdirectory for working copies (default: directly under the meta root)")
+	cmd.Flags().String("parent", "", "directory to create the meta workspace in (default: the current directory)")
+	cmd.Flags().StringArrayVar(&f.repos, "repo", nil, "native repo to register and clone: <url> or <folder>=<url> (repeatable)")
+	cmd.Flags().BoolVarP(&f.yes, "yes", "y", false, "skip confirmation")
+	return cmd
 }
 
 type initPlan struct {
@@ -50,7 +93,13 @@ type initPlan struct {
 	Repos            []config.Repo
 }
 
-func runInit(ctx context.Context, r Reporter, arg string) error {
+func (p *initPlan) metaDir() string { return filepath.Join(p.ParentDir, p.ProjectName) }
+
+func (p *initPlan) mainCopy() string {
+	return filepath.Join(p.metaDir(), p.WorkingCopiesDir, firstWorkingCopyName)
+}
+
+func runInit(ctx context.Context, r Reporter, out io.Writer, arg string, f initFlags) error {
 	if _, err := exec.LookPath("git"); err != nil {
 		return fmt.Errorf("git not found on PATH: %w", err)
 	}
@@ -58,35 +107,49 @@ func runInit(ctx context.Context, r Reporter, arg string) error {
 	if err != nil {
 		return err
 	}
-
-	plan, err := collectInitPlan(arg, cwd)
+	plan, err := collectInitPlan(arg, cwd, f)
 	if err != nil {
 		return err
 	}
 
 	showSummary(r, plan)
 
-	var confirm bool
-	if err := huh.NewConfirm().
-		Title("Create meta workspace?").
-		Affirmative("Yes").
-		Negative("Cancel").
-		Value(&confirm).
-		Run(); err != nil {
+	ok, err := confirm(r, f.yes, confirmation{
+		title:       "Create meta workspace?",
+		affirmative: "Yes",
+		missing:     "init needs confirmation",
+		try:         []string{fmt.Sprintf("mws init %s --yes", plan.ProjectName)},
+	})
+	if err != nil || !ok {
 		return err
 	}
-	if !confirm {
-		r.Warn("Cancelled.")
-		return nil
-	}
 
-	return executeInit(ctx, r, plan)
+	if err := executeInit(ctx, r, plan); err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(out, plan.mainCopy())
+	return err
 }
 
-func collectInitPlan(arg, cwd string) (*initPlan, error) {
+// collectInitPlan builds the plan from arg and f, prompting on a terminal for
+// every value f does not set.
+func collectInitPlan(arg, cwd string, f initFlags) (*initPlan, error) {
 	p := &initPlan{ParentDir: cwd, ProjectName: arg}
+	if f.parent != nil {
+		p.ParentDir = *f.parent
+	}
+	if f.description != nil {
+		p.Description = *f.description
+	}
+	if f.copiesDir != nil {
+		p.WorkingCopiesDir = *f.copiesDir
+	}
+	interactive := canPrompt()
+	if p.ProjectName == "" && !interactive {
+		return nil, noPrompt("no project name given", "mws init <name> --yes")
+	}
 
-	fields := []huh.Field{}
+	var fields []huh.Field
 	if p.ProjectName == "" {
 		fields = append(fields, huh.NewInput().
 			Title("Project name").
@@ -94,36 +157,92 @@ func collectInitPlan(arg, cwd string) (*initPlan, error) {
 			Validate(project.ValidateName).
 			Value(&p.ProjectName))
 	}
-	parent := p.ParentDir
-	fields = append(fields,
-		huh.NewInput().
+	if interactive && f.description == nil {
+		fields = append(fields, huh.NewInput().
 			Title("Description").
 			Description("Short one-line description -- shown in CLAUDE.md and README.md.").
-			Value(&p.Description),
-		huh.NewInput().
+			Value(&p.Description))
+	}
+	if interactive && f.copiesDir == nil {
+		fields = append(fields, huh.NewInput().
 			Title("Subdirectory for working copies (optional)").
 			Description("Leave empty to keep working copies directly under the meta root.").
 			Validate(project.ValidateWorkingCopiesDir).
-			Value(&p.WorkingCopiesDir),
-		huh.NewInput().
+			Value(&p.WorkingCopiesDir))
+	}
+	if interactive && f.parent == nil {
+		fields = append(fields, huh.NewInput().
 			Title("Parent directory").
 			Description("The meta workspace will be created here.").
 			Validate(validateExistingDir).
-			Value(&parent),
-	)
-
-	if err := huh.NewForm(huh.NewGroup(fields...)).Run(); err != nil {
-		return nil, err
+			Value(&p.ParentDir))
 	}
-	p.ParentDir = strings.TrimSpace(parent)
+	if len(fields) > 0 {
+		if err := huh.NewForm(huh.NewGroup(fields...)).Run(); err != nil {
+			return nil, err
+		}
+	}
+	p.ProjectName = strings.TrimSpace(p.ProjectName)
+	p.ParentDir = strings.TrimSpace(p.ParentDir)
 	p.WorkingCopiesDir = strings.TrimSpace(p.WorkingCopiesDir)
-
-	repos, err := promptRepoLoop("Register a native repo to clone into the working copy?")
-	if err != nil {
-		return nil, err
+	if err := project.ValidateName(p.ProjectName); err != nil {
+		return nil, usagef("project name %q: %w", p.ProjectName, err)
 	}
-	p.Repos = repos
+	if err := validateExistingDir(p.ParentDir); err != nil {
+		return nil, usagef("--parent: %w", err)
+	}
+	abs, err := filepath.Abs(p.ParentDir)
+	if err != nil {
+		return nil, usagef("--parent %q: %w", p.ParentDir, err)
+	}
+	p.ParentDir = abs
+	if err := project.ValidateWorkingCopiesDir(p.WorkingCopiesDir); err != nil {
+		return nil, usagef("--copies-dir %q: %w", p.WorkingCopiesDir, err)
+	}
+
+	switch {
+	case len(f.repos) > 0:
+		seen := map[string]string{}
+		for _, spec := range f.repos {
+			repo, err := parseRepoFlag(spec)
+			if err != nil {
+				return nil, err
+			}
+			if prev, ok := seen[repo.Folder]; ok {
+				return nil, usagef("--repo %q and --repo %q both use folder %q; give one of them another folder with --repo <folder>=<url>", prev, spec, repo.Folder)
+			}
+			seen[repo.Folder] = spec
+			p.Repos = append(p.Repos, repo)
+		}
+	case interactive:
+		repos, err := promptRepoLoop("Register a native repo to clone into the working copy?")
+		if err != nil {
+			return nil, err
+		}
+		p.Repos = repos
+	}
 	return p, nil
+}
+
+// parseRepoFlag reads one --repo value: a clone URL, or <folder>=<url>. The
+// folder form is recognised only when the part before the first "=" is a valid
+// working-copy entry name, which a URL's scheme or host never is.
+func parseRepoFlag(spec string) (config.Repo, error) {
+	spec = strings.TrimSpace(spec)
+	if folder, repoURL, ok := strings.Cut(spec, "="); ok && !strings.ContainsAny(folder, ":/@") && project.ValidateName(folder) == nil {
+		if strings.TrimSpace(repoURL) == "" {
+			return config.Repo{}, usagef("--repo %q: no URL after %q", spec, folder+"=")
+		}
+		return config.Repo{Folder: folder, URL: strings.TrimSpace(repoURL)}, nil
+	}
+	if spec == "" {
+		return config.Repo{}, usagef("--repo needs a clone URL, e.g. --repo git@github.com:org/api.git")
+	}
+	folder := deriveFolderFromURL(spec)
+	if err := project.ValidateName(folder); err != nil {
+		return config.Repo{}, usagef("--repo %q: the folder derived from the URL, %q, is not usable (%v); pass --repo <folder>=<url>", spec, folder, err)
+	}
+	return config.Repo{Folder: folder, URL: spec}, nil
 }
 
 func promptRepoLoop(prompt string) ([]config.Repo, error) {
@@ -165,8 +284,7 @@ func promptRepoLoop(prompt string) ([]config.Repo, error) {
 }
 
 func showSummary(r Reporter, p *initPlan) {
-	metaDir := filepath.Join(p.ParentDir, p.ProjectName)
-	mainCopy := filepath.Join(metaDir, p.WorkingCopiesDir, firstWorkingCopyName)
+	metaDir, mainCopy := p.metaDir(), p.mainCopy()
 
 	r.Heading("\nPlanned actions")
 	r.Info(fmt.Sprintf("  meta workspace : %s", metaDir))
@@ -192,10 +310,10 @@ func executeInit(ctx context.Context, r Reporter, p *initPlan) error {
 		return fmt.Errorf("invalid working_copies_dir %q: %w", p.WorkingCopiesDir, err)
 	}
 
-	metaDir := filepath.Join(p.ParentDir, p.ProjectName)
+	metaDir := p.metaDir()
 
 	if _, err := os.Stat(metaDir); err == nil {
-		return fmt.Errorf("path already exists at %s", metaDir)
+		return fmt.Errorf("path already exists at %s; choose another name or --parent", metaDir)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -225,7 +343,7 @@ func executeInit(ctx context.Context, r Reporter, p *initPlan) error {
 	}
 	r.OK(fmt.Sprintf("Created meta workspace at %s", metaDir))
 
-	mainCopy := filepath.Join(metaDir, p.WorkingCopiesDir, firstWorkingCopyName)
+	mainCopy := p.mainCopy()
 	if err := os.MkdirAll(mainCopy, 0o755); err != nil {
 		return err
 	}

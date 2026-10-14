@@ -35,7 +35,7 @@ func TestWtExecErrors(t *testing.T) {
 	}{
 		"no command":       {[]string{"exec", "x"}, 2},
 		"missing dash":     {[]string{"exec", "x", "true"}, 2},
-		"unknown worktree": {[]string{"exec", "nope", "--", "true"}, 1},
+		"unknown worktree": {[]string{"exec", "nope", "--", "true"}, 4},
 		"not executable":   {[]string{"exec", "x", "--", "no-such-command-mws"}, 1},
 	} {
 		if res := runWt(t, f.copy, tc.args...); res.code != tc.code {

@@ -6,31 +6,32 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/sustinbebustin/mws/internal/clierr"
 	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/project"
-	"github.com/sustinbebustin/mws/internal/worktree"
 )
 
-// wtOutput is where a `mws wt` subcommand reports: its result on stdout (one
-// JSON object under --json), progress and command output on stderr.
-type wtOutput struct {
+// output is where a command reports: its result on stdout (one JSON object
+// under --json), progress and command output on stderr.
+type output struct {
 	stdout, stderr io.Writer
 	json           bool
 }
 
-func newWtOutput(cmd *cobra.Command, jsonOut bool) wtOutput {
-	return wtOutput{stdout: cmd.OutOrStdout(), stderr: cmd.ErrOrStderr(), json: jsonOut}
+func newOutput(cmd *cobra.Command, jsonOut bool) output {
+	return output{stdout: cmd.OutOrStdout(), stderr: cmd.ErrOrStderr(), json: jsonOut}
 }
 
-func (o wtOutput) reporter() consoleReporter { return consoleReporter{w: o.stderr} }
+func (o output) reporter() consoleReporter { return consoleReporter{w: o.stderr} }
 
 // fail prints err as the JSON error object under --json and returns it for
 // the exit code and the stderr message.
-func (o wtOutput) fail(err error) error {
-	if !o.json {
+func (o output) fail(err error) error {
+	if !o.json || err == nil {
 		return err
 	}
 	return errors.Join(err, writeJSON(o.stdout, struct {
@@ -39,7 +40,7 @@ func (o wtOutput) fail(err error) error {
 }
 
 // result prints v as JSON under --json, and calls text otherwise.
-func (o wtOutput) result(v any, text func(w io.Writer) error) error {
+func (o output) result(v any, text func(w io.Writer) error) error {
 	if o.json {
 		return writeJSON(o.stdout, v)
 	}
@@ -48,12 +49,12 @@ func (o wtOutput) result(v any, text func(w io.Writer) error) error {
 
 // locate resolves the workspace from cwd and loads its config, reporting a
 // failure through fail.
-func (o wtOutput) locate() (*project.Workspace, *config.Config, error) {
+func (o output) locate() (*project.Workspace, *config.Config, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return nil, nil, o.fail(&worktree.Error{Kind: worktree.Failure, Err: fmt.Errorf("read current directory: %w", err)})
+		return nil, nil, o.fail(clierr.Failuref("read current directory: %w", err))
 	}
-	ws, cfg, err := locateWorkspace(cwd, "run mws worktree from inside a working copy")
+	ws, cfg, err := locateWorkspace(cwd, "run mws from inside a meta workspace or one of its working copies")
 	if err != nil {
 		return nil, nil, o.fail(err)
 	}
@@ -65,25 +66,54 @@ func (o wtOutput) locate() (*project.Workspace, *config.Config, error) {
 func locateWorkspace(dir, hint string) (*project.Workspace, *config.Config, error) {
 	ws, err := project.Locate(dir)
 	if err != nil {
-		return nil, nil, &worktree.Error{Kind: worktree.Usage, Err: fmt.Errorf("%s: %w; %s", dir, err, hint)}
+		return nil, nil, clierr.Usagef("%s: %w; %s", dir, err, hint)
 	}
 	cfg, err := config.Load(ws.MetaRoot)
 	if err != nil {
-		return nil, nil, &worktree.Error{Kind: worktree.Failure, Err: err}
+		return nil, nil, clierr.Failuref("%w", err)
 	}
 	return ws, cfg, nil
 }
 
-// usageCheckedArgs validates positional args with check, tagging a mismatch
-// as a usage error and printing it as JSON under --json (flags are parsed
-// before args).
-func usageCheckedArgs(check cobra.PositionalArgs, jsonOut *bool) cobra.PositionalArgs {
+func usagef(format string, args ...any) error { return clierr.Usagef(format, args...) }
+
+// usageArgs tags a positional-argument mismatch as a usage error that points
+// at the command's help. An error that already carries an exit code passes
+// through unchanged.
+func usageArgs(check cobra.PositionalArgs) cobra.PositionalArgs {
 	return func(cmd *cobra.Command, args []string) error {
-		if err := check(cmd, args); err != nil {
-			return newWtOutput(cmd, *jsonOut).fail(&worktree.Error{Kind: worktree.Usage, Err: fmt.Errorf("%w; see `%s --help`", err, cmd.CommandPath())})
+		err := check(cmd, args)
+		var coded interface{ ExitCode() int }
+		if err == nil || errors.As(err, &coded) {
+			return err
 		}
-		return nil
+		return usagef("%w; see `%s --help`", err, cmd.CommandPath())
 	}
+}
+
+// usageCheckedArgs is usageArgs that also prints the error as JSON under
+// --json (flags are parsed before args).
+func usageCheckedArgs(check cobra.PositionalArgs, jsonOut *bool) cobra.PositionalArgs {
+	tagged := usageArgs(check)
+	return func(cmd *cobra.Command, args []string) error {
+		return newOutput(cmd, *jsonOut).fail(tagged(cmd, args))
+	}
+}
+
+// exclusiveFlags returns a usage error when more than one of the named flags
+// is set. It replaces cobra's MarkFlagsMutuallyExclusive, whose error cannot
+// be told apart from a runtime failure.
+func exclusiveFlags(cmd *cobra.Command, names ...string) error {
+	var set []string
+	for _, n := range names {
+		if cmd.Flags().Changed(n) {
+			set = append(set, "--"+n)
+		}
+	}
+	if len(set) > 1 {
+		return usagef("%s cannot be used together; see `%s --help`", strings.Join(set, " and "), cmd.CommandPath())
+	}
+	return nil
 }
 
 type jsonError struct {
@@ -103,12 +133,7 @@ func toJSONError(err error) *jsonError {
 	if errors.As(err, &se) {
 		return &jsonError{Code: "setup_failed", Message: err.Error()}
 	}
-	kind := worktree.Failure
-	var we *worktree.Error
-	if errors.As(err, &we) {
-		kind = we.Kind
-	}
-	return &jsonError{Code: kind.Code(), Message: err.Error()}
+	return &jsonError{Code: clierr.KindOf(err).Code(), Message: err.Error()}
 }
 
 func writeJSON(w io.Writer, v any) error {

@@ -28,10 +28,11 @@ var (
 	styleErr     = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 )
 
-// consoleReporter writes lipgloss-styled lines to an io.Writer (stdout in production).
+// consoleReporter writes lipgloss-styled lines to an io.Writer: stderr in
+// production, so stdout carries only a command's result.
 type consoleReporter struct{ w io.Writer }
 
-func newConsoleReporter() Reporter { return consoleReporter{w: os.Stdout} }
+func newConsoleReporter() Reporter { return consoleReporter{w: os.Stderr} }
 
 func (r consoleReporter) Heading(s string) { fmt.Fprintln(r.w, styleHeading.Render(s)) }
 func (r consoleReporter) OK(s string)      { fmt.Fprintln(r.w, styleOK.Render("[OK] ")+s) }

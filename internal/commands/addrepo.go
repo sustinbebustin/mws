@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 
+	"github.com/sustinbebustin/mws/internal/clierr"
 	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/git"
 	"github.com/sustinbebustin/mws/internal/project"
@@ -26,7 +27,13 @@ the repo URL. With no arguments, prompts interactively.
 
 With --optional the repo is registered under [[optional_repos]] instead and is
 NOT cloned into existing working copies. Pull it into a copy on demand with
-'mws clone --with <folder>' (or the clone prompt) or 'mws include <folder>'.`,
+'mws clone --with <folder>' (or the clone prompt) or 'mws include <folder>'.
+
+Re-running with the same URL and folder changes no config and clones into any
+working copy that still lacks the repo.`,
+		Example: `  mws add-repo git@github.com:org/api.git
+  mws add-repo https://github.com/org/web frontend
+  mws add-repo git@github.com:org/docs.git --optional`,
 		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			repoURL := ""
@@ -59,6 +66,9 @@ func runAddRepo(ctx context.Context, r Reporter, repoURL, folder string, optiona
 	}
 
 	if repoURL == "" {
+		if !canPrompt() {
+			return noPrompt("no repo URL given", "mws add-repo <url> [folder]", "mws add-repo <url> [folder] --optional")
+		}
 		if err := huh.NewForm(huh.NewGroup(
 			huh.NewInput().
 				Title("Repo URL").
@@ -80,25 +90,30 @@ func runAddRepo(ctx context.Context, r Reporter, repoURL, folder string, optiona
 		folder = deriveFolderFromURL(repoURL)
 	}
 	if folder == "" {
-		return fmt.Errorf("could not derive folder from URL %q; provide one explicitly", repoURL)
+		return usagef("could not derive a folder from URL %q; pass one: mws add-repo %s <folder>", repoURL, repoURL)
 	}
 
-	added := cfg.AddRepo
+	list := config.ListDefault
 	if optional {
-		added = cfg.AddOptionalRepo
+		list = config.ListOptional
 	}
-	if !added(config.Repo{Folder: folder, URL: repoURL}) {
-		return fmt.Errorf("repo with folder %q is already registered", folder)
-	}
-	if err := config.Save(ws.MetaRoot, cfg); err != nil {
-		return err
+	switch cfg.Register(config.Repo{Folder: folder, URL: repoURL}, list) {
+	case config.AlreadyRegistered:
+		// A retry: keep the config and go on cloning into any copy that
+		// still lacks the repo.
+		r.Info(fmt.Sprintf("%s is already registered as %s", repoURL, folder))
+	case config.FolderTaken:
+		return clierr.Refusedf("folder %q is already registered, with another URL or in the other repo list; nothing was changed; check .mws.toml in %s or pass another folder", folder, ws.MetaRoot)
+	case config.Registered:
+		if err := config.Save(ws.MetaRoot, cfg); err != nil {
+			return err
+		}
+		r.OK(fmt.Sprintf("Registered %s -> %s", folder, repoURL))
 	}
 	if optional {
-		r.OK(fmt.Sprintf("Registered optional repo %s -> %s", folder, repoURL))
 		r.Info(fmt.Sprintf("Pull it into a working copy with `mws clone --with %s` or `mws include %s`.", folder, folder))
 		return nil
 	}
-	r.OK(fmt.Sprintf("Registered %s -> %s", folder, repoURL))
 
 	peers, err := ws.EnumerateCopies()
 	if err != nil {

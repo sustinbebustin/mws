@@ -17,8 +17,9 @@ import (
 func newWorktreeLsCmd(jsonOut *bool) *cobra.Command {
 	var all bool
 	cmd := &cobra.Command{
-		Use:   "ls",
-		Short: "List worktrees with their branches, state and liveness",
+		Use:     "ls",
+		Aliases: []string{"list"},
+		Short:   "List worktrees with their branches, state and liveness",
 		Long: `ls lists the worktrees of this working copy (--all: of every copy). A managed
 worktree shows each native repo as folder:branch@sha, marked dirty when it has
 modified or untracked files and +N when N commits on its branch are reachable
@@ -32,14 +33,14 @@ removes unmanaged entries.`,
   mws wt ls --all --json`,
 		Args: usageCheckedArgs(cobra.NoArgs, jsonOut),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runWorktreeLs(cmd.Context(), newWtOutput(cmd, *jsonOut), all)
+			return runWorktreeLs(cmd.Context(), newOutput(cmd, *jsonOut), all)
 		},
 	}
 	cmd.Flags().BoolVar(&all, "all", false, "list the worktrees of every working copy")
 	return cmd
 }
 
-func runWorktreeLs(ctx context.Context, o wtOutput, all bool) error {
+func runWorktreeLs(ctx context.Context, o output, all bool) error {
 	ws, cfg, err := o.locate()
 	if err != nil {
 		return err

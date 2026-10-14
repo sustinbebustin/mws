@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/sustinbebustin/mws/internal/clierr"
 	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/git"
 	"github.com/sustinbebustin/mws/internal/project"
@@ -46,7 +47,7 @@ func readInnerRepos(ctx context.Context, copyPath, root string) ([]innerRepo, er
 }
 
 // Resolve returns the root of the managed worktree called name in the
-// workspace's copy: a failure when nothing is there, refused when what is
+// workspace's copy: NotFound when nothing is there, refused when what is
 // there is not marked and registered.
 func Resolve(ctx context.Context, ws *project.Workspace, policy config.WorktreePolicy, name string) (string, error) {
 	if ws.WorkingCopy == "" {
@@ -57,7 +58,7 @@ func Resolve(ctx context.Context, ws *project.Workspace, policy config.WorktreeP
 	}
 	root := Path(ws.WorkingCopy, policy, name)
 	if _, err := os.Lstat(root); errors.Is(err, os.ErrNotExist) {
-		return "", failuref("no worktree named %s in working copy %s (nothing at %s); `mws wt ls` lists the worktrees", name, ws.WorkingCopy, root)
+		return "", clierr.NotFoundf("no worktree named %s in working copy %s (nothing at %s); `mws wt ls` lists the worktrees", name, ws.WorkingCopy, root)
 	}
 	managed, err := IsManaged(ctx, ws.MetaRoot, root)
 	if err != nil {
@@ -111,11 +112,63 @@ type target struct {
 	repos []innerRepo
 }
 
+// Checked is a worktree Check found safe to remove.
+type Checked struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
+// Check runs every check Remove runs -- managed, clean unless forced, merged
+// when asked, no foreign process inside -- and reports the worktrees that
+// would be removed, changing nothing.
+func Check(ctx context.Context, r Reporter, opts RemoveOptions) ([]Checked, error) {
+	targets, err := check(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	if err := refuseLive(r, targets); err != nil {
+		return nil, err
+	}
+	out := make([]Checked, len(targets))
+	for i, t := range targets {
+		out[i] = Checked{Name: t.name, Path: t.root}
+	}
+	return out, nil
+}
+
 // Remove removes the named worktrees of the workspace's copy. Every worktree
-// is checked first -- managed, clean unless forced, no foreign process inside
-// -- and nothing is removed if any check refuses. If the process's working
-// directory is inside a target, Remove first changes it to the meta root.
+// is checked first (see Check), and nothing is removed if any check refuses.
+// If the process's working directory is inside a target, Remove first changes
+// it to the meta root.
 func Remove(ctx context.Context, r Reporter, opts RemoveOptions) ([]Removed, error) {
+	ws := opts.Workspace
+	policy := opts.Config.WorktreePolicy()
+	targets, err := check(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	if err := leaveTargets(ws.MetaRoot, targets); err != nil {
+		return nil, failuref("leave the worktree before removing it: %w", err)
+	}
+	if err := refuseLive(r, targets); err != nil {
+		return nil, err
+	}
+
+	out := make([]Removed, 0, len(targets))
+	for _, t := range targets {
+		removed, err := removeOne(ctx, ws.MetaRoot, policy, t, opts)
+		if err != nil {
+			return out, err
+		}
+		r.OK(fmt.Sprintf("Removed worktree %s", t.name))
+		out = append(out, removed)
+	}
+	return out, nil
+}
+
+// check resolves every named worktree and runs the per-worktree safety
+// checks; the first refusal stops it.
+func check(ctx context.Context, opts RemoveOptions) ([]target, error) {
 	ws := opts.Workspace
 	policy := opts.Config.WorktreePolicy()
 	targets := make([]target, 0, len(opts.Names))
@@ -158,24 +211,7 @@ func Remove(ctx context.Context, r Reporter, opts RemoveOptions) ([]Removed, err
 		}
 		targets = append(targets, target{name: name, root: root, repos: repos})
 	}
-
-	if err := leaveTargets(ws.MetaRoot, targets); err != nil {
-		return nil, failuref("leave the worktree before removing it: %w", err)
-	}
-	if err := refuseLive(r, targets); err != nil {
-		return nil, err
-	}
-
-	out := make([]Removed, 0, len(targets))
-	for _, t := range targets {
-		removed, err := removeOne(ctx, ws.MetaRoot, policy, t, opts)
-		if err != nil {
-			return out, err
-		}
-		r.OK(fmt.Sprintf("Removed worktree %s", t.name))
-		out = append(out, removed)
-	}
-	return out, nil
+	return targets, nil
 }
 
 func folderNames(repos []innerRepo) []string {

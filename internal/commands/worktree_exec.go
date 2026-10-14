@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/sustinbebustin/mws/internal/clierr"
 	"github.com/sustinbebustin/mws/internal/worktree"
 )
 
@@ -17,8 +18,9 @@ func newWorktreeExecCmd(jsonOut *bool) *cobra.Command {
 		Use:   "exec <name> -- <cmd> [args...]",
 		Short: "Run a command in a worktree's root",
 		Long: `exec runs <cmd> with its working directory at the worktree's root and stdin,
-stdout and stderr inherited. mws exits with the command's exit code; it fails
-with 1 only when the worktree is not found or the command cannot start.`,
+stdout and stderr inherited. mws exits with the command's exit code, except
+that it exits 4 when the worktree is not found and 1 when the command cannot
+start.`,
 		Example: `  mws wt exec 04 -- just typecheck
   mws wt exec 04 -- git -C frontend log --oneline -3`,
 		Args: usageCheckedArgs(func(cmd *cobra.Command, args []string) error {
@@ -28,12 +30,12 @@ with 1 only when the worktree is not found or the command cannot start.`,
 			return nil
 		}, jsonOut),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorktreeExec(cmd.Context(), newWtOutput(cmd, *jsonOut), cmd.InOrStdin(), args[0], args[1:])
+			return runWorktreeExec(cmd.Context(), newOutput(cmd, *jsonOut), cmd.InOrStdin(), args[0], args[1:])
 		},
 	}
 }
 
-func runWorktreeExec(ctx context.Context, o wtOutput, in io.Reader, name string, argv []string) error {
+func runWorktreeExec(ctx context.Context, o output, in io.Reader, name string, argv []string) error {
 	ws, cfg, err := o.locate()
 	if err != nil {
 		return err
@@ -64,8 +66,8 @@ func runIn(ctx context.Context, dir string, argv []string, in io.Reader, out, er
 	case errors.As(err, &exitErr) && exitErr.ExitCode() >= 0:
 		return &exitStatusError{code: exitErr.ExitCode()}
 	case errors.As(err, &exitErr):
-		return &worktree.Error{Kind: worktree.Failure, Err: fmt.Errorf("%q in %s did not exit normally: %w", argv[0], dir, err)}
+		return clierr.Failuref("%q in %s did not exit normally: %w", argv[0], dir, err)
 	default:
-		return &worktree.Error{Kind: worktree.Failure, Err: fmt.Errorf("run %q in %s: %w; nothing ran; check the command name and PATH", argv[0], dir, err)}
+		return clierr.Failuref("run %q in %s: %w; nothing ran; check the command name and PATH", argv[0], dir, err)
 	}
 }

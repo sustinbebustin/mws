@@ -1,12 +1,13 @@
 package commands
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -100,7 +101,7 @@ func TestRunClonePlacesPeerUnderWorkingCopiesDir(t *testing.T) {
 	}
 
 	withCwd(t, metaRoot, func() {
-		if err := runClone(context.Background(), nopReporter{}, "peer", setupSkip, nil); err != nil {
+		if err := runClone(context.Background(), nopReporter{}, io.Discard, "peer", setupSkip, optionalChoice{}); err != nil {
 			t.Fatalf("runClone: %v", err)
 		}
 	})
@@ -177,7 +178,7 @@ func TestRunCloneFailsWhenRepoURLMissing(t *testing.T) {
 
 	rep := &recordingReporter{}
 	withCwd(t, metaRoot, func() {
-		err := runClone(context.Background(), rep, "peer", setupSkip, nil)
+		err := runClone(context.Background(), rep, io.Discard, "peer", setupSkip, optionalChoice{})
 		if err == nil {
 			t.Fatalf("expected error when repo URL is empty")
 		}
@@ -213,7 +214,7 @@ func TestRunCloneSkipsSetupWhenClonePhaseFailed(t *testing.T) {
 	}
 
 	withCwd(t, metaRoot, func() {
-		err := runClone(context.Background(), nopReporter{}, "peer", setupForceRun, nil)
+		err := runClone(context.Background(), nopReporter{}, io.Discard, "peer", setupForceRun, optionalChoice{})
 		if err == nil {
 			t.Fatalf("expected clone phase to fail")
 		}
@@ -352,7 +353,7 @@ func TestRunCloneWritesMWSCDFileWhenSet(t *testing.T) {
 
 	rep := &recordingReporter{}
 	withCwd(t, metaRoot, func() {
-		if err := runClone(context.Background(), rep, "peer", setupSkip, nil); err != nil {
+		if err := runClone(context.Background(), rep, io.Discard, "peer", setupSkip, optionalChoice{}); err != nil {
 			t.Fatalf("runClone: %v", err)
 		}
 	})
@@ -384,37 +385,110 @@ func TestRunCloneWritesMWSCDFileWhenSet(t *testing.T) {
 	}
 }
 
-func TestRunClonePrintsCDHintWhenMWSCDFileEmpty(t *testing.T) {
-	metaRoot := seedWorkingRepo(t)
-	t.Setenv("MWS_CD_FILE", "") // empty-string -- distinguished from genuinely unset (see sibling test)
-
-	rep := &recordingReporter{}
-	withCwd(t, metaRoot, func() {
-		if err := runClone(context.Background(), rep, "peer", setupSkip, nil); err != nil {
-			t.Fatalf("runClone: %v", err)
-		}
-	})
-
-	wantHint := "Next: cd " + filepath.Join(metaRoot, "peer")
-	if !slices.Contains(rep.infos, wantHint) {
-		t.Fatalf("expected info hint %q in %v", wantHint, rep.infos)
+func TestRunClonePrintsPathOnStdout(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		env  func(t *testing.T)
+	}{
+		{"MWS_CD_FILE unset", func(t *testing.T) { unsetEnv(t, "MWS_CD_FILE") }},
+		{"MWS_CD_FILE empty", func(t *testing.T) { t.Setenv("MWS_CD_FILE", "") }},
+		{"MWS_CD_FILE set", func(t *testing.T) { t.Setenv("MWS_CD_FILE", filepath.Join(t.TempDir(), "cd")) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			metaRoot := seedWorkingRepo(t)
+			tc.env(t)
+			var out bytes.Buffer
+			withCwd(t, metaRoot, func() {
+				if err := runClone(context.Background(), nopReporter{}, &out, "peer", setupSkip, optionalChoice{}); err != nil {
+					t.Fatalf("runClone: %v", err)
+				}
+			})
+			if got, want := out.String(), filepath.Join(metaRoot, "peer")+"\n"; got != want {
+				t.Fatalf("stdout = %q, want %q", got, want)
+			}
+		})
 	}
 }
 
-func TestRunClonePrintsCDHintWhenMWSCDFileUnset(t *testing.T) {
+func TestRunCloneOfAnExistingCopyReportsItsPath(t *testing.T) {
 	metaRoot := seedWorkingRepo(t)
+	// A working copy is recognised by its harness symlinks.
+	writeFileAll(t, filepath.Join(metaRoot, ".mws", "CLAUDE.md"), "# harness")
 	unsetEnv(t, "MWS_CD_FILE")
-
-	rep := &recordingReporter{}
 	withCwd(t, metaRoot, func() {
-		if err := runClone(context.Background(), rep, "peer", setupSkip, nil); err != nil {
-			t.Fatalf("runClone: %v", err)
+		if err := runClone(context.Background(), nopReporter{}, io.Discard, "peer", setupSkip, optionalChoice{}); err != nil {
+			t.Fatalf("first runClone: %v", err)
+		}
+		var out bytes.Buffer
+		if err := runClone(context.Background(), nopReporter{}, &out, "peer", setupSkip, optionalChoice{}); err != nil {
+			t.Fatalf("second runClone: %v", err)
+		}
+		if got, want := out.String(), filepath.Join(metaRoot, "peer")+"\n"; got != want {
+			t.Fatalf("stdout = %q, want %q", got, want)
 		}
 	})
+}
 
-	wantHint := "Next: cd " + filepath.Join(metaRoot, "peer")
-	if !slices.Contains(rep.infos, wantHint) {
-		t.Fatalf("expected info hint %q in %v", wantHint, rep.infos)
+func TestRunCloneRetryFinishesThePreviousRun(t *testing.T) {
+	metaRoot := seedWorkingRepo(t)
+	writeFileAll(t, filepath.Join(metaRoot, ".mws", "CLAUDE.md"), "# harness")
+	cfg, err := config.Load(metaRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The setup command appends a line per run, so the test can count runs.
+	cfg.Repos[0].Setup = []config.SetupCommand{{Cmd: "echo run >> ../setup.log"}}
+	if err := config.Save(metaRoot, cfg); err != nil {
+		t.Fatal(err)
+	}
+	unsetEnv(t, "MWS_CD_FILE")
+	peer := filepath.Join(metaRoot, "peer")
+	runs := func() int {
+		b, _ := os.ReadFile(filepath.Join(peer, "setup.log"))
+		return strings.Count(string(b), "run")
+	}
+	withCwd(t, metaRoot, func() {
+		clone := func(choice setupChoice) {
+			t.Helper()
+			if err := runClone(context.Background(), nopReporter{}, io.Discard, "peer", choice, optionalChoice{}); err != nil {
+				t.Fatalf("runClone: %v", err)
+			}
+		}
+		clone(setupForceRun)
+		if runs() != 1 {
+			t.Fatalf("first clone ran setup %d times, want 1", runs())
+		}
+		// A repo that failed to clone: the retry clones it and runs its setup.
+		if err := os.RemoveAll(filepath.Join(peer, "frontend")); err != nil {
+			t.Fatal(err)
+		}
+		clone(setupForceRun)
+		if _, err := os.Stat(filepath.Join(peer, "frontend", ".git")); err != nil {
+			t.Fatalf("retry did not clone the missing repo: %v", err)
+		}
+		if runs() != 2 {
+			t.Fatalf("retry ran setup %d times in total, want 2", runs())
+		}
+		// Nothing missing: --no-setup is a no-op, --setup reruns setup.
+		clone(setupSkip)
+		clone(setupForceRun)
+		if runs() != 3 {
+			t.Fatalf("setup ran %d times in total, want 3", runs())
+		}
+	})
+}
+
+func TestRunCloneWithoutTerminalNamesTheMissingFlag(t *testing.T) {
+	metaRoot := seedMetaWithOptional(t)
+	noTerminal(t)
+	withCwd(t, metaRoot, func() {
+		err := runClone(context.Background(), nopReporter{}, io.Discard, "peer", setupSkip, optionalChoice{})
+		if ExitCode(err) != 2 || !strings.Contains(err.Error(), "--no-optional") {
+			t.Fatalf("err = %v (exit %d), want a usage error naming --no-optional", err, ExitCode(err))
+		}
+	})
+	if _, err := os.Stat(filepath.Join(metaRoot, "peer")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("peer was created before the usage error: %v", err)
 	}
 }
 
@@ -428,7 +502,7 @@ func TestRunCloneWarnsWhenMWSCDFileUnwritable(t *testing.T) {
 
 	rep := &recordingReporter{}
 	withCwd(t, metaRoot, func() {
-		if err := runClone(context.Background(), rep, "peer", setupSkip, nil); err != nil {
+		if err := runClone(context.Background(), rep, io.Discard, "peer", setupSkip, optionalChoice{}); err != nil {
 			t.Fatalf("runClone should succeed despite handoff failure: %v", err)
 		}
 	})
@@ -487,7 +561,7 @@ func TestCollectSetupOrderAndOmits(t *testing.T) {
 
 func TestResolveOptional(t *testing.T) {
 	// No optional repos registered: returns nil without opening a prompt.
-	got, err := resolveOptional(&config.Config{}, nil)
+	got, err := resolveOptional(&config.Config{}, optionalChoice{})
 	if err != nil || got != nil {
 		t.Fatalf("no optional repos: got %v err %v", got, err)
 	}
@@ -498,7 +572,7 @@ func TestResolveOptional(t *testing.T) {
 	}}
 
 	// --with selects the named repos non-interactively (no prompt).
-	got, err = resolveOptional(cfg, []string{"worker"})
+	got, err = resolveOptional(cfg, optionalChoice{kind: optionalNamed, names: []string{"worker"}})
 	if err != nil {
 		t.Fatalf("--with worker: %v", err)
 	}
@@ -507,7 +581,7 @@ func TestResolveOptional(t *testing.T) {
 	}
 
 	// Unknown --with name is rejected, listing the registered folders.
-	_, err = resolveOptional(cfg, []string{"nope"})
+	_, err = resolveOptional(cfg, optionalChoice{kind: optionalNamed, names: []string{"nope"}})
 	if err == nil {
 		t.Fatal("expected error for unknown --with folder")
 	}
@@ -544,7 +618,7 @@ func seedMetaWithOptional(t *testing.T) string {
 func TestRunCloneWithIncludesOptionalRepo(t *testing.T) {
 	metaRoot := seedMetaWithOptional(t)
 	withCwd(t, metaRoot, func() {
-		if err := runClone(context.Background(), nopReporter{}, "peer", setupSkip, []string{"worker"}); err != nil {
+		if err := runClone(context.Background(), nopReporter{}, io.Discard, "peer", setupSkip, optionalChoice{kind: optionalNamed, names: []string{"worker"}}); err != nil {
 			t.Fatalf("runClone: %v", err)
 		}
 	})
@@ -559,7 +633,7 @@ func TestRunCloneWithUnknownOptionalFailsBeforeMkdir(t *testing.T) {
 	metaRoot := seedMetaWithOptional(t)
 	var err error
 	withCwd(t, metaRoot, func() {
-		err = runClone(context.Background(), nopReporter{}, "peer", setupSkip, []string{"nope"})
+		err = runClone(context.Background(), nopReporter{}, io.Discard, "peer", setupSkip, optionalChoice{kind: optionalNamed, names: []string{"nope"}})
 	})
 	if err == nil {
 		t.Fatal("expected error for unknown --with folder")
@@ -600,7 +674,7 @@ func TestRunCloneWithRunsOptionalSetup(t *testing.T) {
 	}
 
 	withCwd(t, metaRoot, func() {
-		if err := runClone(context.Background(), nopReporter{}, "peer", setupForceRun, []string{"worker"}); err != nil {
+		if err := runClone(context.Background(), nopReporter{}, io.Discard, "peer", setupForceRun, optionalChoice{kind: optionalNamed, names: []string{"worker"}}); err != nil {
 			t.Fatalf("runClone: %v", err)
 		}
 	})
