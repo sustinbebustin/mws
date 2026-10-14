@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -37,7 +38,7 @@ a different one.`,
 			if len(args) == 1 {
 				name = args[0]
 			}
-			return runRestore(newConsoleReporter(), name, as, yes)
+			return runRestore(cmd.Context(), newConsoleReporter(), name, as, yes)
 		},
 	}
 	cmd.Flags().StringVar(&as, "as", "", "restore under a different working copy name")
@@ -45,7 +46,7 @@ a different one.`,
 	return cmd
 }
 
-func runRestore(r Reporter, name, as string, yes bool) error {
+func runRestore(ctx context.Context, r Reporter, name, as string, yes bool) error {
 	ws, policy, err := locateForTrash()
 	if err != nil {
 		return err

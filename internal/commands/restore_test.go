@@ -18,10 +18,10 @@ func TestRunRestoreRoundTripsHarnessSymlinks(t *testing.T) {
 	mustWriteFile(t, filepath.Join(wc, "local.txt"), "uncommitted work")
 
 	withCwd(t, meta, func() {
-		if err := runRm(nopReporter{}, "feature", true, false); err != nil {
+		if err := runRm(t.Context(), nopReporter{}, "feature", true, false); err != nil {
 			t.Fatalf("runRm: %v", err)
 		}
-		if err := runRestore(nopReporter{}, "feature", "", true); err != nil {
+		if err := runRestore(t.Context(), nopReporter{}, "feature", "", true); err != nil {
 			t.Fatalf("runRestore: %v", err)
 		}
 	})
@@ -64,14 +64,14 @@ func TestRunRestoreRefusesToOverwriteExistingCopy(t *testing.T) {
 	meta, wc := setupRmTree(t, &config.Config{ProjectName: "demo"}, "feature")
 
 	withCwd(t, meta, func() {
-		if err := runRm(nopReporter{}, "feature", true, false); err != nil {
+		if err := runRm(t.Context(), nopReporter{}, "feature", true, false); err != nil {
 			t.Fatalf("runRm: %v", err)
 		}
 		// A new working copy claims the name while the old one is in the trash.
 		mustMkdir(t, wc)
 		mustWriteFile(t, filepath.Join(wc, "new.txt"), "new work")
 
-		err := runRestore(nopReporter{}, "feature", "", true)
+		err := runRestore(t.Context(), nopReporter{}, "feature", "", true)
 		if err == nil {
 			t.Fatalf("runRestore should refuse to overwrite an existing working copy")
 		}
@@ -97,10 +97,10 @@ func TestRunRestoreAsAlternateName(t *testing.T) {
 	meta, wc := setupRmTree(t, &config.Config{ProjectName: "demo"}, "feature")
 
 	withCwd(t, meta, func() {
-		if err := runRm(nopReporter{}, "feature", true, false); err != nil {
+		if err := runRm(t.Context(), nopReporter{}, "feature", true, false); err != nil {
 			t.Fatalf("runRm: %v", err)
 		}
-		if err := runRestore(nopReporter{}, "feature", "feature-recovered", true); err != nil {
+		if err := runRestore(t.Context(), nopReporter{}, "feature", "feature-recovered", true); err != nil {
 			t.Fatalf("runRestore: %v", err)
 		}
 	})
@@ -117,7 +117,7 @@ func TestRunRestoreReportsEmptyTrash(t *testing.T) {
 	meta, _ := setupRmTree(t, &config.Config{ProjectName: "demo"}, "feature")
 
 	withCwd(t, meta, func() {
-		err := runRestore(nopReporter{}, "", "", true)
+		err := runRestore(t.Context(), nopReporter{}, "", "", true)
 		if err == nil {
 			t.Fatalf("runRestore should fail when there is nothing to restore")
 		}
@@ -131,10 +131,10 @@ func TestRunRestoreRejectsUnknownName(t *testing.T) {
 	meta, _ := setupRmTree(t, &config.Config{ProjectName: "demo"}, "feature")
 
 	withCwd(t, meta, func() {
-		if err := runRm(nopReporter{}, "feature", true, false); err != nil {
+		if err := runRm(t.Context(), nopReporter{}, "feature", true, false); err != nil {
 			t.Fatalf("runRm: %v", err)
 		}
-		err := runRestore(nopReporter{}, "nope", "", true)
+		err := runRestore(t.Context(), nopReporter{}, "nope", "", true)
 		if err == nil {
 			t.Fatalf("runRestore should fail on a name that was never trashed")
 		}

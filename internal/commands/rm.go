@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -35,7 +36,7 @@ the meta workspace and harness are untouched.`,
 			if len(args) == 1 {
 				name = args[0]
 			}
-			return runRm(newConsoleReporter(), name, yes, purge)
+			return runRm(cmd.Context(), newConsoleReporter(), name, yes, purge)
 		},
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation")
@@ -43,7 +44,7 @@ the meta workspace and harness are untouched.`,
 	return cmd
 }
 
-func runRm(r Reporter, name string, yes, purge bool) error {
+func runRm(ctx context.Context, r Reporter, name string, yes, purge bool) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
