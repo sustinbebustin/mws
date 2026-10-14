@@ -30,6 +30,7 @@ type NewOptions struct {
 type RepoResult struct {
 	Folder string `json:"folder"`
 	Path   string `json:"path"`
+	// Branch is "" when the checkout is detached.
 	Branch string `json:"branch"`
 	// Base is the commit the worktree started from: the resolved base for a
 	// new branch, the branch tip for a reused one, empty for a reused worktree.
@@ -38,9 +39,12 @@ type RepoResult struct {
 
 // Result describes the worktree New created or found.
 type Result struct {
-	Name   string       `json:"name"`
-	Path   string       `json:"path"`
-	Copy   string       `json:"copy"`
+	Name string `json:"name"`
+	Path string `json:"path"`
+	Copy string `json:"copy"`
+	// Branch is the branch every native repo is on: the requested one for a
+	// new worktree; for a reused one, what its repos are on, or "" when they
+	// differ or are detached (Repos has each).
 	Branch string       `json:"branch"`
 	Reused bool         `json:"reused"`
 	Repos  []RepoResult `json:"repos"`
@@ -121,11 +125,19 @@ func reuse(ctx context.Context, metaRoot string, res Result) (Result, error) {
 	}
 	res.Reused = true
 	res.Repos = make([]RepoResult, 0, len(repos))
-	for _, folder := range repos {
+	for i, folder := range repos {
 		dir := filepath.Join(res.Path, folder)
 		br, err := git.CurrentBranch(ctx, dir)
 		if err != nil {
 			return Result{}, failuref("read branch of %s: %w", dir, err)
+		}
+		if br == "HEAD" {
+			br = ""
+		}
+		if i == 0 {
+			res.Branch = br
+		} else if br != res.Branch {
+			res.Branch = ""
 		}
 		res.Repos = append(res.Repos, RepoResult{Folder: folder, Path: dir, Branch: br})
 	}

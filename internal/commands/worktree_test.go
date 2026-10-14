@@ -416,6 +416,16 @@ func TestWtNewIsIdempotent(t *testing.T) {
 	if n := len(strings.Split(gitT(t, f.meta, "worktree", "list"), "\n")); n != 2 {
 		t.Fatalf("meta has %d worktrees after a rerun, want main + x", n)
 	}
+
+	// A reuse reports the branches the worktree is on, not the ones asked for.
+	if out := decodeNew(t, mustNew(t, f.copy, "x", "--branch", "other", "--json")); out.Branch != "wt/x" {
+		t.Fatalf("rerun --branch other reported branch %q, want x's own wt/x", out.Branch)
+	}
+	gitT(t, filepath.Join(f.wtPath("x"), "frontend"), "switch", "-q", "--detach")
+	out = decodeNew(t, mustNew(t, f.copy, "x", "--json"))
+	if out.Branch != "" || out.Repos[0].Branch != "wt/x" || out.Repos[1].Branch != "" {
+		t.Fatalf("rerun with a detached frontend = %+v, want no common branch and frontend detached", out)
+	}
 }
 
 // assertNothingCreated checks that a failed or refused `wt new name` left no
