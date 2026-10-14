@@ -28,7 +28,10 @@ from no other ref; then the pids of processes running inside it and its age.
 orphan: registered in the meta repo, directory gone (prune drops it).
 unmanaged: a directory in the worktrees dir without marker and registration,
 or a native repo worktree registered outside the worktrees dir. mws never
-removes unmanaged entries.`,
+removes unmanaged entries.
+
+With no entries, stdout stays empty and a "no worktrees in ..." line goes to
+stderr; --json prints {"worktrees": []}. Either way the exit code is 0.`,
 		Example: `  mws wt ls
   mws wt ls --all --json`,
 		Args: usageCheckedArgs(cobra.NoArgs, jsonOut),
@@ -52,9 +55,22 @@ func runWorktreeLs(ctx context.Context, o output, all bool) error {
 	if entries == nil {
 		entries = []worktree.Entry{}
 	}
+	if !o.json && len(entries) == 0 {
+		// stderr, so scripts parsing stdout still see an empty list.
+		o.reporter().Info(emptyWorktreesMessage(ws.WorkingCopy, all))
+		return nil
+	}
 	return o.result(struct {
 		Worktrees []worktree.Entry `json:"worktrees"`
 	}{entries}, func(w io.Writer) error { return printWorktrees(w, entries, all) })
+}
+
+// emptyWorktreesMessage says where ls looked when it found nothing.
+func emptyWorktreesMessage(workingCopy string, all bool) string {
+	if all {
+		return "no worktrees in any working copy"
+	}
+	return "no worktrees in " + filepath.Base(workingCopy)
 }
 
 // printWorktrees writes one aligned line per entry; with all, each name is
