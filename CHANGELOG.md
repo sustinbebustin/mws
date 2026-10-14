@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-14
+
 ### Added
 - Grouped `mws --help`: commands are listed under Workspace, Working copies, Env files, Worktrees, and Shell and info.
 - A step that takes a second or more (a clone, a setup command) shows its duration on its `[OK]` line.
@@ -100,7 +102,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tag-driven release pipeline: pushing a `v*` tag publishes darwin and linux binaries (amd64 and arm64) to GitHub Releases via goreleaser, with checksums and a conventional-commit-grouped changelog.
 - Homebrew tap: every release pushes a formula to `sustinbebustin/homebrew-mws`, enabling `brew install sustinbebustin/mws/mws`.
 
-[Unreleased]: https://github.com/sustinbebustin/mws/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/sustinbebustin/mws/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/sustinbebustin/mws/releases/tag/v0.7.0
 [0.6.0]: https://github.com/sustinbebustin/mws/releases/tag/v0.6.0
 [0.5.0]: https://github.com/sustinbebustin/mws/releases/tag/v0.5.0
 [0.4.2]: https://github.com/sustinbebustin/mws/releases/tag/v0.4.2
