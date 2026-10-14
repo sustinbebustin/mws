@@ -92,6 +92,28 @@ func TestWtPruneRemovesOnlyCleanIdleMergedWorktrees(t *testing.T) {
 	}
 }
 
+func TestWtPruneKeepsAWorktreeWithADetachedRepo(t *testing.T) {
+	f := seedWtWorkspace(t)
+	mustNew(t, f.copy, "x", "--no-setup")
+	backend := filepath.Join(f.wtPath("x"), "backend")
+	gitT(t, backend, "switch", "-q", "--detach")
+	commitIn(t, backend, "only-here.txt")
+	sha := gitT(t, backend, "rev-parse", "HEAD")
+
+	for _, args := range [][]string{{"--dry-run"}, nil} {
+		out := runPrune(t, f.copy, args...)
+		if len(out.Removed) != 0 {
+			t.Fatalf("prune %v removed %+v, want x kept: its detached backend holds %s", args, out.Removed, sha)
+		}
+		if reasons := strings.Join(out.keptReasons("x"), "; "); !strings.Contains(reasons, "backend") || !strings.Contains(reasons, "detached") {
+			t.Fatalf("prune %v kept x for %q, want a reason naming backend's detached HEAD", args, reasons)
+		}
+	}
+	if got := gitT(t, backend, "rev-parse", "HEAD"); got != sha {
+		t.Fatalf("backend HEAD = %s, want %s", got, sha)
+	}
+}
+
 func TestWtPruneKeepsTheWorktreeItRunsIn(t *testing.T) {
 	f := seedWtWorkspace(t)
 	mustNew(t, f.copy, "x", "--no-setup")

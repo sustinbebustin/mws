@@ -177,19 +177,31 @@ func dirtyFolders(repos []innerRepo) []string {
 func unmergedWork(ctx context.Context, repos []innerRepo) ([]string, error) {
 	var out []string
 	for _, ir := range repos {
-		if ir.branch == "" {
-			out = append(out, ir.folder+": detached HEAD")
-			continue
+		n := 0
+		if ir.branch != "" {
+			var err error
+			if n, err = git.UniqueCommits(ctx, ir.src, ir.branch); err != nil {
+				return nil, fmt.Errorf("%s: count unmerged commits on %s: %w", ir.folder, ir.branch, err)
+			}
 		}
-		n, err := git.UniqueCommits(ctx, ir.src, ir.branch)
-		if err != nil {
-			return nil, fmt.Errorf("%s: count unmerged commits on %s: %w", ir.folder, ir.branch, err)
-		}
-		if n > 0 {
-			out = append(out, fmt.Sprintf("%s: %s, %s", ir.folder, ir.branch, unmergedReason(n)))
+		if reason, ok := unmergedRepo(ir.folder, ir.branch, n); ok {
+			out = append(out, reason)
 		}
 	}
 	return out, nil
+}
+
+// unmergedRepo describes one inner repo whose work would be lost with its
+// worktree: detached (branch "", reachability not checked) or holding
+// uniqueCommits no other ref reaches. ok is false when nothing would be lost.
+func unmergedRepo(folder, branch string, uniqueCommits int) (reason string, ok bool) {
+	switch {
+	case branch == "":
+		return folder + ": detached HEAD", true
+	case uniqueCommits > 0:
+		return fmt.Sprintf("%s:%s has %s", folder, branch, unmergedReason(uniqueCommits)), true
+	}
+	return "", false
 }
 
 // leaveTargets moves the process out of any target so its own cwd neither

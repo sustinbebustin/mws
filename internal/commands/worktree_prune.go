@@ -22,8 +22,9 @@ func newWorktreePruneCmd(jsonOut *bool) *cobra.Command {
   2. runs git worktree prune in the meta repo and every native repo, dropping
      registrations whose directories are gone
   3. removes, like rm without --force, every managed worktree whose native
-     repos are clean, that no process runs in, and whose branches hold no
-     commit missing from other refs; the worktree prune runs in is kept
+     repos are clean and on a branch, that no process runs in, and whose
+     branches hold no commit missing from other refs; the worktree prune
+     runs in is kept
 
 It prints what it kept and why. --dry-run reports the same and changes nothing.`,
 		Example: `  mws wt prune --dry-run

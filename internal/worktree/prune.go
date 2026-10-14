@@ -43,7 +43,8 @@ type PruneResult struct {
 
 // Prune repairs stale anchors, drops registrations of vanished worktrees,
 // then removes every managed worktree of the copy that is clean, idle and
-// fully merged, keeping the one the caller runs in.
+// fully merged (no detached inner repo, as RemoveOptions.OnlyIfMerged),
+// keeping the one the caller runs in.
 func Prune(ctx context.Context, r Reporter, opts PruneOptions) (PruneResult, error) {
 	ws := opts.Workspace
 	res := PruneResult{DryRun: opts.DryRun, Repaired: []string{}, Dropped: []string{}, Removed: []Removed{}, Kept: []Kept{}}
@@ -91,11 +92,11 @@ func Prune(ctx context.Context, r Reporter, opts PruneOptions) (PruneResult, err
 			res.Removed = append(res.Removed, Removed{Name: e.Name, Path: e.Path, Branches: []BranchOutcome{}})
 			continue
 		}
-		removed, err := Remove(ctx, r, RemoveOptions{Workspace: ws, Config: opts.Config, Names: []string{e.Name}})
+		removed, err := Remove(ctx, r, RemoveOptions{Workspace: ws, Config: opts.Config, Names: []string{e.Name}, OnlyIfMerged: true})
 		var we *Error
 		switch {
 		case errors.As(err, &we) && we.Kind == Refused:
-			// Changed since it was listed, e.g. an agent started inside it.
+			// Changed since it was listed, e.g. an agent started or committed inside it.
 			res.Kept = append(res.Kept, Kept{Name: e.Name, Path: e.Path, Reasons: []string{err.Error()}})
 		case err != nil:
 			return res, err
@@ -125,8 +126,8 @@ func keepReasons(e *Entry, callerWorktree string) []string {
 		reasons = append(reasons, "in use by process(es) "+joinInts(e.Live))
 	}
 	for _, r := range e.Repos {
-		if r.UniqueCommits > 0 {
-			reasons = append(reasons, fmt.Sprintf("%s:%s has %s", r.Folder, r.Branch, unmergedReason(r.UniqueCommits)))
+		if reason, ok := unmergedRepo(r.Folder, r.Branch, r.UniqueCommits); ok {
+			reasons = append(reasons, reason)
 		}
 	}
 	return reasons
