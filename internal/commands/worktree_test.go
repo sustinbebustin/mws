@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -343,5 +344,257 @@ func TestWtNewReusesUnattachedBranch(t *testing.T) {
 	}
 	if got, want := gitT(t, filepath.Join(f.wtPath("r"), "backend"), "rev-parse", "HEAD"), gitT(t, f.repo("backend"), "rev-parse", "HEAD"); got != want {
 		t.Fatalf("backend at %s, want copy HEAD %s", got, want)
+	}
+}
+
+// newJSONOut mirrors the documented `wt new --json` shape.
+type newJSONOut struct {
+	Name   string `json:"name"`
+	Path   string `json:"path"`
+	Copy   string `json:"copy"`
+	Branch string `json:"branch"`
+	Reused bool   `json:"reused"`
+	Repos  []struct {
+		Folder string `json:"folder"`
+		Path   string `json:"path"`
+		Branch string `json:"branch"`
+		Base   string `json:"base"`
+	} `json:"repos"`
+	Error *struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+func decodeNew(t *testing.T, res wtResult) newJSONOut {
+	t.Helper()
+	var out newJSONOut
+	if err := json.Unmarshal([]byte(res.stdout), &out); err != nil {
+		t.Fatalf("stdout is not one JSON object: %v\n%s", err, res.stdout)
+	}
+	return out
+}
+
+func TestWtNewJSONShape(t *testing.T) {
+	f := seedWtWorkspace(t)
+	out := decodeNew(t, mustNew(t, f.copy, "x", "--no-setup", "--json"))
+
+	if out.Name != "x" || out.Path != f.wtPath("x") || out.Copy != f.copy || out.Branch != "wt/x" || out.Reused || out.Error != nil {
+		t.Fatalf("unexpected result: %+v", out)
+	}
+	if len(out.Repos) != 2 {
+		t.Fatalf("repos = %+v, want backend and frontend", out.Repos)
+	}
+	for i, folder := range []string{"backend", "frontend"} {
+		r := out.Repos[i]
+		want := gitT(t, f.repo(folder), "rev-parse", "HEAD")
+		if r.Folder != folder || r.Path != filepath.Join(f.wtPath("x"), folder) || r.Branch != "wt/x" || r.Base != want {
+			t.Fatalf("repo %d = %+v, want %s on wt/x from %s", i, r, folder, want)
+		}
+	}
+}
+
+func TestWtNewIsIdempotent(t *testing.T) {
+	f := seedWtWorkspace(t)
+	mustNew(t, f.copy, "x", "--no-setup")
+
+	plain := mustNew(t, f.copy, "x")
+	if plain.lastLine() != f.wtPath("x") {
+		t.Fatalf("rerun printed %q, want %q", plain.lastLine(), f.wtPath("x"))
+	}
+	out := decodeNew(t, mustNew(t, f.copy, "x", "--json"))
+	if !out.Reused || out.Path != f.wtPath("x") || len(out.Repos) != 2 || out.Repos[0].Branch != "wt/x" {
+		t.Fatalf("rerun --json = %+v, want reused x with its repos", out)
+	}
+	if n := len(strings.Split(gitT(t, f.meta, "worktree", "list"), "\n")); n != 2 {
+		t.Fatalf("meta has %d worktrees after a rerun, want main + x", n)
+	}
+}
+
+// assertNothingCreated checks that a failed or refused `wt new name` left no
+// directory, registration or branch behind.
+func assertNothingCreated(t *testing.T, f wtFixture, name string) {
+	t.Helper()
+	if _, err := os.Lstat(filepath.Join(f.copy, ".wt")); err == nil {
+		entries, _ := os.ReadDir(filepath.Join(f.copy, ".wt"))
+		for _, e := range entries {
+			if e.Name() == name {
+				t.Fatalf("%s left behind", f.wtPath(name))
+			}
+		}
+	}
+	for _, dir := range []string{f.meta, f.repo("backend"), f.repo("frontend")} {
+		for _, line := range strings.Split(gitT(t, dir, "worktree", "list", "--porcelain"), "\n") {
+			if strings.HasPrefix(line, "worktree ") && strings.Contains(line, filepath.Join(".wt", name)) {
+				t.Fatalf("%s still registers %s", dir, line)
+			}
+		}
+	}
+	for _, folder := range []string{"backend", "frontend"} {
+		if got := gitT(t, f.repo(folder), "branch", "--list", "wt/"+name); got != "" {
+			t.Fatalf("%s kept branch wt/%s", folder, name)
+		}
+	}
+}
+
+func TestWtNewRollsBackWhenAnInnerRepoFails(t *testing.T) {
+	f := seedWtWorkspace(t)
+	// frontend sorts after backend, so backend's worktree exists when this fires;
+	// a failing post-checkout hook also leaves frontend's branch and registration.
+	writeFileAll(t, filepath.Join(f.repo("frontend"), ".git", "hooks", "post-checkout"), "#!/bin/sh\nexit 1\n")
+	if err := os.Chmod(filepath.Join(f.repo("frontend"), ".git", "hooks", "post-checkout"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	res := runWt(t, f.copy, "new", "x", "--no-setup")
+	if res.code != 1 {
+		t.Fatalf("exit %d, want 1\nstderr: %s", res.code, res.stderr)
+	}
+	if !strings.Contains(res.stderr, "removed") {
+		t.Fatalf("error should say what happened to the partial worktree:\n%s", res.stderr)
+	}
+	assertNothingCreated(t, f, "x")
+	if _, err := os.Lstat(filepath.Join(f.copy, ".wt")); err == nil {
+		t.Fatal("the worktrees dir created by the failed run is still there")
+	}
+}
+
+func TestWtNewRefusesBranchCheckedOutElsewhere(t *testing.T) {
+	f := seedWtWorkspace(t)
+	mustNew(t, f.copy, "x", "--no-setup")
+
+	res := runWt(t, f.copy, "new", "y", "--branch", "wt/x", "--no-setup", "--json")
+	if res.code != 3 {
+		t.Fatalf("exit %d, want 3\nstderr: %s", res.code, res.stderr)
+	}
+	out := decodeNew(t, res)
+	if out.Error == nil || out.Error.Code != "refused" || !strings.Contains(out.Error.Message, f.wtPath("x")) {
+		t.Fatalf("error = %+v, want refused naming where wt/x is checked out", out.Error)
+	}
+	assertNothingCreated(t, f, "y")
+
+	// The copy's own checkout counts as elsewhere too.
+	res = runWt(t, f.copy, "new", "z", "--branch", "feat/integration", "--no-setup")
+	if res.code != 3 || !strings.Contains(res.stderr, f.repo("backend")) {
+		t.Fatalf("exit %d, want 3 naming the copy's checkout\nstderr: %s", res.code, res.stderr)
+	}
+}
+
+func TestWtNewRefusesRepoMidMerge(t *testing.T) {
+	f := seedWtWorkspace(t)
+	front := f.repo("frontend")
+	gitT(t, front, "switch", "-q", "-c", "side", "main")
+	writeFileAll(t, filepath.Join(front, "side.txt"), "side")
+	gitT(t, front, "add", "side.txt")
+	gitT(t, front, "commit", "-q", "-m", "side")
+	gitT(t, front, "switch", "-q", "feat/integration")
+	gitT(t, front, "merge", "-q", "--no-ff", "--no-commit", "side")
+
+	res := runWt(t, f.copy, "new", "x", "--no-setup")
+	if res.code != 3 || !strings.Contains(res.stderr, "merge") {
+		t.Fatalf("exit %d, want 3 mentioning the merge\nstderr: %s", res.code, res.stderr)
+	}
+	assertNothingCreated(t, f, "x")
+}
+
+func TestWtNewRefusesUnmanagedDirectory(t *testing.T) {
+	f := seedWtWorkspace(t)
+	writeFileAll(t, filepath.Join(f.wtPath("u"), "notes.txt"), "keep me")
+
+	res := runWt(t, f.copy, "new", "u", "--no-setup")
+	if res.code != 3 {
+		t.Fatalf("exit %d, want 3\nstderr: %s", res.code, res.stderr)
+	}
+	if got := readFile(t, filepath.Join(f.wtPath("u"), "notes.txt")); got != "keep me" {
+		t.Fatalf("refused create touched the directory: %q", got)
+	}
+}
+
+func TestWtNewUsageErrors(t *testing.T) {
+	f := seedWtWorkspace(t)
+	for name, args := range map[string][]string{
+		"bad name":     {"new", ".hidden"},
+		"no name":      {"new"},
+		"bad branch":   {"new", "x", "--branch", "a..b"},
+		"unknown flag": {"new", "x", "--nope"},
+	} {
+		if res := runWt(t, f.copy, args...); res.code != 2 {
+			t.Fatalf("%s: exit %d, want 2\nstderr: %s", name, res.code, res.stderr)
+		}
+	}
+	if out := decodeNew(t, runWt(t, f.copy, "new", "--json")); out.Error == nil || out.Error.Code != "usage" {
+		t.Fatalf("missing name with --json: error = %+v, want code usage", out.Error)
+	}
+	res := runWt(t, f.meta, "new", "x", "--json")
+	if res.code != 2 {
+		t.Fatalf("from the meta root: exit %d, want 2\nstderr: %s", res.code, res.stderr)
+	}
+	if out := decodeNew(t, res); out.Error == nil || out.Error.Code != "usage" {
+		t.Fatalf("from the meta root: error = %+v, want code usage", out.Error)
+	}
+}
+
+func TestWtNewRunsSetup(t *testing.T) {
+	f := seedWtWorkspace(t)
+	f.cfg.Repos[0].Setup = []config.SetupCommand{{Cmd: "touch repo-setup-ran"}}
+	f.cfg.Worktrees = &config.Worktrees{Setup: []config.SetupCommand{{Cmd: "touch root-setup-ran"}}}
+	f.saveConfig(t)
+
+	mustNew(t, f.copy, "x")
+	for _, p := range []string{"backend/repo-setup-ran", "root-setup-ran"} {
+		if _, err := os.Stat(filepath.Join(f.wtPath("x"), p)); err != nil {
+			t.Fatalf("setup did not create %s: %v", p, err)
+		}
+	}
+	// The copy itself is untouched by setup.
+	if _, err := os.Stat(filepath.Join(f.repo("backend"), "repo-setup-ran")); err == nil {
+		t.Fatal("repo setup ran in the working copy instead of the worktree")
+	}
+}
+
+func TestWtNewRepoSetupFalseRunsOnlyRootSetup(t *testing.T) {
+	f := seedWtWorkspace(t)
+	off := false
+	f.cfg.Repos[0].Setup = []config.SetupCommand{{Cmd: "touch repo-setup-ran"}}
+	f.cfg.Worktrees = &config.Worktrees{RepoSetup: &off, Setup: []config.SetupCommand{{Cmd: "touch root-setup-ran"}}}
+	f.saveConfig(t)
+
+	mustNew(t, f.copy, "x")
+	if _, err := os.Stat(filepath.Join(f.wtPath("x"), "backend", "repo-setup-ran")); err == nil {
+		t.Fatal("repo_setup = false still ran [[repos.setup]]")
+	}
+	if _, err := os.Stat(filepath.Join(f.wtPath("x"), "root-setup-ran")); err != nil {
+		t.Fatalf("[[worktrees.setup]] did not run: %v", err)
+	}
+}
+
+func TestWtNewSetupFailureKeepsWorktree(t *testing.T) {
+	f := seedWtWorkspace(t)
+	f.cfg.Repos[1].Setup = []config.SetupCommand{{Cmd: "exit 7"}}
+	f.saveConfig(t)
+
+	res := runWt(t, f.copy, "new", "x", "--json")
+	if res.code != 1 {
+		t.Fatalf("exit %d, want 1\nstderr: %s", res.code, res.stderr)
+	}
+	out := decodeNew(t, res)
+	if out.Path != f.wtPath("x") || out.Error == nil || out.Error.Code != "setup_failed" || !strings.Contains(out.Error.Message, "exit 7") {
+		t.Fatalf("result = %+v, want the path plus a setup_failed error naming the command", out)
+	}
+	if _, err := os.Stat(filepath.Join(f.wtPath("x"), project.WorktreeMarkerFileName)); err != nil {
+		t.Fatalf("worktree should be kept after a setup failure: %v", err)
+	}
+
+	plain := runWt(t, f.copy, "new", "y")
+	if plain.code != 1 || plain.lastLine() != f.wtPath("y") {
+		t.Fatalf("plain: exit %d, last line %q; want 1 and the path", plain.code, plain.lastLine())
+	}
+}
+
+func TestWtPathUnknownWorktree(t *testing.T) {
+	f := seedWtWorkspace(t)
+	res := runWt(t, f.copy, "path", "nope")
+	if res.code != 1 || res.stdout != "" {
+		t.Fatalf("exit %d stdout %q, want 1 and nothing on stdout", res.code, res.stdout)
 	}
 }

@@ -42,11 +42,12 @@ func newWorktreeCmd() *cobra.Command {
 	return cmd
 }
 
-// wtArgs validates positional args, tagging a mismatch as a usage error.
-func wtArgs(n int) cobra.PositionalArgs {
+// wtArgs validates positional args, tagging a mismatch as a usage error and
+// printing it as JSON under --json (flags are parsed before args).
+func wtArgs(n int, jsonOut *bool) cobra.PositionalArgs {
 	return func(cmd *cobra.Command, args []string) error {
 		if err := cobra.ExactArgs(n)(cmd, args); err != nil {
-			return &worktree.Error{Kind: worktree.Usage, Err: fmt.Errorf("%w; see `%s --help`", err, cmd.CommandPath())}
+			return emitWtError(cmd.OutOrStdout(), *jsonOut, &worktree.Error{Kind: worktree.Usage, Err: fmt.Errorf("%w; see `%s --help`", err, cmd.CommandPath())})
 		}
 		return nil
 	}
@@ -79,7 +80,7 @@ keeps the worktree, prints its path and exits 1. Refuses (exit 3) a branch
 checked out elsewhere and a repo in the middle of a merge or rebase.`,
 		Example: `  mws wt new 04
   mws wt new 04 --branch feat/save-roof --base main --json`,
-		Args: wtArgs(1),
+		Args: wtArgs(1, jsonOut),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorktreeNew(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), *jsonOut, args[0], f)
 		},
@@ -94,7 +95,7 @@ func newWorktreePathCmd(jsonOut *bool) *cobra.Command {
 	return &cobra.Command{
 		Use:   "path <name>",
 		Short: "Print the absolute path of a worktree",
-		Args:  wtArgs(1),
+		Args:  wtArgs(1, jsonOut),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorktreePath(cmd.Context(), cmd.OutOrStdout(), *jsonOut, args[0])
 		},
