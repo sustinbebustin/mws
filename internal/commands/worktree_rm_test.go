@@ -112,6 +112,31 @@ func TestWtRmKeepsBranchWithUnmergedCommits(t *testing.T) {
 	}
 }
 
+// A failure after earlier names were removed still reports those removals.
+func TestWtRmReportsRemovalsBeforeAFailure(t *testing.T) {
+	f := seedWtWorkspace(t)
+	mustNew(t, f.copy, "x", "--no-setup")
+	mustNew(t, f.copy, "y", "--no-setup")
+	// git refuses to remove a locked worktree without --force --force.
+	gitT(t, f.repo("frontend"), "worktree", "lock", filepath.Join(f.wtPath("y"), "frontend"))
+
+	res := runWt(t, f.copy, "rm", "x", "y", "--json")
+	if res.code != 1 {
+		t.Fatalf("exit %d, want 1\nstderr: %s", res.code, res.stderr)
+	}
+	var out struct {
+		Removed []struct {
+			Name string `json:"name"`
+		} `json:"removed"`
+		Error *jsonErrorOut `json:"error"`
+	}
+	decodeJSON(t, res, &out)
+	if len(out.Removed) != 1 || out.Removed[0].Name != "x" || out.Error == nil || !strings.Contains(out.Error.Message, "y") {
+		t.Fatalf("output = %+v, want x removed and an error naming y", out)
+	}
+	assertRemoved(t, f, "x")
+}
+
 // A detached HEAD's commits live only in that worktree's HEAD and reflog,
 // which git deletes along with the worktree.
 func TestWtRmRefusesDetachedCommitsUnlessForced(t *testing.T) {

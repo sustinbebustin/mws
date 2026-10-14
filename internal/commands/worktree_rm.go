@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -54,25 +55,38 @@ func runWorktreeRm(ctx context.Context, o wtOutput, names []string, f wtRmFlags)
 		Force:      f.force,
 		KeepBranch: f.keepBranch,
 	})
-	if err != nil {
+	switch {
+	case err == nil:
+		return o.result(struct {
+			Removed []worktree.Removed `json:"removed"`
+		}{removed}, func(w io.Writer) error { return printRemoved(w, removed) })
+	case len(removed) == 0:
 		return o.fail(err)
+	case o.json:
+		// A later name failed after earlier ones were removed: report both.
+		return errors.Join(err, writeJSON(o.stdout, struct {
+			Removed []worktree.Removed `json:"removed"`
+			Error   *jsonError         `json:"error"`
+		}{removed, toJSONError(err)}))
+	default:
+		return errors.Join(err, printRemoved(o.stdout, removed))
 	}
-	return o.result(struct {
-		Removed []worktree.Removed `json:"removed"`
-	}{removed}, func(w io.Writer) error {
-		for _, r := range removed {
-			if _, err := fmt.Fprintf(w, "removed %s\n", r.Path); err != nil {
+}
+
+// printRemoved writes one line per removed worktree and one per kept branch.
+func printRemoved(w io.Writer, removed []worktree.Removed) error {
+	for _, r := range removed {
+		if _, err := fmt.Fprintf(w, "removed %s\n", r.Path); err != nil {
+			return err
+		}
+		for _, b := range r.Branches {
+			if b.Deleted {
+				continue
+			}
+			if _, err := fmt.Fprintf(w, "kept %s:%s, %s\n", b.Folder, b.Branch, b.Reason); err != nil {
 				return err
 			}
-			for _, b := range r.Branches {
-				if b.Deleted {
-					continue
-				}
-				if _, err := fmt.Fprintf(w, "kept %s:%s, %s\n", b.Folder, b.Branch, b.Reason); err != nil {
-					return err
-				}
-			}
 		}
-		return nil
-	})
+	}
+	return nil
 }
