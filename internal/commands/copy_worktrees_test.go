@@ -14,6 +14,76 @@ import (
 	"github.com/sustinbebustin/mws/internal/trash"
 )
 
+// assertWorktreeIntact checks that the worktree at root works after a move:
+// its anchor and inner repos are registered at root, the inner repos are
+// still on their wt/ branch, and the untracked file seeded in frontend is
+// still there.
+func assertWorktreeIntact(t *testing.T, f wtFixture, root, name string) {
+	t.Helper()
+	if got := gitT(t, root, "rev-parse", "--show-toplevel"); got != root {
+		t.Fatalf("anchor toplevel = %q, want %q", got, root)
+	}
+	meta := gitT(t, f.meta, "worktree", "list", "--porcelain")
+	if !strings.Contains(meta, "worktree "+root+"\n") || strings.Contains(meta, "prunable") {
+		t.Fatalf("meta registrations do not hold %s cleanly:\n%s", root, meta)
+	}
+	for _, folder := range []string{"backend", "frontend"} {
+		dir := filepath.Join(root, folder)
+		if got := gitT(t, dir, "branch", "--show-current"); got != "wt/"+name {
+			t.Fatalf("%s branch = %q, want wt/%s", folder, got, name)
+		}
+		if got := gitT(t, dir, "rev-parse", "--show-toplevel"); got != dir {
+			t.Fatalf("%s toplevel = %q, want %q", folder, got, dir)
+		}
+	}
+	if got := gitT(t, filepath.Join(root, "frontend"), "status", "--porcelain"); got != "?? wip.txt" {
+		t.Fatalf("frontend status = %q, want the untracked wip.txt", got)
+	}
+}
+
+func TestRestoreRepairsWorktrees(t *testing.T) {
+	for _, tc := range []struct{ name, as string }{{"same name", ""}, {"as", "c2"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := seedWtWorkspace(t)
+			mustNew(t, f.copy, "x", "--no-setup")
+			writeFileAll(t, filepath.Join(f.wtPath("x"), "frontend", "wip.txt"), "unsaved")
+
+			withCwd(t, f.meta, func() {
+				if err := runRm(t.Context(), nopReporter{}, "c", true, false); err != nil {
+					t.Fatalf("runRm: %v", err)
+				}
+				if err := runRestore(t.Context(), nopReporter{}, "c", tc.as, true); err != nil {
+					t.Fatalf("runRestore: %v", err)
+				}
+			})
+			dest := f.copy
+			if tc.as != "" {
+				dest = filepath.Join(f.meta, tc.as)
+			}
+			assertWorktreeIntact(t, f, filepath.Join(dest, ".wt", "x"), "x")
+		})
+	}
+}
+
+// `mws trash prune` and `mws wt prune` run `git worktree prune` on the meta
+// repo; a copy waiting in the trash must survive that.
+func TestRestoreSurvivesAMetaPruneWhileTrashed(t *testing.T) {
+	f := seedWtWorkspace(t)
+	mustNew(t, f.copy, "x", "--no-setup")
+	writeFileAll(t, filepath.Join(f.wtPath("x"), "frontend", "wip.txt"), "unsaved")
+
+	withCwd(t, f.meta, func() {
+		if err := runRm(t.Context(), nopReporter{}, "c", true, false); err != nil {
+			t.Fatalf("runRm: %v", err)
+		}
+		gitT(t, f.meta, "worktree", "prune")
+		if err := runRestore(t.Context(), nopReporter{}, "c", "", true); err != nil {
+			t.Fatalf("runRestore: %v", err)
+		}
+	})
+	assertWorktreeIntact(t, f, f.wtPath("x"), "x")
+}
+
 func TestRmConfirmationListsWorktrees(t *testing.T) {
 	f := seedWtWorkspace(t)
 	mustNew(t, f.copy, "x", "--no-setup")

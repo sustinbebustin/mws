@@ -1,7 +1,9 @@
 package worktree
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -25,6 +27,24 @@ func Roots(copyPath string, policy config.WorktreePolicy) ([]string, error) {
 		root := filepath.Join(wtDir, d.Name())
 		if d.IsDir() && hasMarker(root) {
 			roots = append(roots, root)
+		}
+	}
+	return roots, nil
+}
+
+// RepairCopy reconnects every worktree of the working copy at copyPath with
+// the repos that own it, after the copy moved (trashed, restored, renamed):
+// the anchor with the meta repo and each inner worktree with the copy's
+// native repo. It returns the repaired roots; a copy without worktrees runs
+// no git at all.
+func RepairCopy(ctx context.Context, metaRoot, copyPath string, policy config.WorktreePolicy) ([]string, error) {
+	roots, err := Roots(copyPath, policy)
+	if err != nil {
+		return nil, err
+	}
+	for i, root := range roots {
+		if err := repair(ctx, metaRoot, copyPath, root); err != nil {
+			return roots[:i], fmt.Errorf("repair worktree %s: %w", root, err)
 		}
 	}
 	return roots, nil

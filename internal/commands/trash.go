@@ -74,10 +74,11 @@ func newTrashEmptyCmd() *cobra.Command {
 }
 
 func runTrashList(r Reporter) error {
-	ws, policy, err := locateForTrash()
+	ws, cfg, err := locateForTrash()
 	if err != nil {
 		return err
 	}
+	policy := cfg.TrashPolicy()
 	sweepTrash(r, ws.MetaRoot, policy)
 
 	entries, skipped, err := trash.List(ws.MetaRoot)
@@ -99,10 +100,11 @@ func runTrashList(r Reporter) error {
 }
 
 func runTrashPrune(r Reporter) error {
-	ws, policy, err := locateForTrash()
+	ws, cfg, err := locateForTrash()
 	if err != nil {
 		return err
 	}
+	policy := cfg.TrashPolicy()
 	if policy.Retention <= 0 {
 		r.Info("trash.retention_days is 0, so nothing expires. Use `mws trash empty` to purge everything.")
 		return nil
@@ -180,24 +182,24 @@ func emptyPromptTitle(entries, skipped int) string {
 		entries, skipped, plural(skipped, "entry", "entries"))
 }
 
-// locateForTrash resolves the workspace from cwd and the effective trash
-// policy. Like the other commands it loads the config explicitly, because
-// project.Locate tolerates a malformed .mws.toml and would otherwise leave the
-// caller acting on default retention it never configured.
-func locateForTrash() (*project.Workspace, config.TrashPolicy, error) {
+// locateForTrash resolves the workspace from cwd and its config. Like the
+// other commands it loads the config explicitly, because project.Locate
+// tolerates a malformed .mws.toml and would otherwise leave the caller acting
+// on default retention it never configured.
+func locateForTrash() (*project.Workspace, *config.Config, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return nil, config.TrashPolicy{}, err
+		return nil, nil, err
 	}
 	ws, err := project.Locate(cwd)
 	if err != nil {
-		return nil, config.TrashPolicy{}, err
+		return nil, nil, err
 	}
 	cfg, err := config.Load(ws.MetaRoot)
 	if err != nil {
-		return nil, config.TrashPolicy{}, err
+		return nil, nil, err
 	}
-	return ws, cfg.TrashPolicy(), nil
+	return ws, cfg, nil
 }
 
 // sweepTrash purges expired entries and reports what went. A sweep failure is

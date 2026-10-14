@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/sustinbebustin/mws/internal/config"
+	"github.com/sustinbebustin/mws/internal/git"
 	"github.com/sustinbebustin/mws/internal/project"
 	"github.com/sustinbebustin/mws/internal/trash"
 	"github.com/sustinbebustin/mws/internal/worktree"
@@ -128,6 +129,11 @@ func runRm(ctx context.Context, r Reporter, name string, yes, purge bool) error 
 			return err
 		}
 		r.OK(fmt.Sprintf("Deleted %s", target))
+		if len(wts) > 0 {
+			if err := git.PruneWorktrees(ctx, ws.MetaRoot); err != nil {
+				r.Warn(fmt.Sprintf("Could not drop the deleted worktrees' registrations from the meta repo: %v. Run `git worktree prune` in %s", err, ws.MetaRoot))
+			}
+		}
 		return nil
 	}
 
@@ -136,6 +142,11 @@ func runRm(ctx context.Context, r Reporter, name string, yes, purge bool) error 
 		return err
 	}
 	r.OK(fmt.Sprintf("Trashed %s -> %s", target, filepath.Join(trash.DirName, entry.ID)))
+	// Point the worktree registrations into the trash, so a `git worktree
+	// prune` on the meta repo before the restore does not drop them.
+	if _, err := worktree.RepairCopy(ctx, ws.MetaRoot, entry.CopyPath, cfg.WorktreePolicy()); err != nil {
+		r.Warn(fmt.Sprintf("Could not re-point the worktrees of %s at the trash: %v. They restore intact unless `mws trash prune|empty` or `mws wt prune` runs before `mws restore %s`", name, err, entry.Name))
+	}
 	if policy.Retention > 0 {
 		r.Info(fmt.Sprintf("Restore within %s with `mws restore %s`.", humanDuration(policy.Retention), entry.Name))
 	} else {
