@@ -7,8 +7,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
+
+	"github.com/sustinbebustin/mws/internal/config"
+	"github.com/sustinbebustin/mws/internal/project"
+	"github.com/sustinbebustin/mws/internal/worktree"
 )
 
 // claudeProjectDirEnv is set by Claude Code for every hook: the session's
@@ -51,6 +56,14 @@ func newWorktreeHookCmd() *cobra.Command {
 			Args:  cobra.NoArgs,
 			RunE: func(cmd *cobra.Command, _ []string) error {
 				return hookFailed(runHookCreate(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr()))
+			},
+		},
+		&cobra.Command{
+			Use:   "remove",
+			Short: "WorktreeRemove hook: remove a worktree, exit 1 on any refusal",
+			Args:  cobra.NoArgs,
+			RunE: func(cmd *cobra.Command, _ []string) error {
+				return hookFailed(runHookRemove(cmd.Context(), cmd.InOrStdin(), cmd.ErrOrStderr()))
 			},
 		},
 	)
@@ -112,4 +125,62 @@ func runHookCreate(ctx context.Context, in io.Reader, out, errW io.Writer) error
 		return nil
 	}
 	return err
+}
+
+// removePayload is the part of the WorktreeRemove payload mws reads.
+type removePayload struct {
+	WorktreePath string `json:"worktree_path"`
+}
+
+func runHookRemove(ctx context.Context, in io.Reader, errW io.Writer) error {
+	var p removePayload
+	if err := decodePayload(in, &p); err != nil {
+		return err
+	}
+	if p.WorktreePath == "" {
+		return errors.New(`the WorktreeRemove payload has no "worktree_path"; nothing was removed`)
+	}
+	ws, cfg, name, err := locateManagedRoot(p.WorktreePath)
+	if err != nil {
+		return err
+	}
+	if name == "" || ws.Worktree != filepath.Clean(p.WorktreePath) {
+		return fmt.Errorf("%s is not the root of a worktree mws manages, so mws will not remove it; nothing was removed; inspect it and remove it by hand if it is yours", p.WorktreePath)
+	}
+	r := consoleReporter{w: errW}
+	removed, err := worktree.Remove(ctx, r, worktree.RemoveOptions{Workspace: ws, Config: cfg, Names: []string{name}})
+	if err != nil {
+		return err
+	}
+	reportKeptBranches(r, removed)
+	return nil
+}
+
+// locateManagedRoot resolves the workspace of dir and, when dir lies in a
+// marked worktree in its copy's worktrees dir, that worktree's name ("" when
+// it does not). Registration is checked later by worktree.Resolve.
+func locateManagedRoot(dir string) (*project.Workspace, *config.Config, string, error) {
+	ws, cfg, err := locateWorktreeAt(dir, "it is not inside a meta workspace")
+	if err != nil {
+		return nil, nil, "", err
+	}
+	if ws.Worktree == "" {
+		return ws, cfg, "", nil
+	}
+	name := filepath.Base(ws.Worktree)
+	if worktree.Path(ws.WorkingCopy, cfg.WorktreePolicy(), name) != ws.Worktree {
+		return ws, cfg, "", nil
+	}
+	return ws, cfg, name, nil
+}
+
+// reportKeptBranches says which branches a removal kept, and why.
+func reportKeptBranches(r Reporter, removed []worktree.Removed) {
+	for _, rm := range removed {
+		for _, b := range rm.Branches {
+			if !b.Deleted {
+				r.Info(fmt.Sprintf("kept %s:%s, %s", b.Folder, b.Branch, b.Reason))
+			}
+		}
+	}
 }

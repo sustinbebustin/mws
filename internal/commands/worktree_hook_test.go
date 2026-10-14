@@ -117,6 +117,50 @@ func TestWtHookCreateSetupFailureStillExits0WithPath(t *testing.T) {
 	}
 }
 
+func TestWtHookRemoveRefusesDirtyWithExit1(t *testing.T) {
+	f := seedWtWorkspace(t)
+	mustNew(t, f.copy, "x", "--no-setup")
+	wip := filepath.Join(f.wtPath("x"), "frontend", "wip.txt")
+	writeFileAll(t, wip, "unsaved")
+
+	res := runHook(t, f, f.copy, "remove", map[string]string{"worktree_path": f.wtPath("x")})
+	if res.code != 1 {
+		t.Fatalf("exit %d, want 1\nstderr: %s", res.code, res.stderr)
+	}
+	if !strings.Contains(res.stderr, "frontend") {
+		t.Fatalf("stderr should name the dirty repo:\n%s", res.stderr)
+	}
+	if got := readFile(t, wip); got != "unsaved" {
+		t.Fatalf("refused remove touched the work: %q", got)
+	}
+}
+
+func TestWtHookRemoveRemovesCleanWorktree(t *testing.T) {
+	f := seedWtWorkspace(t)
+	mustNew(t, f.copy, "x", "--no-setup")
+
+	res := runHook(t, f, f.copy, "remove", map[string]string{"worktree_path": f.wtPath("x")})
+	if res.code != 0 {
+		t.Fatalf("exit %d\nstderr: %s", res.code, res.stderr)
+	}
+	assertRemoved(t, f, "x")
+}
+
+// A path that is not an mws worktree is refused, never deleted.
+func TestWtHookRemoveRefusesForeignPath(t *testing.T) {
+	f := seedWtWorkspace(t)
+	plain := filepath.Join(f.copy, "notes")
+	writeFileAll(t, filepath.Join(plain, "a.txt"), "keep me")
+
+	res := runHook(t, f, f.copy, "remove", map[string]string{"worktree_path": plain})
+	if res.code != 1 {
+		t.Fatalf("exit %d, want 1\nstderr: %s", res.code, res.stderr)
+	}
+	if got := readFile(t, filepath.Join(plain, "a.txt")); got != "keep me" {
+		t.Fatalf("refused remove touched %s: %q", plain, got)
+	}
+}
+
 func TestWtHookCreateReusesName(t *testing.T) {
 	f := seedWtWorkspace(t)
 	payload := map[string]string{"name": "x", "cwd": f.copy}
