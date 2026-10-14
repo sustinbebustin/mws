@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Colour follows each stream on its own: progress on stderr and results on stdout are coloured when that stream is a terminal and plain otherwise, with the same text either way. `cd "$(mws clone ...)"` keeps its colours, and `NO_COLOR` turns them off. Colours are the terminal's own, so they follow its theme. See ADR 0013.
 - Prompts share one theme, and leaving one with ctrl-c prints `Cancelled.` and exits `1` instead of `user aborted`.
 - The final error message starts with `[FAIL]`, matching the progress lines.
+- `mws wt ls` with no worktrees prints `no worktrees in <copy>` (`--all`: `no worktrees in any working copy`) to stderr instead of nothing. Stdout stays empty, `--json` and the exit code are unchanged.
 
 ## [0.6.0] - 2026-10-14
 
