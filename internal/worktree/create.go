@@ -173,14 +173,10 @@ func planRepos(ctx context.Context, copyPath, launch, branch, base string) ([]pl
 		if op != "" {
 			return nil, refusedf("%s: %s is in the middle of a %s, so its HEAD is not a stable base; nothing was created; finish or abort the %s there, then retry", folder, from, op, op)
 		}
-		holders, err := git.Worktrees(ctx, p.src)
-		if err != nil {
+		if holder, err := branchHolder(ctx, p.src, branch, ""); err != nil {
 			return nil, failuref("%s: list worktrees: %w", folder, err)
-		}
-		for _, h := range holders {
-			if h.Branch == branch {
-				return nil, refusedf("%s: branch %s is already checked out at %s, and git allows a branch in one worktree only; nothing was created; use another name or --branch, or switch that checkout off %s", folder, branch, h.Path, branch)
-			}
+		} else if holder != "" {
+			return nil, refusedf("%s: branch %s is already checked out at %s, and git allows a branch in one worktree only; nothing was created; use another name or --branch, or switch that checkout off %s", folder, branch, holder, branch)
 		}
 		if p.reuse, err = git.BranchExists(ctx, p.src, branch); err != nil {
 			return nil, failuref("%s: look up branch %s: %w", folder, branch, err)
@@ -208,6 +204,21 @@ func planRepos(ctx context.Context, copyPath, launch, branch, base string) ([]pl
 	return plan, nil
 }
 
+// branchHolder returns the path of a worktree of repoDir, other than except,
+// that has branch checked out, or "" when there is none.
+func branchHolder(ctx context.Context, repoDir, branch, except string) (string, error) {
+	holders, err := git.Worktrees(ctx, repoDir)
+	if err != nil {
+		return "", err
+	}
+	for _, h := range holders {
+		if h.Branch == branch && h.Path != except {
+			return h.Path, nil
+		}
+	}
+	return "", nil
+}
+
 // builder creates a worktree step by step and remembers every step so
 // rollback can undo exactly what was done.
 type builder struct {
@@ -232,7 +243,7 @@ func (b *builder) rollback(ctx context.Context) error {
 func (b *builder) build(ctx context.Context, r Reporter, opts NewOptions, plan []plannedRepo, branch string) ([]RepoResult, error) {
 	parent := filepath.Dir(b.target)
 	if _, err := os.Stat(parent); errors.Is(err, os.ErrNotExist) {
-		if err := os.Mkdir(parent, 0o755); err != nil {
+		if err := os.Mkdir(parent, 0o755); err != nil && !errors.Is(err, os.ErrExist) {
 			return nil, failuref("create %s: %w", parent, err)
 		}
 		// Remove only if still empty: a concurrent `new` may share it.
@@ -244,14 +255,20 @@ func (b *builder) build(ctx context.Context, r Reporter, opts NewOptions, plan [
 		})
 	}
 
+	// Claim the name: a concurrent `new` of the same name fails here, before
+	// this run registers a rollback step that would delete its directory.
+	if err := os.Mkdir(b.target, 0o755); errors.Is(err, os.ErrExist) {
+		return nil, refusedf("%s appeared while this worktree was being created, probably from a concurrent `mws wt new %s`; nothing was changed; retry to reuse it", b.target, opts.Name)
+	} else if err != nil {
+		return nil, failuref("create %s: %w", b.target, err)
+	}
+	b.onRollback(func(context.Context) error { return os.RemoveAll(b.target) })
+
 	if err := git.AddDetachedNoCheckout(ctx, b.meta, b.target); err != nil {
-		// git may have created the directory before failing.
-		b.onRollback(func(context.Context) error { return os.RemoveAll(b.target) })
 		return nil, failuref("anchor %s to the meta repo at %s (it must be a git repository with at least one commit): %w", b.target, b.meta, err)
 	}
 	b.onRollback(func(ctx context.Context) error {
-		err := git.RemoveWorktreeForce(ctx, b.meta, b.target)
-		return errors.Join(err, os.RemoveAll(b.target))
+		return git.RemoveWorktreeForce(ctx, b.meta, b.target)
 	})
 	if err := git.SparseCheckoutOnly(ctx, b.target, "/.gitignore"); err != nil {
 		return nil, failuref("sparse-checkout the anchor at %s: %w", b.target, err)
@@ -267,9 +284,13 @@ func (b *builder) build(ctx context.Context, r Reporter, opts NewOptions, plan [
 		} else {
 			// Registered before the attempt: a failing checkout hook leaves the
 			// branch and registration behind even though git reports failure.
+			// A branch checked out elsewhere is another run's, never ours.
 			b.onRollback(func(ctx context.Context) error {
 				exists, err := git.BranchExists(ctx, p.src, branch)
 				if err != nil || !exists {
+					return err
+				}
+				if holder, err := branchHolder(ctx, p.src, branch, dst); err != nil || holder != "" {
 					return err
 				}
 				return git.DeleteBranch(ctx, p.src, branch)
