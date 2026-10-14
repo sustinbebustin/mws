@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/sustinbebustin/mws/internal/config"
@@ -51,10 +50,7 @@ func Prune(ctx context.Context, r Reporter, opts PruneOptions) (PruneResult, err
 	if ws.WorkingCopy == "" {
 		return res, usagef("not inside a working copy: run mws worktree prune from a working copy (or a worktree of one) under %s", ws.MetaRoot)
 	}
-	policy := opts.Config.WorktreePolicy()
-	wtDir := filepath.Join(ws.WorkingCopy, policy.Dir)
-
-	stale, orphans, err := staleAndOrphans(ctx, ws.MetaRoot, wtDir)
+	stale, orphans, err := staleAndOrphans(ctx, ws.MetaRoot, ws.WorkingCopy, opts.Config.WorktreePolicy())
 	if err != nil {
 		return res, failuref("inspect worktree registrations of %s: %w", ws.WorkingCopy, err)
 	}
@@ -123,7 +119,7 @@ func keepReasons(e *Entry, callerWorktree string) []string {
 		reasons = append(reasons, "modified or untracked files in "+strings.Join(dirty, ", "))
 	}
 	if len(e.Live) > 0 {
-		reasons = append(reasons, "in use by process(es) "+joinInts(e.Live))
+		reasons = append(reasons, "in use by process(es) "+e.Live.Join(", "))
 	}
 	for _, r := range e.Repos {
 		if reason, ok := unmergedRepo(r.Folder, r.Branch, r.UniqueCommits); ok {
@@ -133,56 +129,26 @@ func keepReasons(e *Entry, callerWorktree string) []string {
 	return reasons
 }
 
-// staleAndOrphans finds marked roots in wtDir the meta repo does not
-// register (stale anchors) and registrations in wtDir whose directory is gone.
-func staleAndOrphans(ctx context.Context, metaRoot, wtDir string) (stale, orphans []string, err error) {
+// staleAndOrphans finds marked roots of the copy the meta repo does not
+// register (stale anchors) and registrations whose directory is gone.
+func staleAndOrphans(ctx context.Context, metaRoot, copyPath string, policy config.WorktreePolicy) (stale, orphans []string, err error) {
 	wts, err := git.Worktrees(ctx, metaRoot)
 	if err != nil {
 		return nil, nil, err
 	}
-	registered := map[string]bool{}
-	for _, w := range wts {
-		if filepath.Dir(w.Path) != wtDir {
-			continue
-		}
-		registered[w.Path] = true
-		if _, err := os.Lstat(w.Path); errors.Is(err, os.ErrNotExist) {
-			orphans = append(orphans, w.Path)
-		}
-	}
-	dirs, err := os.ReadDir(wtDir)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	s, err := scanCopy(copyPath, policy, wts)
+	if err != nil {
 		return nil, nil, err
 	}
-	for _, d := range dirs {
-		root := filepath.Join(wtDir, d.Name())
-		if !d.IsDir() || registered[root] || !hasMarker(root) {
+	for _, d := range s.dirs {
+		if !d.marked || d.registered {
 			continue
 		}
-		if _, err := os.Lstat(filepath.Join(root, ".git")); err == nil {
-			stale = append(stale, root)
+		if _, err := os.Lstat(filepath.Join(d.root, ".git")); err == nil {
+			stale = append(stale, d.root)
 		}
 	}
-	sort.Strings(orphans)
-	return stale, orphans, nil
-}
-
-// repair reconnects the anchor and every inner worktree of root with the
-// repos that own them.
-func repair(ctx context.Context, metaRoot, copyPath, root string) error {
-	if err := git.RepairWorktree(ctx, metaRoot, root); err != nil {
-		return err
-	}
-	folders, err := nativeRepos(root)
-	if err != nil {
-		return err
-	}
-	for _, folder := range folders {
-		if err := git.RepairWorktree(ctx, filepath.Join(copyPath, folder), filepath.Join(root, folder)); err != nil {
-			return fmt.Errorf("%s: %w", folder, err)
-		}
-	}
-	return nil
+	return stale, s.orphans, nil
 }
 
 // pruneRegistrations runs `git worktree prune` in the meta repo and in every

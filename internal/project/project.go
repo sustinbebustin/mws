@@ -130,10 +130,17 @@ func resolveWorktree(copyPath, start, worktreesDir string) string {
 		return ""
 	}
 	root := filepath.Join(copyPath, worktreesDir, parts[1])
-	if st, err := os.Stat(filepath.Join(root, WorktreeMarkerFileName)); err != nil || !st.Mode().IsRegular() {
+	if !IsWorktreeRoot(root) {
 		return ""
 	}
 	return root
+}
+
+// IsWorktreeRoot reports whether dir carries a worktree marker file. It does
+// not check the meta repo's registration.
+func IsWorktreeRoot(dir string) bool {
+	st, err := os.Stat(filepath.Join(dir, WorktreeMarkerFileName))
+	return err == nil && st.Mode().IsRegular()
 }
 
 // CopiesRoot returns the directory under which working copies live: the meta

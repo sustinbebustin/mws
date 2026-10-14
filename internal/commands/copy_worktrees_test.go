@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/sustinbebustin/mws/internal/config"
-	"github.com/sustinbebustin/mws/internal/project"
 	"github.com/sustinbebustin/mws/internal/trash"
 )
 
@@ -149,8 +148,7 @@ func TestRmConfirmationListsWorktrees(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ws := &project.Workspace{MetaRoot: f.meta}
-	wts, err := copyWorktrees(t.Context(), nopReporter{}, ws, cfg, f.copy)
+	wts, err := copyWorktrees(t.Context(), nopReporter{}, f.meta, cfg, f.copy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,6 +176,9 @@ func TestRmRefusesWhileAWorktreeIsLive(t *testing.T) {
 	withCwd(t, f.meta, func() { err = runRm(t.Context(), nopReporter{}, "c", true, false) })
 	if err == nil {
 		t.Fatal("rm removed a copy whose worktree has a live process")
+	}
+	if code := ExitCode(err); code != 3 {
+		t.Fatalf("exit %d, want 3 (refused), as wt rm", code)
 	}
 	for _, want := range []string{"x", strconv.Itoa(agent.Process.Pid), "nothing was removed"} {
 		if !strings.Contains(err.Error(), want) {

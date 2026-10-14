@@ -20,12 +20,13 @@ type Worktree struct {
 // Worktrees lists every worktree registered with the repository at repoDir,
 // the main checkout included.
 func Worktrees(ctx context.Context, repoDir string) ([]Worktree, error) {
-	out, err := capture(ctx, repoDir, "worktree", "list", "--porcelain")
+	// -z ends each field with NUL, so a path may hold a newline.
+	out, err := capture(ctx, repoDir, "worktree", "list", "--porcelain", "-z")
 	if err != nil {
 		return nil, err
 	}
 	var list []Worktree
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\x00") {
 		switch {
 		case strings.HasPrefix(line, "worktree "):
 			list = append(list, Worktree{Path: strings.TrimPrefix(line, "worktree ")})
@@ -113,7 +114,6 @@ func UniqueCommits(ctx context.Context, repoDir, branch string) (int, error) {
 	return n, nil
 }
 
-// DeleteBranch force-deletes a local branch.
 // DetachedUniqueCommits counts the commits on the detached HEAD of the
 // worktree at dir that no local branch, tag or remote-tracking branch
 // reaches: the work lost if that worktree is removed.
@@ -129,6 +129,7 @@ func DetachedUniqueCommits(ctx context.Context, dir string) (int, error) {
 	return n, nil
 }
 
+// DeleteBranch force-deletes a local branch.
 func DeleteBranch(ctx context.Context, repoDir, branch string) error {
 	return run(ctx, repoDir, "branch", "--quiet", "-D", branch)
 }

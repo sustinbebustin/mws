@@ -11,9 +11,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/sustinbebustin/mws/internal/config"
-	"github.com/sustinbebustin/mws/internal/git"
 	"github.com/sustinbebustin/mws/internal/project"
 	"github.com/sustinbebustin/mws/internal/trash"
+	"github.com/sustinbebustin/mws/internal/worktree"
 )
 
 func newTrashCmd() *cobra.Command {
@@ -130,15 +130,10 @@ func runTrashPrune(ctx context.Context, r Reporter) error {
 	return nil
 }
 
-// pruneMetaWorktrees drops the meta repo's registrations of worktrees whose
-// directories are gone, such as those of purged copies. Copies still in the
-// trash keep theirs: rm points them into the trash. A failure only warns,
-// since the purge itself succeeded.
+// pruneMetaWorktrees drops the meta repo's registrations of the purged copies'
+// worktrees. A failure only warns, since the purge itself succeeded.
 func pruneMetaWorktrees(ctx context.Context, r Reporter, metaRoot string) {
-	if _, err := os.Lstat(filepath.Join(metaRoot, ".git")); err != nil {
-		return // not a git repository, so no worktrees
-	}
-	if err := git.PruneWorktrees(ctx, metaRoot); err != nil {
+	if err := worktree.ForgetVanished(ctx, metaRoot); err != nil {
 		r.Warn(fmt.Sprintf("Could not drop stale worktree registrations from the meta repo: %v. Run `git worktree prune` in %s", err, metaRoot))
 	}
 }

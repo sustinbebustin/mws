@@ -217,9 +217,6 @@ func runHookSubagentStop(ctx context.Context, r Reporter, in io.Reader) error {
 	if !managed {
 		return nil
 	}
-	if err := os.Chdir(ws.MetaRoot); err != nil {
-		return fmt.Errorf("kept worktree %s: cannot leave it for the meta root: %w", name, err)
-	}
 	removed, err := worktree.Remove(ctx, r, worktree.RemoveOptions{Workspace: ws, Config: cfg, Names: []string{name}, OnlyIfMerged: true})
 	if err != nil {
 		return fmt.Errorf("kept worktree %s: %w", name, err)

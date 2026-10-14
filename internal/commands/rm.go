@@ -12,7 +12,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/sustinbebustin/mws/internal/config"
-	"github.com/sustinbebustin/mws/internal/git"
 	"github.com/sustinbebustin/mws/internal/project"
 	"github.com/sustinbebustin/mws/internal/trash"
 	"github.com/sustinbebustin/mws/internal/worktree"
@@ -98,12 +97,12 @@ func runRm(ctx context.Context, r Reporter, name string, yes, purge bool) error 
 	if !looksLikeWorkingCopy(ws.MetaRoot, target) {
 		return fmt.Errorf("%s does not contain any harness symlinks pointing into %s/.mws/; refusing to remove. If this is genuinely a working copy whose symlinks are broken, run `mws relink` first, or remove it manually", target, ws.MetaRoot)
 	}
-	wts, err := copyWorktrees(ctx, r, ws, cfg, target)
+	wts, err := copyWorktrees(ctx, r, ws.MetaRoot, cfg, target)
 	if err != nil {
 		return err
 	}
-	if err := refuseLiveWorktrees(target, wts); err != nil {
-		return err
+	if err := worktree.RefuseLive(wts); err != nil {
+		return fmt.Errorf("refusing to remove working copy %s: %w", target, err)
 	}
 
 	if !yes {
@@ -129,7 +128,7 @@ func runRm(ctx context.Context, r Reporter, name string, yes, purge bool) error 
 		}
 		r.OK(fmt.Sprintf("Deleted %s", target))
 		if len(wts) > 0 {
-			if err := git.PruneWorktrees(ctx, ws.MetaRoot); err != nil {
+			if err := worktree.ForgetVanished(ctx, ws.MetaRoot); err != nil {
 				r.Warn(fmt.Sprintf("Could not drop the deleted worktrees' registrations from the meta repo: %v. Run `git worktree prune` in %s", err, ws.MetaRoot))
 			}
 		}
@@ -174,7 +173,7 @@ func rmConfirmDescription(metaRoot, name string, toTrash bool, wts []worktree.En
 // copyWorktrees lists the managed worktrees of the working copy at copyPath.
 // A copy without worktrees needs no git, so a meta workspace that is not a
 // git repository still works.
-func copyWorktrees(ctx context.Context, r Reporter, ws *project.Workspace, cfg *config.Config, copyPath string) ([]worktree.Entry, error) {
+func copyWorktrees(ctx context.Context, r Reporter, metaRoot string, cfg *config.Config, copyPath string) ([]worktree.Entry, error) {
 	roots, err := worktree.Roots(copyPath, cfg.WorktreePolicy())
 	if err != nil {
 		return nil, fmt.Errorf("find worktrees of %s: %w", copyPath, err)
@@ -182,8 +181,7 @@ func copyWorktrees(ctx context.Context, r Reporter, ws *project.Workspace, cfg *
 	if len(roots) == 0 {
 		return nil, nil
 	}
-	scoped := project.Workspace{MetaRoot: ws.MetaRoot, WorkingCopiesDir: ws.WorkingCopiesDir, WorkingCopy: copyPath}
-	entries, err := worktree.List(ctx, r, worktree.ListOptions{Workspace: &scoped, Config: cfg})
+	entries, err := worktree.ListCopies(ctx, r, metaRoot, cfg, []string{copyPath})
 	if err != nil {
 		return nil, err
 	}
@@ -194,21 +192,4 @@ func copyWorktrees(ctx context.Context, r Reporter, ws *project.Workspace, cfg *
 		}
 	}
 	return managed, nil
-}
-
-// refuseLiveWorktrees fails when another process works inside one of the
-// copy's worktrees: moving the copy would pull the directory from under it.
-func refuseLiveWorktrees(copyPath string, wts []worktree.Entry) error {
-	var live []string
-	for i := range wts {
-		e := &wts[i]
-		if len(e.Live) == 0 {
-			continue
-		}
-		live = append(live, fmt.Sprintf("%s (process %s)", e.Name, joinPIDs(e.Live, ", ")))
-	}
-	if len(live) == 0 {
-		return nil
-	}
-	return fmt.Errorf("refusing to remove working copy %s: its worktrees are in use: %s. Stop those processes, then retry; nothing was removed", copyPath, strings.Join(live, "; "))
 }

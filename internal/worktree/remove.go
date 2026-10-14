@@ -259,12 +259,28 @@ func refuseLive(r Reporter, targets []target) error {
 		r.Warn("cannot list process working directories on this system, so worktrees were not checked for running processes")
 		return nil
 	}
-	for _, t := range targets {
-		if pids := live.in(t.root); len(pids) > 0 {
-			return refusedf("worktree %s is in use: process(es) %s have their working directory inside %s; nothing was removed; stop them (or wait for the agent to finish), then retry", t.name, joinInts(pids), t.root)
+	entries := make([]Entry, len(targets))
+	for i, t := range targets {
+		entries[i] = Entry{Name: t.name, Path: t.root, Live: live.in(t.root)}
+	}
+	return RefuseLive(entries)
+}
+
+// RefuseLive refuses, naming every one, when a process outside the caller's
+// own tree works inside any of entries (as List fills Entry.Live): removing
+// it would pull the directory from under that process.
+func RefuseLive(entries []Entry) error {
+	var live []string
+	for i := range entries {
+		e := &entries[i]
+		if len(e.Live) > 0 {
+			live = append(live, fmt.Sprintf("%s (process(es) %s in %s)", e.Name, e.Live.Join(", "), e.Path))
 		}
 	}
-	return nil
+	if len(live) == 0 {
+		return nil
+	}
+	return refusedf("worktrees in use: %s; nothing was removed; stop those processes (or wait for the agent to finish), then retry", strings.Join(live, "; "))
 }
 
 func unmergedReason(n int) string {
@@ -272,14 +288,6 @@ func unmergedReason(n int) string {
 		return "1 commit not merged anywhere"
 	}
 	return fmt.Sprintf("%d commits not merged anywhere", n)
-}
-
-func joinInts(ns []int) string {
-	s := make([]string, len(ns))
-	for i, n := range ns {
-		s[i] = fmt.Sprint(n)
-	}
-	return strings.Join(s, ", ")
 }
 
 // removeOne removes the inner worktrees, settles their branches, then

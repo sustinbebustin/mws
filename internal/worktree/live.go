@@ -44,12 +44,24 @@ func scanProcesses() liveness {
 	return l
 }
 
+// PIDs are process ids.
+type PIDs []int
+
+// Join formats p as decimal numbers separated by sep.
+func (p PIDs) Join(sep string) string {
+	s := make([]string, len(p))
+	for i, pid := range p {
+		s[i] = strconv.Itoa(pid)
+	}
+	return strings.Join(s, sep)
+}
+
 // in returns the sorted pids whose cwd is root or below it.
-func (l liveness) in(root string) []int {
+func (l liveness) in(root string) PIDs {
 	if resolved, err := filepath.EvalSymlinks(root); err == nil {
 		root = resolved
 	}
-	var pids []int
+	var pids PIDs
 	for pid, cwd := range l.cwds {
 		if cwd == root || strings.HasPrefix(cwd, root+string(filepath.Separator)) {
 			pids = append(pids, pid)

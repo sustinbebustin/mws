@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -95,20 +94,11 @@ func describeRepos(repos []worktree.RepoStatus) string {
 	return strings.Join(parts, ", ")
 }
 
-func describeLive(pids []int) string {
+func describeLive(pids worktree.PIDs) string {
 	if len(pids) == 0 {
 		return "idle"
 	}
-	return "live " + joinPIDs(pids, ",")
-}
-
-// joinPIDs formats pids as decimal numbers separated by sep.
-func joinPIDs(pids []int, sep string) string {
-	s := make([]string, len(pids))
-	for i, p := range pids {
-		s[i] = strconv.Itoa(p)
-	}
-	return strings.Join(s, sep)
+	return "live " + pids.Join(",")
 }
 
 func describeAge(e *worktree.Entry) string {

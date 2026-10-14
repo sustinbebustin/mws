@@ -2,15 +2,11 @@ package worktree
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/BurntSushi/toml"
 
 	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/git"
@@ -50,7 +46,7 @@ type Entry struct {
 	Detail     string       `json:"detail,omitempty"`
 	Repos      []RepoStatus `json:"repos"`
 	Dirty      bool         `json:"dirty"`
-	Live       []int        `json:"live"`
+	Live       PIDs         `json:"live"`
 	Created    *time.Time   `json:"created,omitempty"`
 	AgeSeconds int64        `json:"age_seconds,omitempty"`
 }
@@ -85,18 +81,24 @@ func List(ctx context.Context, r Reporter, opts ListOptions) ([]Entry, error) {
 	} else if ws.WorkingCopy == "" {
 		return nil, usagef("not inside a working copy: run mws worktree ls from a working copy, or pass --all to list every copy under %s", ws.MetaRoot)
 	}
+	return ListCopies(ctx, r, ws.MetaRoot, opts.Config, copies)
+}
+
+// ListCopies reports every worktree of the working copies at copies, sorted
+// by path. It warns when liveness cannot be checked on this system.
+func ListCopies(ctx context.Context, r Reporter, metaRoot string, cfg *config.Config, copies []string) ([]Entry, error) {
 	live := scanProcesses()
 	if !live.supported {
 		r.Warn("cannot list process working directories on this system, so liveness is not shown")
 	}
-	metaWts, err := git.Worktrees(ctx, ws.MetaRoot)
+	metaWts, err := git.Worktrees(ctx, metaRoot)
 	if err != nil {
 		return nil, failuref("list the meta repo's worktrees: %w", err)
 	}
-	l := lister{ctx: ctx, policy: opts.Config.WorktreePolicy(), live: live, now: time.Now(), metaWts: metaWts}
+	l := lister{policy: cfg.WorktreePolicy(), live: live, now: time.Now(), metaWts: metaWts}
 	var out []Entry
 	for _, c := range copies {
-		entries, err := l.copy(c)
+		entries, err := l.copy(ctx, c)
 		if err != nil {
 			return nil, failuref("list worktrees of %s: %w", c, err)
 		}
@@ -107,54 +109,38 @@ func List(ctx context.Context, r Reporter, opts ListOptions) ([]Entry, error) {
 }
 
 type lister struct {
-	ctx     context.Context
 	policy  config.WorktreePolicy
 	live    liveness
 	now     time.Time
 	metaWts []git.Worktree
 }
 
-func (l lister) copy(copyPath string) ([]Entry, error) {
-	wtDir := filepath.Join(copyPath, l.policy.Dir)
-	registered := map[string]bool{}
-	for _, w := range l.metaWts {
-		if filepath.Dir(w.Path) == wtDir {
-			registered[w.Path] = true
-		}
-	}
-
-	var out []Entry
-	dirs, err := os.ReadDir(wtDir)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+func (l lister) copy(ctx context.Context, copyPath string) ([]Entry, error) {
+	s, err := scanCopy(copyPath, l.policy, l.metaWts)
+	if err != nil {
 		return nil, err
 	}
-	for _, d := range dirs {
-		if !d.IsDir() {
-			continue
-		}
-		root := filepath.Join(wtDir, d.Name())
-		e := Entry{Name: d.Name(), Path: root, Copy: copyPath, State: Unmanaged, Repos: []RepoStatus{}, Live: []int{}}
-		marked := hasMarker(root)
+	var out []Entry
+	for _, d := range s.dirs {
+		e := Entry{Name: d.name, Path: d.root, Copy: copyPath, State: Unmanaged, Repos: []RepoStatus{}, Live: PIDs{}}
 		switch {
-		case marked && registered[root]:
-			if err := l.inspect(&e); err != nil {
-				return nil, fmt.Errorf("%s: %w", d.Name(), err)
+		case d.marked && d.registered:
+			if err := l.inspect(ctx, &e); err != nil {
+				return nil, fmt.Errorf("%s: %w", d.name, err)
 			}
-		case marked:
+		case d.marked:
 			e.Detail = "marked but not registered in the meta repo; `mws wt prune` repairs a moved worktree"
 		default:
 			e.Detail = fmt.Sprintf("no %s marker; mws never touches it", project.WorktreeMarkerFileName)
 		}
 		out = append(out, e)
 	}
-	for p := range registered {
-		if _, err := os.Lstat(p); errors.Is(err, os.ErrNotExist) {
-			out = append(out, Entry{Name: filepath.Base(p), Path: p, Copy: copyPath, State: Orphan, Repos: []RepoStatus{}, Live: []int{},
-				Detail: "registered in the meta repo, but the directory is gone; `mws wt prune` drops the registration"})
-		}
+	for _, p := range s.orphans {
+		out = append(out, Entry{Name: filepath.Base(p), Path: p, Copy: copyPath, State: Orphan, Repos: []RepoStatus{}, Live: PIDs{},
+			Detail: "registered in the meta repo, but the directory is gone; `mws wt prune` drops the registration"})
 	}
 
-	stray, err := l.strayInner(copyPath, wtDir)
+	stray, err := l.strayInner(ctx, copyPath, filepath.Join(copyPath, l.policy.Dir))
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +149,7 @@ func (l lister) copy(copyPath string) ([]Entry, error) {
 
 // strayInner lists native repo worktrees registered outside the worktrees dir
 // (the copy's own checkout excepted): layouts improvised without mws.
-func (l lister) strayInner(copyPath, wtDir string) ([]Entry, error) {
+func (l lister) strayInner(ctx context.Context, copyPath, wtDir string) ([]Entry, error) {
 	folders, err := nativeRepos(copyPath)
 	if err != nil {
 		return nil, err
@@ -171,7 +157,7 @@ func (l lister) strayInner(copyPath, wtDir string) ([]Entry, error) {
 	var out []Entry
 	for _, folder := range folders {
 		src := filepath.Join(copyPath, folder)
-		wts, err := git.Worktrees(l.ctx, src)
+		wts, err := git.Worktrees(ctx, src)
 		if err != nil {
 			return nil, fmt.Errorf("%s: list worktrees: %w", folder, err)
 		}
@@ -181,7 +167,7 @@ func (l lister) strayInner(copyPath, wtDir string) ([]Entry, error) {
 			}
 			out = append(out, Entry{
 				Name: filepath.Base(w.Path), Path: w.Path, Copy: copyPath, State: Unmanaged,
-				Repos: []RepoStatus{{Folder: folder, Branch: w.Branch}}, Live: []int{},
+				Repos: []RepoStatus{{Folder: folder, Branch: w.Branch}}, Live: PIDs{},
 				Detail: fmt.Sprintf("%s worktree registered outside %s; mws never touches it", folder, wtDir),
 			})
 		}
@@ -190,19 +176,19 @@ func (l lister) strayInner(copyPath, wtDir string) ([]Entry, error) {
 }
 
 // inspect fills a managed entry with its repos, liveness and age.
-func (l lister) inspect(e *Entry) error {
+func (l lister) inspect(ctx context.Context, e *Entry) error {
 	e.State = Managed
-	repos, err := readInnerRepos(l.ctx, e.Copy, e.Path)
+	repos, err := readInnerRepos(ctx, e.Copy, e.Path)
 	if err != nil {
 		return err
 	}
 	for _, ir := range repos {
 		rs := RepoStatus{Folder: ir.folder, Branch: ir.branch, Dirty: ir.dirty}
-		if rs.SHA, err = git.ResolveCommit(l.ctx, ir.dir, "HEAD"); err != nil {
+		if rs.SHA, err = git.ResolveCommit(ctx, ir.dir, "HEAD"); err != nil {
 			return fmt.Errorf("%s: %w", ir.folder, err)
 		}
 		if ir.branch != "" {
-			if rs.UniqueCommits, err = git.UniqueCommits(l.ctx, ir.src, ir.branch); err != nil {
+			if rs.UniqueCommits, err = git.UniqueCommits(ctx, ir.src, ir.branch); err != nil {
 				return fmt.Errorf("%s: count unmerged commits: %w", ir.folder, err)
 			}
 		}
@@ -212,16 +198,10 @@ func (l lister) inspect(e *Entry) error {
 	if l.live.supported {
 		e.Live = append(e.Live, l.live.in(e.Path)...)
 	}
-	var m Marker
-	if _, err := toml.DecodeFile(filepath.Join(e.Path, project.WorktreeMarkerFileName), &m); err == nil && !m.Created.IsZero() {
+	if m, err := readMarker(e.Path); err == nil && !m.Created.IsZero() {
 		created := m.Created
 		e.Created = &created
 		e.AgeSeconds = int64(l.now.Sub(created).Seconds())
 	}
 	return nil
-}
-
-func hasMarker(root string) bool {
-	st, err := os.Stat(filepath.Join(root, project.WorktreeMarkerFileName))
-	return err == nil && st.Mode().IsRegular()
 }
