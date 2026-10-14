@@ -21,7 +21,7 @@ import (
 //	  other/               # outside the meta entirely
 func setupWorkspace(t *testing.T) (metaRoot, main, peer string) {
 	t.Helper()
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	metaRoot = filepath.Join(root, "demo")
 	if err := os.MkdirAll(metaRoot, 0o755); err != nil {
 		t.Fatal(err)
@@ -107,9 +107,21 @@ func TestLocateNotInWorkspace(t *testing.T) {
 //	  copies/
 //	    main/            # working copy
 //	    feature-x/       # peer working copy
+//
+// resolvedTempDir is t.TempDir with symlinks resolved: Locate returns real
+// paths, and on macOS the temp dir sits behind the /var -> /private/var link.
+func resolvedTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 func setupWorkspaceWithCopiesDir(t *testing.T) (metaRoot, copiesRoot, main, peer string) {
 	t.Helper()
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	metaRoot = filepath.Join(root, "demo")
 	if err := os.MkdirAll(filepath.Join(metaRoot, ".mws"), 0o755); err != nil {
 		t.Fatal(err)

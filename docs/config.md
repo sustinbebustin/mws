@@ -30,6 +30,14 @@ working_copies_dir  = "<segment>" # optional; single path segment under the meta
 [trash]                           # optional; whole table may be omitted
   retention_days = 7              # days a trashed copy is kept; 0 = forever
   disabled       = false          # true = `mws rm` deletes outright
+
+[worktrees]                       # optional; whole table may be omitted
+  dir           = ".wt"           # one segment, leading "."; holds <copy>/<dir>/<name>/
+  branch_prefix = "wt/"           # default branch is <prefix><name>
+  repo_setup    = true            # run [[repos.setup]] in each inner repo on create
+
+  [[worktrees.setup]]             # optional; zero or more
+    cmd = "<shell string>"        # passed to `sh -c`, cwd = the worktree root
 ```
 
 | Top-level key        | Type              | Required | Notes |
@@ -40,6 +48,7 @@ working_copies_dir  = "<segment>" # optional; single path segment under the meta
 | `repos`              | array of tables   | no       | Each entry adds one **Native repo** to every **Working copy**. |
 | `optional_repos`     | array of tables   | no       | On-demand **Native repos** that are *not* cloned into every copy. Pulled into a specific copy via the `mws clone` prompt, `mws clone --with <folder>`, or `mws include <folder>`. Same shape as `[[repos]]`. |
 | `trash`              | table             | no       | Tunes the soft-delete behaviour of `mws rm`. See [`[trash]`](#trash). Omit the table for the defaults. |
+| `worktrees`          | table             | no       | Tunes `mws worktree`. See [`[worktrees]`](#worktrees). Omit the table for the defaults. |
 
 ### `[[repos]]`
 
@@ -110,6 +119,50 @@ Behavior:
 
 Design rationale: [ADR-0010](./adr/0010-soft-delete-working-copies.md).
 
+### `[worktrees]`
+
+`mws worktree` (alias `mws wt`) creates a **Worktree** of a **Working copy** at `<copy>/<dir>/<name>/`. Omit the table entirely for the defaults below.
+
+| Key             | Type   | Required | Notes |
+|-----------------|--------|----------|-------|
+| `dir`           | string | no       | Directory inside each working copy that holds its worktrees. Defaults to `.wt`. Must be one path segment: a single leading `.` followed by letters, digits, `-`, `_` or `.`. The dot keeps it out of working-copy enumeration and default searches; an invalid value is rejected at load time. |
+| `branch_prefix` | string | no       | Prepended to a worktree's name to form its branch in every native repo. Defaults to `wt/`. Only a branch named `<prefix><name>` is ever deleted by `rm`/`prune`; a `--branch` override is always kept. |
+| `repo_setup`    | bool   | no       | `true` (the default) runs each repo's `[[repos.setup]]` commands inside its worktree on create. `false` skips only those; `--no-setup` skips them and `[[worktrees.setup]]` both. |
+
+`[[worktrees.setup]]` entries (`cmd`, run via `sh -c` with cwd = the worktree root) run after the per-repo setup, for root-level steps such as `direnv allow`. Setup output streams to stderr. A file a setup command writes at the root counts as work there: `rm` refuses it without `--force` and `prune` keeps the worktree.
+
+Commands (non-interactive; run from anywhere inside a working copy or one of its worktrees; results on stdout, progress on stderr):
+
+| Command | What it does |
+|---|---|
+| `mws wt new <name> [--branch <b>] [--base <ref>] [--no-setup]` | Create the worktree and print its absolute path as the last stdout line. `--branch` creates or reuses `<b>` in every native repo instead of `<prefix><name>`; `--base` is the start point for new branches (default: HEAD of the launching checkout). An existing branch that no worktree has checked out is reused. Re-running for an existing worktree prints its path and exits 0. |
+| `mws wt ls [--all]` | List worktrees (`--all`: of every working copy) with per-repo `branch@sha`, dirty state, commits reachable from no other ref, pids running inside, and age. Also reports `orphan` (registered, directory gone) and `unmanaged` (no marker, or registered outside the worktrees dir) entries. |
+| `mws wt path <name>` | Print the worktree's absolute path. |
+| `mws wt exec <name> -- <cmd> [args...]` | Run `<cmd>` with cwd = the worktree root and stdio inherited; mws exits with the command's exit code. |
+| `mws wt rm <name>... [--force] [--keep-branch]` | Remove worktrees. Checks every name first; one refusal removes nothing. `--force` discards modified and untracked files, commits on a detached HEAD that no branch reaches, and root files mws did not create or that changed since creation; `--keep-branch` keeps every branch. |
+| `mws wt prune [--dry-run]` | Repair stale registrations, run `git worktree prune` in the meta repo and every native repo, then remove every clean, idle, fully merged worktree (except the one it runs in, and any with a native repo on a detached HEAD). Reports what it kept and why. |
+| `mws wt hook create\|remove\|subagent-stop` | Hidden adapters for Claude Code's `WorktreeCreate`, `WorktreeRemove` and `SubagentStop` hooks; they read the hook's JSON payload on stdin. `mws init` wires them into the skeleton's `.claude/settings.json`. `mws wt hook --help` documents each. |
+
+Exit codes: `0` ok, `1` failure, `2` usage, `3` refused by a safety check (unmanaged directory, modified or untracked files, unreachable detached commits, changed root files, live process, branch checked out elsewhere, repo mid-merge or rebase). `hook create` and `hook remove` exit 1 for every error so Claude fails closed; `hook subagent-stop` always exits 0.
+
+`--json` (a flag of `mws worktree`) makes `new`, `path`, `ls`, `rm` and `prune` print one JSON object on stdout; `exec` and `hook` do not print JSON.
+
+```text
+new     {name, path, copy, branch, reused, repos:[{folder, path, branch, base?}]}
+path    {name, path, copy}
+ls      {worktrees:[{name, path, copy, state, detail?, repos:[{folder, branch, sha?, dirty, unique_commits}],
+                     dirty, live:[pid], created?, age_seconds?}]}      # state: managed | orphan | unmanaged
+rm      {removed:[{name, path, branches:[{folder, branch, deleted, unique_commits, reason?}]}]}
+prune   {dry_run, repaired:[...], dropped:[...], removed:[...as rm...], kept:[{name, path, reasons:[...]}]}
+error   {error:{code, message}}                  # code: usage | refused | failure | setup_failed
+```
+
+`base` in `new` is a full commit id (the branch tip for a reused branch) and is omitted for a reused worktree. A setup failure under `--json` prints the full result object plus `error` (`setup_failed`) and exits 1.
+
+Related behavior of the other commands: `mws list` appends `(+N worktrees)` to a copy; `mws rm <copy>` refuses while one of its worktrees has a live process and lists its worktrees in the confirmation; `mws restore` repairs the worktrees' git links; `mws relink` refreshes harness links in worktree roots; `mws trash prune|empty` prune stale meta worktree registrations; `mws sync-env` updates only the copy, never its worktrees.
+
+Design rationale: [ADR-0011](./adr/0011-worktrees-are-children-of-a-working-copy.md).
+
 ## Worked example
 
 ```toml
@@ -179,3 +232,4 @@ The file is tracked by the meta workspace's git. Commit changes alongside the ha
 - [ADR-0007](./adr/0007-working-copies-subdir.md) - configurable working-copies subdirectory
 - [ADR-0009](./adr/0009-optional-repos.md) - optional repos pulled into copies on demand
 - [ADR-0010](./adr/0010-soft-delete-working-copies.md) - why `mws rm` trashes instead of deleting
+- [ADR-0011](./adr/0011-worktrees-are-children-of-a-working-copy.md) - why worktrees live inside the working copy

@@ -9,6 +9,7 @@ import (
 
 	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/project"
+	"github.com/sustinbebustin/mws/internal/worktree"
 )
 
 func newListCmd() *cobra.Command {
@@ -34,9 +35,11 @@ func runList(r Reporter) error {
 	// Locate tolerates a malformed .mws.toml so it can still report the meta
 	// root; surface the real parse error here before scanning the (possibly
 	// wrong) copies root.
-	if _, err := config.Load(ws.MetaRoot); err != nil {
+	cfg, err := config.Load(ws.MetaRoot)
+	if err != nil {
 		return err
 	}
+	policy := cfg.WorktreePolicy()
 
 	r.Heading(fmt.Sprintf("Meta workspace: %s", ws.MetaRoot))
 	peers, err := ws.EnumerateCopies()
@@ -52,7 +55,15 @@ func runList(r Reporter) error {
 		if peer == ws.WorkingCopy {
 			marker = "* "
 		}
-		r.Info(marker + filepath.Base(peer))
+		line := marker + filepath.Base(peer)
+		roots, err := worktree.Roots(peer, policy)
+		if err != nil {
+			return fmt.Errorf("count worktrees of %s: %w", peer, err)
+		}
+		if n := len(roots); n > 0 {
+			line += fmt.Sprintf("  (+%d %s)", n, plural(n, "worktree", "worktrees"))
+		}
+		r.Info(line)
 	}
 	return nil
 }

@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -14,6 +15,7 @@ import (
 	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/project"
 	"github.com/sustinbebustin/mws/internal/trash"
+	"github.com/sustinbebustin/mws/internal/worktree"
 )
 
 func newRestoreCmd() *cobra.Command {
@@ -23,8 +25,9 @@ func newRestoreCmd() *cobra.Command {
 		Use:   "restore [name]",
 		Short: "Bring a trashed working copy back",
 		Long: `restore moves a working copy out of <meta>/.trash/ and back under the
-meta workspace, then repairs its harness symlinks. With no name, it prompts
-with the contents of the trash.
+meta workspace, then repairs its harness symlinks and the git links of its
+worktrees, which keep their branches and uncommitted files. With no name, it
+prompts with the contents of the trash.
 
 If a name was trashed more than once, restore prompts for which entry to bring
 back. --yes skips every prompt and takes the most recent match -- or, with no
@@ -37,7 +40,7 @@ a different one.`,
 			if len(args) == 1 {
 				name = args[0]
 			}
-			return runRestore(newConsoleReporter(), name, as, yes)
+			return runRestore(cmd.Context(), newConsoleReporter(), name, as, yes)
 		},
 	}
 	cmd.Flags().StringVar(&as, "as", "", "restore under a different working copy name")
@@ -45,11 +48,12 @@ a different one.`,
 	return cmd
 }
 
-func runRestore(r Reporter, name, as string, yes bool) error {
-	ws, policy, err := locateForTrash()
+func runRestore(ctx context.Context, r Reporter, name, as string, yes bool) error {
+	ws, cfg, err := locateForTrash()
 	if err != nil {
 		return err
 	}
+	policy := cfg.TrashPolicy()
 	// Sweep first so an entry that is already past its retention can't be
 	// resurrected by a well-timed restore.
 	sweepTrash(r, ws.MetaRoot, policy)
@@ -85,6 +89,15 @@ func runRestore(r Reporter, name, as string, yes bool) error {
 		return fmt.Errorf("restored %s but failed to relink the harness: %w. Run `mws relink` to retry", dest, err)
 	}
 	r.OK(fmt.Sprintf("Relinked %d harness %s", len(linked), plural(len(linked), "entry", "entries")))
+
+	// Worktree links are absolute and still name the trash (or the old name).
+	repaired, err := worktree.RepairCopy(ctx, ws.MetaRoot, dest, cfg.WorktreePolicy())
+	if err != nil {
+		return fmt.Errorf("restored %s but %w. Its files are intact; run `mws wt prune` in %s to retry the repair", dest, err, dest)
+	}
+	if n := len(repaired); n > 0 {
+		r.OK(fmt.Sprintf("Repaired %d %s", n, plural(n, "worktree", "worktrees")))
+	}
 	return nil
 }
 

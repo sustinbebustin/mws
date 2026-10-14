@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 
+	"github.com/sustinbebustin/mws/internal/atomicfile"
 	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/git"
 	"github.com/sustinbebustin/mws/internal/project"
@@ -408,7 +409,7 @@ func copyEnvsFor(r Reporter, metaRoot string, repo config.Repo, workingCopy stri
 			r.Warn(fmt.Sprintf("%s: staged env %s not found, skipping (%s -> %s)", repo.Folder, src, env.Source, env.Target))
 			continue
 		}
-		if err := copyFile(src, dst); err != nil {
+		if err := atomicfile.Copy(src, dst); err != nil {
 			r.Fail(fmt.Sprintf("%s: copy env %s -> %s: %v", repo.Folder, env.Source, env.Target, err))
 			continue
 		}

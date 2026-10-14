@@ -349,3 +349,68 @@ func TestLoadRejectsNegativeRetention(t *testing.T) {
 		t.Fatalf("error should name the offending key: %v", err)
 	}
 }
+
+func TestWorktreePolicyDefaults(t *testing.T) {
+	got := (&Config{}).WorktreePolicy()
+	want := WorktreePolicy{Dir: ".wt", BranchPrefix: "wt/", RepoSetup: true}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("policy = %+v, want %+v", got, want)
+	}
+}
+
+func TestLoadWorktreesTable(t *testing.T) {
+	dir := t.TempDir()
+	body := "project_name = \"demo\"\n\n" +
+		"[worktrees]\ndir = \".trees\"\nbranch_prefix = \"agent/\"\nrepo_setup = false\n\n" +
+		"[[worktrees.setup]]\ncmd = \"direnv allow\"\n"
+	if err := os.WriteFile(Path(dir), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := WorktreePolicy{
+		Dir:          ".trees",
+		BranchPrefix: "agent/",
+		RepoSetup:    false,
+		Setup:        []SetupCommand{{Cmd: "direnv allow"}},
+	}
+	if got := c.WorktreePolicy(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("policy = %+v, want %+v", got, want)
+	}
+}
+
+// A [worktrees] table that sets only some keys keeps the defaults for the rest;
+// in particular an omitted repo_setup must not read as false.
+func TestLoadPartialWorktreesTableKeepsDefaults(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(Path(dir), []byte("project_name = \"demo\"\n\n[[worktrees.setup]]\ncmd = \"true\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := c.WorktreePolicy()
+	if got.Dir != ".wt" || got.BranchPrefix != "wt/" || !got.RepoSetup {
+		t.Fatalf("policy = %+v, want default dir, prefix and repo_setup", got)
+	}
+}
+
+func TestLoadRejectsInvalidWorktreesDir(t *testing.T) {
+	for _, bad := range []string{"wt", ".", "..", ".a/b", ".a b", ""} {
+		dir := t.TempDir()
+		body := "project_name = \"demo\"\n\n[worktrees]\ndir = \"" + bad + "\"\n"
+		if err := os.WriteFile(Path(dir), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load(dir)
+		if err == nil {
+			t.Fatalf("worktrees.dir = %q should be a load error", bad)
+		}
+		if !strings.Contains(err.Error(), "worktrees.dir") {
+			t.Fatalf("dir %q: error should name the offending key: %v", bad, err)
+		}
+	}
+}

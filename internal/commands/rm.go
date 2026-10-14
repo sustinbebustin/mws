@@ -1,10 +1,12 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
@@ -12,6 +14,7 @@ import (
 	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/project"
 	"github.com/sustinbebustin/mws/internal/trash"
+	"github.com/sustinbebustin/mws/internal/worktree"
 )
 
 func newRmCmd() *cobra.Command {
@@ -28,14 +31,17 @@ touches the trash -- nothing purges in the background. Force one with
 'mws trash prune'.
 
 Pass --purge to delete the working copy outright with no way back. Either way
-the meta workspace and harness are untouched.`,
+the meta workspace and harness are untouched.
+
+The copy's worktrees go with it. rm refuses while another process works inside
+one of them.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var name string
 			if len(args) == 1 {
 				name = args[0]
 			}
-			return runRm(newConsoleReporter(), name, yes, purge)
+			return runRm(cmd.Context(), newConsoleReporter(), name, yes, purge)
 		},
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation")
@@ -43,7 +49,7 @@ the meta workspace and harness are untouched.`,
 	return cmd
 }
 
-func runRm(r Reporter, name string, yes, purge bool) error {
+func runRm(ctx context.Context, r Reporter, name string, yes, purge bool) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -91,16 +97,19 @@ func runRm(r Reporter, name string, yes, purge bool) error {
 	if !looksLikeWorkingCopy(ws.MetaRoot, target) {
 		return fmt.Errorf("%s does not contain any harness symlinks pointing into %s/.mws/; refusing to remove. If this is genuinely a working copy whose symlinks are broken, run `mws relink` first, or remove it manually", target, ws.MetaRoot)
 	}
+	wts, err := copyWorktrees(ctx, r, ws.MetaRoot, cfg, target)
+	if err != nil {
+		return err
+	}
+	if err := worktree.RefuseLive(wts); err != nil {
+		return fmt.Errorf("refusing to remove working copy %s: %w", target, err)
+	}
 
 	if !yes {
-		description := "This deletes the directory and any native repo clones inside it. It cannot be undone."
-		if toTrash {
-			description = fmt.Sprintf("This moves the directory and any native repo clones inside it into %s. Bring it back with `mws restore %s`.", trash.Root(ws.MetaRoot), name)
-		}
 		var ok bool
 		if err := huh.NewConfirm().
 			Title(fmt.Sprintf("Remove working copy %s?", target)).
-			Description(description).
+			Description(rmConfirmDescription(ws.MetaRoot, name, toTrash, wts)).
 			Affirmative("Remove").
 			Negative("Cancel").
 			Value(&ok).
@@ -118,6 +127,11 @@ func runRm(r Reporter, name string, yes, purge bool) error {
 			return err
 		}
 		r.OK(fmt.Sprintf("Deleted %s", target))
+		if len(wts) > 0 {
+			if err := worktree.ForgetVanished(ctx, ws.MetaRoot); err != nil {
+				r.Warn(fmt.Sprintf("Could not drop the deleted worktrees' registrations from the meta repo: %v. Run `git worktree prune` in %s", err, ws.MetaRoot))
+			}
+		}
 		return nil
 	}
 
@@ -126,10 +140,56 @@ func runRm(r Reporter, name string, yes, purge bool) error {
 		return err
 	}
 	r.OK(fmt.Sprintf("Trashed %s -> %s", target, filepath.Join(trash.DirName, entry.ID)))
+	// Point the worktree registrations into the trash, so a `git worktree
+	// prune` on the meta repo before the restore does not drop them.
+	if _, err := worktree.RepairCopy(ctx, ws.MetaRoot, entry.CopyPath, cfg.WorktreePolicy()); err != nil {
+		r.Warn(fmt.Sprintf("Could not re-point the worktrees of %s at the trash: %v. They restore intact unless `mws trash prune|empty` or `mws wt prune` runs before `mws restore %s`", name, err, entry.Name))
+	}
 	if policy.Retention > 0 {
 		r.Info(fmt.Sprintf("Restore within %s with `mws restore %s`.", humanDuration(policy.Retention), entry.Name))
 	} else {
 		r.Info(fmt.Sprintf("Kept until purged. Restore with `mws restore %s`.", entry.Name))
 	}
 	return nil
+}
+
+// rmConfirmDescription explains what removing the copy called name does,
+// naming its worktrees, which go with it.
+func rmConfirmDescription(metaRoot, name string, toTrash bool, wts []worktree.Entry) string {
+	contents := "the directory and any native repo clones inside it"
+	if len(wts) > 0 {
+		names := make([]string, len(wts))
+		for i := range wts {
+			names[i] = wts[i].Name
+		}
+		contents = fmt.Sprintf("the directory, any native repo clones inside it, and its %s %s", plural(len(wts), "worktree", "worktrees"), strings.Join(names, ", "))
+	}
+	if toTrash {
+		return fmt.Sprintf("This moves %s into %s. Bring it back with `mws restore %s`.", contents, trash.Root(metaRoot), name)
+	}
+	return fmt.Sprintf("This deletes %s. It cannot be undone.", contents)
+}
+
+// copyWorktrees lists the managed worktrees of the working copy at copyPath.
+// A copy without worktrees needs no git, so a meta workspace that is not a
+// git repository still works.
+func copyWorktrees(ctx context.Context, r Reporter, metaRoot string, cfg *config.Config, copyPath string) ([]worktree.Entry, error) {
+	roots, err := worktree.Roots(copyPath, cfg.WorktreePolicy())
+	if err != nil {
+		return nil, fmt.Errorf("find worktrees of %s: %w", copyPath, err)
+	}
+	if len(roots) == 0 {
+		return nil, nil
+	}
+	entries, err := worktree.ListCopies(ctx, r, metaRoot, cfg, []string{copyPath})
+	if err != nil {
+		return nil, err
+	}
+	var managed []worktree.Entry
+	for i := range entries {
+		if entries[i].State == worktree.Managed {
+			managed = append(managed, entries[i])
+		}
+	}
+	return managed, nil
 }

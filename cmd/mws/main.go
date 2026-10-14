@@ -20,8 +20,10 @@ func run() int {
 	defer stop()
 
 	if err := commands.NewRootCmd().ExecuteContext(ctx); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
+		if !commands.Silent(err) {
+			fmt.Fprintln(os.Stderr, err)
+		}
+		return commands.ExitCode(err)
 	}
 	return 0
 }

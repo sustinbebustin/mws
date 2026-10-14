@@ -1,4 +1,4 @@
-package commands
+package atomicfile
 
 import (
 	"os"
@@ -13,8 +13,8 @@ func TestCopyFilePreservesPermsOnFreshDst(t *testing.T) {
 		t.Fatal(err)
 	}
 	dst := filepath.Join(dir, "out", "dst")
-	if err := copyFile(src, dst); err != nil {
-		t.Fatalf("copyFile: %v", err)
+	if err := Copy(src, dst); err != nil {
+		t.Fatalf("Copy: %v", err)
 	}
 	st, err := os.Stat(dst)
 	if err != nil {
@@ -35,8 +35,8 @@ func TestCopyFileResetsPermsOnOverwrite(t *testing.T) {
 	if err := os.WriteFile(dst, []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := copyFile(src, dst); err != nil {
-		t.Fatalf("copyFile: %v", err)
+	if err := Copy(src, dst); err != nil {
+		t.Fatalf("Copy: %v", err)
 	}
 	st, err := os.Stat(dst)
 	if err != nil {
@@ -61,8 +61,8 @@ func TestCopyFileLeavesNoTempOnSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	dst := filepath.Join(dir, "dst")
-	if err := copyFile(src, dst); err != nil {
-		t.Fatalf("copyFile: %v", err)
+	if err := Copy(src, dst); err != nil {
+		t.Fatalf("Copy: %v", err)
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/project"
+	"github.com/sustinbebustin/mws/internal/worktree"
 )
 
 func newRelinkCmd() *cobra.Command {
@@ -26,7 +27,10 @@ If a working copy holds a regular file where the harness has the same-named
 regular file (typically because an editor's atomic-save replaced a symlink),
 relink detects the divergence. Identical content is auto-repaired by removing
 the working-copy file so the symlink can be restored. Diverged content prompts
-for which side wins.`,
+for which side wins.
+
+relink also refreshes the links in each copy's worktrees. Files a worktree
+holds as its own copies are left alone.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRelink(newConsoleReporter())
@@ -45,9 +49,11 @@ func runRelink(r Reporter) error {
 	}
 	// Locate tolerates a malformed .mws.toml; surface the parse error here so
 	// the user isn't told "nothing to relink" when the real problem is config.
-	if _, err := config.Load(ws.MetaRoot); err != nil {
+	cfg, err := config.Load(ws.MetaRoot)
+	if err != nil {
 		return err
 	}
+	policy := cfg.WorktreePolicy()
 
 	peers, err := ws.EnumerateCopies()
 	if err != nil {
@@ -69,6 +75,7 @@ func runRelink(r Reporter) error {
 			r.Fail(fmt.Sprintf("%s: %v", filepath.Base(peer), err))
 			continue
 		}
+		relinkWorktrees(r, ws.MetaRoot, peer, policy)
 		if len(linked) == 0 {
 			r.Info(fmt.Sprintf("%s: nothing to link", filepath.Base(peer)))
 			continue
@@ -78,6 +85,23 @@ func runRelink(r Reporter) error {
 		}
 	}
 	return nil
+}
+
+// relinkWorktrees refreshes the links in every worktree root of the copy at
+// peer. Like the copy itself, a failing worktree is reported, not fatal.
+func relinkWorktrees(r Reporter, metaRoot, peer string, policy config.WorktreePolicy) {
+	roots, err := worktree.Roots(peer, policy)
+	if err != nil {
+		r.Fail(fmt.Sprintf("%s: find worktrees: %v", filepath.Base(peer), err))
+		return
+	}
+	for _, root := range roots {
+		if err := worktree.Relink(metaRoot, peer, root, policy); err != nil {
+			r.Fail(fmt.Sprintf("%s: worktree %s: %v", filepath.Base(peer), filepath.Base(root), err))
+			continue
+		}
+		r.OK(fmt.Sprintf("%s: relinked worktree %s", filepath.Base(peer), filepath.Base(root)))
+	}
 }
 
 // divergencePrompt asks the user what to do when peer/<name> and meta/<name> are both regular

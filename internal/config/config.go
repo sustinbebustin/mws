@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -33,6 +34,79 @@ type Config struct {
 	// Trash tunes the soft-delete behaviour of `mws rm`. An absent table means
 	// defaults; read it through TrashPolicy rather than dereferencing here.
 	Trash *Trash `toml:"trash,omitempty"`
+	// Worktrees tunes `mws worktree`. An absent table means defaults; read it
+	// through WorktreePolicy rather than dereferencing here.
+	Worktrees *Worktrees `toml:"worktrees,omitempty"`
+}
+
+// Default worktree settings, applied when the `[worktrees]` table or one of
+// its keys is absent.
+const (
+	DefaultWorktreesDir         = ".wt"
+	DefaultWorktreeBranchPrefix = "wt/"
+)
+
+// Worktrees is the raw on-disk `[worktrees]` table. Pointer fields separate
+// "absent" (take the default) from an explicit value; callers use
+// Config.WorktreePolicy instead of reading these fields.
+type Worktrees struct {
+	// Dir is the directory inside each working copy that holds its worktrees.
+	Dir *string `toml:"dir,omitempty"`
+	// BranchPrefix is prepended to a worktree's name to form its default
+	// branch in every native repo.
+	BranchPrefix *string `toml:"branch_prefix,omitempty"`
+	// RepoSetup controls whether [[repos.setup]] commands run inside each
+	// inner repo of a new worktree.
+	RepoSetup *bool `toml:"repo_setup,omitempty"`
+	// Setup lists commands run in the worktree root after creation.
+	Setup []SetupCommand `toml:"setup,omitempty"`
+}
+
+// WorktreePolicy is the resolved worktree behaviour, with defaults applied.
+type WorktreePolicy struct {
+	Dir          string
+	BranchPrefix string
+	RepoSetup    bool
+	Setup        []SetupCommand
+}
+
+// WorktreePolicy resolves the effective worktree policy for this config,
+// applying the defaults for anything the config leaves unset.
+func (c *Config) WorktreePolicy() WorktreePolicy {
+	p := WorktreePolicy{Dir: DefaultWorktreesDir, BranchPrefix: DefaultWorktreeBranchPrefix, RepoSetup: true}
+	w := c.Worktrees
+	if w == nil {
+		return p
+	}
+	if w.Dir != nil {
+		p.Dir = *w.Dir
+	}
+	if w.BranchPrefix != nil {
+		p.BranchPrefix = *w.BranchPrefix
+	}
+	if w.RepoSetup != nil {
+		p.RepoSetup = *w.RepoSetup
+	}
+	p.Setup = w.Setup
+	return p
+}
+
+// validateWorktreesDir checks that dir is one path segment made of a single
+// leading '.' followed by letters, digits, '-', '_' or '.'. The leading dot
+// keeps the directory out of working-copy enumeration and default searches.
+func validateWorktreesDir(dir string) error {
+	rest, ok := strings.CutPrefix(dir, ".")
+	if !ok || rest == "" || strings.HasPrefix(rest, ".") {
+		return fmt.Errorf("worktrees.dir is %q; must be a single path segment starting with one '.' (e.g. %q)", dir, DefaultWorktreesDir)
+	}
+	for _, r := range rest {
+		switch {
+		case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
+		default:
+			return fmt.Errorf("worktrees.dir is %q; invalid character %q (allowed after the leading '.': letters, digits, '-', '_', '.')", dir, r)
+		}
+	}
+	return nil
 }
 
 // DefaultTrashRetention is how long a trashed working copy survives before an
@@ -129,6 +203,11 @@ func Load(metaRoot string) (*Config, error) {
 func (c *Config) Validate() error {
 	if c.Trash != nil && c.Trash.RetentionDays != nil && *c.Trash.RetentionDays < 0 {
 		return fmt.Errorf("trash.retention_days is %d; must be 0 (keep forever) or a positive number of days", *c.Trash.RetentionDays)
+	}
+	if c.Worktrees != nil && c.Worktrees.Dir != nil {
+		if err := validateWorktreesDir(*c.Worktrees.Dir); err != nil {
+			return err
+		}
 	}
 	return nil
 }
