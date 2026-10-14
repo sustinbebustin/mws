@@ -28,6 +28,10 @@ _Avoid_: subrepo, nested repo (implies submodule), child repo.
 A **Native repo** registered in the **mws config** under `[[optional_repos]]` that mws does *not* clone into every **Working copy**. Instead it is pulled into a specific copy on demand: chosen at `mws clone` time (the multiselect prompt or `--with <folder>`) or added later with `mws include <folder>`. Shares the **Native repo** shape (folder, URL, **Env staging** mappings, **Setup commands**); once cloned into a copy it is an ordinary **Native repo**. The "optional" qualifier names the clone *policy*, not the repo's nature. Registered with `mws add-repo --optional`.
 _Avoid_: extra repo, addon, side repo.
 
+**Worktree**:
+A child of a **Working copy**, at `<copy>/<worktrees dir>/<name>/` (default `.wt`), created by `mws worktree`. Holds one `git worktree` per **Native repo** on branch `<prefix><name>` (default `wt/<name>`), shares the **Harness dir** by symlink, and gets copies of the working copy's per-copy state (root files, **Env staging** targets). Its root is a detached, sparse linked worktree of the **Meta workspace** repo, marked by `.mws-worktree.toml`. For short-lived parallel work inside one copy; a separate line of work is a **Peer working copy**.
+_Avoid_: clone, peer, sub-copy, branch (overloaded).
+
 **Peer working copies**:
 Multiple **Working copies** living side-by-side inside the same **Meta workspace**, all symlinking the same **Harness dir**. Created via `mws clone` for parallel work.
 _Avoid_: duplicates, branches (overloaded with git).
@@ -54,6 +58,7 @@ _Avoid_: hooks (implies a broader lifecycle that does not exist), scripts (overl
 - A **Working copy** symlinks every top-level entry of its parent meta's **Harness dir**. New entries in the harness are picked up by subsequent `mws clone` runs (and `mws relink` for existing copies).
 - A **Working copy** contains zero or more **Native repos**, each an independent git clone.
 - An **Optional repo** is registered in the **mws config** but cloned only into the **Working copies** that ask for it (via the `mws clone` prompt/`--with` or `mws include`), unlike a default **Native repo** which lands in every copy.
+- A **Working copy** has zero or more **Worktrees**. A **Worktree** belongs to exactly one copy, moves with it on `mws rm` / `mws restore`, is never listed as a working copy (only counted), and shares that copy's ports and stack by copy.
 - **Peer working copies** share one **Harness dir** but each has its own **Native repo** clones.
 - The **mws config** is reachable from any **Working copy** by walking up to the **Meta workspace** root.
 - **Env staging** is owned by the **Meta workspace** and copied into a **Working copy**'s **Native repos** on `mws clone` per the mappings in the **mws config**. Env files in a working copy are independent of staging after the copy -- edits do not flow back.

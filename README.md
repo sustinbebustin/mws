@@ -108,6 +108,8 @@ my-project/                       # this directory IS a git repo (meta root)
 │   └── ...
 └── feature-x/                    # Additional working copy
     ├── frontend/                 # Independent clone (own .git/)
+    ├── .wt/                      # Worktrees of this copy (untracked)
+    │   └── 04/                   # `mws wt new 04`: frontend/ + backend/ on wt/04, harness links
     └── ...
 ```
 
@@ -116,6 +118,8 @@ Every top-level entry under `.mws/` is symlinked into each working copy -- disco
 Working copies can optionally be grouped under a single subdirectory by setting `working_copies_dir` in `.mws.toml` (e.g. `working_copies_dir = "copies"`); subsequent `mws clone`s land at `<meta>/copies/<name>/` instead of `<meta>/<name>/`. See [`docs/config.md`](./docs/config.md) for the rules and caveats.
 
 `mws rm` moves a working copy into `.trash/` rather than deleting it, so a mistaken removal costs nothing: `mws restore <name>` puts it back with its uncommitted work and env files intact. Trashed copies are purged automatically once they pass the retention window (7 days by default, configurable via `[trash]`). Note that the sweep is opportunistic -- it runs when an mws command touches the trash, not on a timer.
+
+For parallel agents inside one working copy, `mws wt new <name>` creates a **worktree** at `<copy>/.wt/<name>/`: a `git worktree` of every native repo on `wt/<name>`, the same harness symlinks, the copy's ports, env and MCP files, and setup run. `mws wt rm` refuses to lose uncommitted work or unmerged commits. The skeleton wires Claude Code's `WorktreeCreate`, `WorktreeRemove` and `SubagentStop` hooks to `mws wt hook ...`, so `claude -w` and `isolation: "worktree"` subagents use the same layout. See [`docs/config.md`](./docs/config.md#worktrees) and [ADR-0011](./docs/adr/0011-worktrees-are-children-of-a-working-copy.md).
 
 ## Commands
 
@@ -133,6 +137,7 @@ Working copies can optionally be grouped under a single subdirectory by setting 
 | `mws relink` | Refresh harness symlinks across every working copy; handles diverged content interactively. |
 | `mws sync-env [name]` | Copy staged env files from `.envs/` into a working copy (overwrites). |
 | `mws stage-env [name]` | Inverse of `sync-env`: capture a working copy's env files into staging as the new default. |
+| `mws worktree` (`mws wt`) `new\|ls\|path\|exec\|rm\|prune` | Manage worktrees of the current working copy: `new <name>` creates one and prints its path, `ls [--all]` shows branches, dirty state and liveness, `path <name>` prints its path, `exec <name> -- <cmd>` runs in it, `rm <name>...` removes (refuses to lose work; `--force` discards uncommitted files), `prune` removes every clean, idle, merged one. `--json` everywhere; exit `3` = refused by a safety check. |
 | `mws migrate <path>` | Convert an old sibling-meta layout to meta-at-root. |
 
 ## Configuration
