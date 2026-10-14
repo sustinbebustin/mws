@@ -141,6 +141,44 @@ func TestWtLsAllCoversEveryCopy(t *testing.T) {
 	}
 }
 
+func TestWtLsSaysSoWhenEmpty(t *testing.T) {
+	f := seedWtWorkspace(t)
+
+	for _, tc := range []struct {
+		cwd  string
+		args []string
+		want string
+	}{
+		{f.copy, nil, "no worktrees in " + filepath.Base(f.copy) + "\n"},
+		{f.meta, []string{"--all"}, "no worktrees in any working copy\n"},
+	} {
+		res := runWt(t, tc.cwd, append([]string{"ls"}, tc.args...)...)
+		if res.code != 0 || res.stdout != "" || !strings.HasSuffix(res.stderr, tc.want) {
+			t.Fatalf("ls %v: exit %d, stdout %q, stderr %q; want exit 0, empty stdout, stderr ending %q",
+				tc.args, res.code, res.stdout, res.stderr, tc.want)
+		}
+
+		res = runWt(t, tc.cwd, append([]string{"ls", "--json"}, tc.args...)...)
+		if res.code != 0 || res.stdout != "{\n  \"worktrees\": []\n}\n" || strings.Contains(res.stderr, "no worktrees") {
+			t.Fatalf("ls --json %v: exit %d, stdout %q, stderr %q; want exit 0 and an empty list only",
+				tc.args, res.code, res.stdout, res.stderr)
+		}
+	}
+}
+
+func TestWtLsOrphanOnlyIsNotEmpty(t *testing.T) {
+	f := seedWtWorkspace(t)
+	mustNew(t, f.copy, "gone", "--no-setup")
+	if err := os.RemoveAll(f.wtPath("gone")); err != nil {
+		t.Fatal(err)
+	}
+
+	res := runWt(t, f.copy, "ls")
+	if res.code != 0 || !strings.Contains(res.stdout, "orphan") || strings.Contains(res.stderr, "no worktrees") {
+		t.Fatalf("exit %d, stdout %q, stderr %q; want the orphan listed and no empty message", res.code, res.stdout, res.stderr)
+	}
+}
+
 func TestWtLsReportsCleanWorktree(t *testing.T) {
 	f := seedWtWorkspace(t)
 	mustNew(t, f.copy, "x", "--no-setup")
