@@ -50,11 +50,15 @@ const WorktreeMarkerFileName = ".mws-worktree.toml"
 // inside the meta, WorkingCopy is set to the direct child of the copies root
 // that contains start. The copies root is the meta root, or
 // <metaRoot>/<working_copies_dir> when that key is set in .mws.toml. If start
-// was inside a worktree of that copy, Worktree is set to its root.
+// was inside a worktree of that copy, Worktree is set to its root. Every
+// returned path has its symlinks resolved, as git reports worktree paths.
 func Locate(start string) (*Workspace, error) {
 	start, err := filepath.Abs(start)
 	if err != nil {
 		return nil, err
+	}
+	if resolved, err := filepath.EvalSymlinks(start); err == nil {
+		start = resolved
 	}
 
 	dir := start

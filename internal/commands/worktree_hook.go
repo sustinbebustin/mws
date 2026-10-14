@@ -158,7 +158,12 @@ func runHookRemove(ctx context.Context, in io.Reader, errW io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if name == "" || ws.Worktree != filepath.Clean(p.WorktreePath) {
+	// Locate resolves symlinks, so compare against the resolved payload path.
+	root, err := filepath.EvalSymlinks(p.WorktreePath)
+	if err != nil {
+		root = filepath.Clean(p.WorktreePath)
+	}
+	if name == "" || ws.Worktree != root {
 		return fmt.Errorf("%s is not the root of a worktree mws manages, so mws will not remove it; nothing was removed; inspect it and remove it by hand if it is yours", p.WorktreePath)
 	}
 	r := consoleReporter{w: errW}

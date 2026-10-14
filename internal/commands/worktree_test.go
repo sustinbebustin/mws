@@ -598,6 +598,27 @@ func TestWtNewSetupFailureKeepsWorktree(t *testing.T) {
 	}
 }
 
+// A shell that reached the meta through a symlink reports the symlinked path
+// in $PWD, while git lists worktrees by their resolved path.
+func TestWtWorksThroughSymlinkedMeta(t *testing.T) {
+	f := seedWtWorkspace(t)
+	mustNew(t, f.copy, "x", "--no-setup")
+	link := filepath.Join(f.root, "link")
+	if err := os.Symlink(f.meta, link); err != nil {
+		t.Fatal(err)
+	}
+	via := filepath.Join(link, "c")
+	t.Setenv("PWD", via)
+
+	if res := runWt(t, via, "path", "x"); res.code != 0 {
+		t.Fatalf("path: exit %d\nstderr: %s", res.code, res.stderr)
+	}
+	if res := runWt(t, via, "rm", "x"); res.code != 0 {
+		t.Fatalf("rm: exit %d\nstderr: %s", res.code, res.stderr)
+	}
+	assertRemoved(t, f, "x")
+}
+
 func TestWtPathUnknownWorktree(t *testing.T) {
 	f := seedWtWorkspace(t)
 	res := runWt(t, f.copy, "path", "nope")
