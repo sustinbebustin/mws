@@ -40,7 +40,7 @@ The harness skeleton ships embedded in the binary -- no separate template repo, 
 
 ### Shell integration (optional)
 
-With a small shell function installed, `mws clone <name>` cds your shell into the new working copy on success. Without it, `mws clone` prints a copy-pasteable `cd <path>` hint instead -- a child process can't change its parent shell's directory.
+With a small shell function installed, `mws clone <name>` cds your shell into the new working copy on success. Without it, `mws clone` prints the new working copy's path as its last stdout line for you to `cd` into -- a child process can't change its parent shell's directory.
 
 ```bash
 eval "$(mws shell-init zsh)"     # add to ~/.zshrc
