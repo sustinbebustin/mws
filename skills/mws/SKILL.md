@@ -105,4 +105,4 @@ gh issue list --repo sustinbebustin/mws --state all --search "<keywords>"   # ad
 gh issue create --repo sustinbebustin/mws --title "<what went wrong>" --body "<details>"
 ```
 
-Include `mws version`, the command you ran, its exit code and output, and what you expected. Replace project names, repo URLs and paths with placeholders.
+In the body, give `mws version`, the exact command, its exit code and output, what you expected, and any workaround. For a skill or docs problem, quote the passage and say what was wrong. Replace project names, repo URLs and paths with placeholders.
