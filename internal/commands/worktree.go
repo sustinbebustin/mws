@@ -45,6 +45,7 @@ func newWorktreeCmd() *cobra.Command {
 		newWorktreeExecCmd(&jsonOut),
 		newWorktreeLsCmd(&jsonOut),
 		newWorktreePruneCmd(&jsonOut),
+		newWorktreeHookCmd(),
 	)
 	return cmd
 }
@@ -129,11 +130,16 @@ func (e *setupFailedError) Error() string { return e.err.Error() }
 func (e *setupFailedError) ExitCode() int { return 1 }
 
 func runWorktreeNew(ctx context.Context, out, errW io.Writer, jsonOut bool, name string, f wtNewFlags) error {
-	r := consoleReporter{w: errW}
 	ws, cfg, err := locateForWorktree()
 	if err != nil {
 		return emitWtError(out, jsonOut, err)
 	}
+	return createWorktree(ctx, out, errW, jsonOut, ws, cfg, name, f)
+}
+
+// createWorktree is `wt new` in an already located workspace.
+func createWorktree(ctx context.Context, out, errW io.Writer, jsonOut bool, ws *project.Workspace, cfg *config.Config, name string, f wtNewFlags) error {
+	r := consoleReporter{w: errW}
 	res, err := worktree.New(ctx, r, worktree.NewOptions{
 		Workspace: ws,
 		Config:    cfg,
@@ -227,9 +233,15 @@ func locateForWorktree() (*project.Workspace, *config.Config, error) {
 	if err != nil {
 		return nil, nil, &worktree.Error{Kind: worktree.Failure, Err: fmt.Errorf("read current directory: %w", err)}
 	}
-	ws, err := project.Locate(cwd)
+	return locateWorktreeAt(cwd, "run mws worktree from inside a working copy")
+}
+
+// locateWorktreeAt resolves the workspace containing dir and loads its
+// config; hint says how to recover when dir is outside every workspace.
+func locateWorktreeAt(dir, hint string) (*project.Workspace, *config.Config, error) {
+	ws, err := project.Locate(dir)
 	if err != nil {
-		return nil, nil, &worktree.Error{Kind: worktree.Usage, Err: fmt.Errorf("%s: %w; run mws worktree from inside a working copy", cwd, err)}
+		return nil, nil, &worktree.Error{Kind: worktree.Usage, Err: fmt.Errorf("%s: %w; %s", dir, err, hint)}
 	}
 	cfg, err := config.Load(ws.MetaRoot)
 	if err != nil {

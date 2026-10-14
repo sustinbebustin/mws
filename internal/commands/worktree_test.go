@@ -132,11 +132,18 @@ func (r wtResult) lastLine() string {
 // maps the returned error to the process exit code main would use.
 func runWt(t *testing.T, cwd string, args ...string) wtResult {
 	t.Helper()
+	return runWtIn(t, cwd, "", args...)
+}
+
+// runWtIn is runWt with stdin fed from the given string.
+func runWtIn(t *testing.T, cwd, stdin string, args ...string) wtResult {
+	t.Helper()
 	var out, errb bytes.Buffer
 	var err error
 	withCwd(t, cwd, func() {
 		root := NewRootCmd()
 		root.SetArgs(append([]string{"wt"}, args...))
+		root.SetIn(strings.NewReader(stdin))
 		root.SetOut(&out)
 		root.SetErr(&errb)
 		err = root.ExecuteContext(context.Background())
