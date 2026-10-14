@@ -84,6 +84,31 @@ func TestRestoreSurvivesAMetaPruneWhileTrashed(t *testing.T) {
 	assertWorktreeIntact(t, f, f.wtPath("x"), "x")
 }
 
+func TestRelinkRepairsHarnessSymlinksInWorktrees(t *testing.T) {
+	f := seedWtWorkspace(t)
+	mustNew(t, f.copy, "x", "--no-setup")
+	root := f.wtPath("x")
+	if err := os.Remove(filepath.Join(root, "CLAUDE.md")); err != nil {
+		t.Fatal(err)
+	}
+	gitignore := readFile(t, filepath.Join(root, ".gitignore"))
+
+	withCwd(t, f.meta, func() {
+		if err := runRelink(nopReporter{}); err != nil {
+			t.Fatalf("runRelink: %v", err)
+		}
+	})
+	if got := readFile(t, filepath.Join(root, "CLAUDE.md")); got != "# harness" {
+		t.Fatalf("worktree CLAUDE.md = %q, want the harness file", got)
+	}
+	if got := readFile(t, filepath.Join(root, ".gitignore")); got != gitignore {
+		t.Fatalf("relink replaced the anchor's .gitignore with %q", got)
+	}
+	if got := gitT(t, root, "status", "--porcelain"); got != "" {
+		t.Fatalf("anchor status after relink not clean:\n%s", got)
+	}
+}
+
 func TestRmConfirmationListsWorktrees(t *testing.T) {
 	f := seedWtWorkspace(t)
 	mustNew(t, f.copy, "x", "--no-setup")

@@ -421,6 +421,26 @@ func shortID(id string) string {
 // same name, as it does in the copy; the anchor's checked-out .gitignore is
 // never replaced.
 func carryRoot(r Reporter, metaRoot, copyPath, target, worktreesDir string) error {
+	return mirrorRoot(r, metaRoot, copyPath, target, worktreesDir, true)
+}
+
+// Relink refreshes the links of the worktree at root: harness entries and the
+// copy-root directories it mirrors, with copy-root entries still shadowing
+// harness ones. Files copied into the root at creation are left alone; they
+// are the worktree's own from then on.
+func Relink(metaRoot, copyPath, root string, policy config.WorktreePolicy) error {
+	return mirrorRoot(silent{}, metaRoot, copyPath, root, policy.Dir, false)
+}
+
+// silent discards progress lines.
+type silent struct{}
+
+func (silent) OK(string)   {}
+func (silent) Warn(string) {}
+
+// mirrorRoot is carryRoot, with copying the copy root's regular files
+// optional so a relink never overwrites the worktree's own copies.
+func mirrorRoot(r Reporter, metaRoot, copyPath, target, worktreesDir string, copyFiles bool) error {
 	if _, err := project.LinkHarnessIntoWorkingCopy(metaRoot, target); err != nil {
 		return err
 	}
@@ -460,6 +480,9 @@ func carryRoot(r Reporter, metaRoot, copyPath, target, worktreesDir string) erro
 				return err
 			}
 			r.OK(fmt.Sprintf("Linked %s", name))
+			continue
+		}
+		if !copyFiles {
 			continue
 		}
 		if err := os.Remove(dst); err != nil && !errors.Is(err, os.ErrNotExist) {
