@@ -19,7 +19,7 @@ func run() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := commands.NewRootCmd().ExecuteContext(ctx); err != nil {
+	if err := commands.Execute(ctx, os.Args[1:]); err != nil {
 		if !commands.Silent(err) {
 			fmt.Fprintln(os.Stderr, err)
 		}

@@ -28,9 +28,9 @@ func TestRepairDivergedFilesAutoRepairsIdentical(t *testing.T) {
 	mustWriteFile(t, filepath.Join(peer, ".mcp.json"), string(body))
 
 	called := false
-	prompt := func(string, string) (string, error) {
+	prompt := func(string, string) (resolution, error) {
 		called = true
-		return "", errors.New("prompt should not be called for identical content")
+		return resolveAsk, errors.New("prompt should not be called for identical content")
 	}
 	if err := repairDivergedFiles(nopReporter{}, meta, peer, prompt); err != nil {
 		t.Fatalf("repairDivergedFiles: %v", err)
@@ -52,7 +52,7 @@ func TestRepairDivergedFilesPromptsAndPromotes(t *testing.T) {
 	mustWriteFile(t, filepath.Join(meta, project.HarnessDirName, ".mcp.json"), `{"old":true}`)
 	mustWriteFile(t, filepath.Join(peer, ".mcp.json"), `{"new":true}`)
 
-	prompt := func(string, string) (string, error) { return "peer", nil }
+	prompt := func(string, string) (resolution, error) { return resolvePeer, nil }
 	if err := repairDivergedFiles(nopReporter{}, meta, peer, prompt); err != nil {
 		t.Fatalf("repairDivergedFiles: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestRunRelinkVisitsCopiesUnderWorkingCopiesDir(t *testing.T) {
 	mustMkdir(t, peer)
 
 	withCwd(t, meta, func() {
-		if err := runRelink(nopReporter{}); err != nil {
+		if err := runRelink(nopReporter{}, relinkFlags{}); err != nil {
 			t.Fatalf("runRelink: %v", err)
 		}
 	})
@@ -107,9 +107,9 @@ func TestRepairDivergedFilesSkipsSymlinksAndPeerOnlyFiles(t *testing.T) {
 	}
 	mustWriteFile(t, filepath.Join(peer, "notes.md"), `peer-only`)
 
-	prompt := func(string, string) (string, error) {
+	prompt := func(string, string) (resolution, error) {
 		t.Fatal("prompt should not be called")
-		return "", nil
+		return resolveAsk, nil
 	}
 	if err := repairDivergedFiles(nopReporter{}, meta, peer, prompt); err != nil {
 		t.Fatalf("repairDivergedFiles: %v", err)

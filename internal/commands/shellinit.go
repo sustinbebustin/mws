@@ -76,12 +76,15 @@ Install (one-time):
   # fish
   mws shell-init fish | source         # add to ~/.config/fish/config.fish
 
-Without the wrapper, ` + "`mws clone`" + ` prints a copy-pasteable ` + "`cd <path>`" + ` hint
-instead -- a child process cannot change its parent shell's working directory.
+Without the wrapper, ` + "`mws clone`" + ` still prints the new working copy's path
+as its last stdout line -- a child process cannot change its parent shell's
+working directory, so cd there yourself.
 
 The wrapper invokes the binary with MWS_CD_FILE pointing at a tempfile; the
 binary writes the new working copy's absolute path there on success. External
 tools (IDEs, custom scripts) can use the same MWS_CD_FILE contract directly.`,
+		Example: `  eval "$(mws shell-init zsh)"
+  mws shell-init fish | source`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			switch args[0] {
@@ -90,7 +93,7 @@ tools (IDEs, custom scripts) can use the same MWS_CD_FILE contract directly.`,
 			case "fish":
 				fmt.Fprint(cmd.OutOrStdout(), shellInitFish)
 			default:
-				return fmt.Errorf("unsupported shell %q (supported: zsh, bash, fish)", args[0])
+				return usagef("unsupported shell %q (supported: zsh, bash, fish), e.g. mws shell-init zsh", args[0])
 			}
 			return nil
 		},

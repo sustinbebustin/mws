@@ -31,14 +31,14 @@ It prints what it kept and why. --dry-run reports the same and changes nothing.`
   mws wt prune --json`,
 		Args: usageCheckedArgs(cobra.NoArgs, jsonOut),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runWorktreePrune(cmd.Context(), newWtOutput(cmd, *jsonOut), dryRun)
+			return runWorktreePrune(cmd.Context(), newOutput(cmd, *jsonOut), dryRun)
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "report what would be repaired, dropped and removed; change nothing")
 	return cmd
 }
 
-func runWorktreePrune(ctx context.Context, o wtOutput, dryRun bool) error {
+func runWorktreePrune(ctx context.Context, o output, dryRun bool) error {
 	ws, cfg, err := o.locate()
 	if err != nil {
 		return err

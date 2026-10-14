@@ -285,11 +285,9 @@ func Empty(metaRoot string) error {
 	return nil
 }
 
-// Sweep purges every entry older than retention and returns those it purged.
-// A retention of zero or less means "keep forever" and sweeps nothing. Nothing
-// schedules a sweep; it happens only when a caller asks for one, so an entry
-// outlives its retention until something calls this.
-func Sweep(metaRoot string, retention time.Duration) ([]Entry, error) {
+// Expired lists the entries older than retention, the ones Sweep would purge.
+// A retention of zero or less means "keep forever" and lists nothing.
+func Expired(metaRoot string, retention time.Duration) ([]Entry, error) {
 	if retention <= 0 {
 		return nil, nil
 	}
@@ -298,12 +296,27 @@ func Sweep(metaRoot string, retention time.Duration) ([]Entry, error) {
 		return nil, err
 	}
 	cutoff := time.Now().UTC().Add(-retention)
+	var expired []Entry
+	for _, e := range entries {
+		if !e.DeletedAt.After(cutoff) {
+			expired = append(expired, e)
+		}
+	}
+	return expired, nil
+}
+
+// Sweep purges every entry older than retention and returns those it purged.
+// A retention of zero or less means "keep forever" and sweeps nothing. Nothing
+// schedules a sweep; it happens only when a caller asks for one, so an entry
+// outlives its retention until something calls this.
+func Sweep(metaRoot string, retention time.Duration) ([]Entry, error) {
+	expired, err := Expired(metaRoot, retention)
+	if err != nil {
+		return nil, err
+	}
 	var purged []Entry
 	var errs []error
-	for _, e := range entries {
-		if e.DeletedAt.After(cutoff) {
-			continue
-		}
+	for _, e := range expired {
 		// Keep going past a failure: one undeletable entry must not permanently
 		// block every later expired entry from ever being reclaimed.
 		if err := Purge(e); err != nil {

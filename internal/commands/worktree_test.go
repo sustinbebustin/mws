@@ -632,7 +632,41 @@ func TestWtWorksThroughSymlinkedMeta(t *testing.T) {
 func TestWtPathUnknownWorktree(t *testing.T) {
 	f := seedWtWorkspace(t)
 	res := runWt(t, f.copy, "path", "nope")
-	if res.code != 1 || res.stdout != "" {
-		t.Fatalf("exit %d stdout %q, want 1 and nothing on stdout", res.code, res.stdout)
+	if res.code != 4 || res.stdout != "" {
+		t.Fatalf("exit %d stdout %q, want 4 and nothing on stdout", res.code, res.stdout)
+	}
+}
+
+func TestWtRmOfAMissingWorktreeIsNotFound(t *testing.T) {
+	f := seedWtWorkspace(t)
+	res := runWt(t, f.copy, "rm", "nope", "--json")
+	if res.code != 4 || !strings.Contains(res.stdout, `"code": "not_found"`) {
+		t.Fatalf("exit %d stdout %q, want 4 and a not_found JSON error", res.code, res.stdout)
+	}
+}
+
+func TestWtRmRetrySkipsNamesAlreadyRemoved(t *testing.T) {
+	f := seedWtWorkspace(t)
+	mustNew(t, f.copy, "a", "--no-setup")
+	mustNew(t, f.copy, "b", "--no-setup")
+	if res := runWt(t, f.copy, "rm", "a"); res.code != 0 {
+		t.Fatalf("rm a: exit %d\nstderr: %s", res.code, res.stderr)
+	}
+	res := runWt(t, f.copy, "rm", "a", "b", "--json")
+	if res.code != 0 || !strings.Contains(res.stdout, `"not_found": [`) {
+		t.Fatalf("retry rm a b: exit %d stdout %q\nstderr: %s", res.code, res.stdout, res.stderr)
+	}
+	assertRemoved(t, f, "b")
+}
+
+func TestWtRmDryRunRemovesNothing(t *testing.T) {
+	f := seedWtWorkspace(t)
+	mustNew(t, f.copy, "x", "--no-setup")
+	res := runWt(t, f.copy, "rm", "x", "--dry-run")
+	if res.code != 0 || res.stdout != "would remove "+f.wtPath("x")+"\n" {
+		t.Fatalf("dry run: exit %d stdout %q\nstderr: %s", res.code, res.stdout, res.stderr)
+	}
+	if _, err := os.Stat(f.wtPath("x")); err != nil {
+		t.Fatalf("dry run removed the worktree: %v", err)
 	}
 }

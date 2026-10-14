@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -25,7 +24,7 @@ const legacyMetaSuffix = "-meta"
 const legacyConfigName = "config.toml"
 
 func newMigrateCmd() *cobra.Command {
-	yes := false
+	var f confirmFlags
 	cmd := &cobra.Command{
 		Use:   "migrate <path>",
 		Short: "Convert an old sibling-meta layout to meta-at-root",
@@ -41,17 +40,22 @@ repos inside working copies are left alone -- they move with their parent
 dir during the rename.
 
 Pass either the old meta dir (<parent>/<name>-meta/) or any working copy
-of it; migrate figures out the rest.`,
+of it; migrate figures out the rest. It prints the plan, then asks for
+confirmation; --dry-run prints the plan and stops, and --yes (required
+without a terminal) skips the question.`,
+		Example: `  mws migrate ~/dev/demo-meta --dry-run
+  mws migrate ~/dev/demo-meta --yes`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var arg string
 			if len(args) == 1 {
 				arg = args[0]
 			}
-			return runMigrate(cmd.Context(), newConsoleReporter(), arg, yes)
+			return runMigrate(newConsoleReporter(), arg, f)
 		},
 	}
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation")
+	cmd.Flags().BoolVarP(&f.yes, "yes", "y", false, "skip confirmation")
+	cmd.Flags().BoolVar(&f.dryRun, "dry-run", false, "print the migration plan; change nothing")
 	return cmd
 }
 
@@ -63,12 +67,14 @@ type migratePlan struct {
 	Renames     map[string]string // OldPeers path -> new subdir name inside NewMeta
 }
 
-func runMigrate(ctx context.Context, r Reporter, arg string, yes bool) error {
-	_ = ctx
+func runMigrate(r Reporter, arg string, f confirmFlags) error {
 	if _, err := exec.LookPath("git"); err != nil {
 		return fmt.Errorf("git not found on PATH: %w", err)
 	}
 	if arg == "" {
+		if !canPrompt() {
+			return noPrompt("no path to migrate given", "mws migrate <old-meta-dir> --dry-run", "mws migrate <old-meta-dir> --yes")
+		}
 		if err := huh.NewInput().
 			Title("Path to migrate").
 			Description("Path to the old <name>-meta directory or any of its working copies.").
@@ -100,20 +106,18 @@ func runMigrate(ctx context.Context, r Reporter, arg string, yes bool) error {
 		}
 	}
 
-	if !yes {
-		var ok bool
-		if err := huh.NewConfirm().
-			Title("Proceed with migration?").
-			Affirmative("Migrate").
-			Negative("Cancel").
-			Value(&ok).
-			Run(); err != nil {
-			return err
-		}
-		if !ok {
-			r.Warn("Cancelled.")
-			return nil
-		}
+	if f.dryRun {
+		r.Info("Dry run: nothing was changed.")
+		return nil
+	}
+	ok, err := confirm(r, f.yes, confirmation{
+		title:       "Proceed with migration?",
+		affirmative: "Migrate",
+		missing:     "migrating needs confirmation",
+		try:         []string{fmt.Sprintf("mws migrate %s --yes", arg)},
+	})
+	if err != nil || !ok {
+		return err
 	}
 
 	return executeMigrate(r, plan)

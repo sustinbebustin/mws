@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sustinbebustin/mws/internal/clierr"
 	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/git"
 	"github.com/sustinbebustin/mws/internal/project"
@@ -75,7 +76,7 @@ func New(ctx context.Context, r Reporter, opts NewOptions) (Result, error) {
 		branch = policy.BranchPrefix + opts.Name
 	}
 	if err := git.CheckBranchName(ctx, branch); errors.Is(err, git.ErrInvalidBranchName) {
-		return Result{}, &Error{Kind: Usage, Err: err}
+		return Result{}, &clierr.Error{Kind: clierr.Usage, Err: err}
 	} else if err != nil {
 		return Result{}, failuref("check branch name %q: %w", branch, err)
 	}

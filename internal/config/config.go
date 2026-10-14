@@ -245,24 +245,47 @@ func (c *Config) folderRegistered(folder string) bool {
 	return false
 }
 
-// AddRepo appends a repo to the config if its folder is not already registered
-// (in either Repos or OptionalRepos). Returns true if added, false on duplicate.
-func (c *Config) AddRepo(r Repo) bool {
-	if c.folderRegistered(r.Folder) {
-		return false
-	}
-	c.Repos = append(c.Repos, r)
-	return true
-}
+// RepoList names the list a repo is registered in.
+type RepoList int
 
-// AddOptionalRepo appends a repo to OptionalRepos if its folder is not already
-// registered (in either list). Returns true if added, false on duplicate.
-func (c *Config) AddOptionalRepo(r Repo) bool {
-	if c.folderRegistered(r.Folder) {
-		return false
+const (
+	// ListDefault is [[repos]], cloned into every working copy.
+	ListDefault RepoList = iota
+	// ListOptional is [[optional_repos]], cloned on demand.
+	ListOptional
+)
+
+// Registration is the outcome of Register.
+type Registration int
+
+const (
+	// Registered means the repo was appended.
+	Registered Registration = iota
+	// AlreadyRegistered means the same folder and URL are already in the
+	// same list; nothing changed.
+	AlreadyRegistered
+	// FolderTaken means the folder is registered with another URL or in the
+	// other list; nothing changed.
+	FolderTaken
+)
+
+// Register appends r to list unless its folder is already registered in
+// either list; folders are unique across both.
+func (c *Config) Register(r Repo, list RepoList) Registration {
+	target := &c.Repos
+	if list == ListOptional {
+		target = &c.OptionalRepos
 	}
-	c.OptionalRepos = append(c.OptionalRepos, r)
-	return true
+	for _, x := range *target {
+		if x.Folder == r.Folder && x.URL == r.URL {
+			return AlreadyRegistered
+		}
+	}
+	if c.folderRegistered(r.Folder) {
+		return FolderTaken
+	}
+	*target = append(*target, r)
+	return Registered
 }
 
 // OptionalRepo returns the registered optional repo with the given folder.

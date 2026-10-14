@@ -82,8 +82,8 @@ Behavior:
 
 - Within one repo: commands run in array order and stop at the first non-zero exit.
 - Across repos: a failure in one repo does not block another. Each repo's setup runs independently.
-- The user is prompted once with a grouped list of every command before any run. Override with `--setup` (run without prompting) or `--no-setup` (skip entirely). The two flags are mutually exclusive.
-- Child stdout and stderr stream live to the terminal; long-running `pnpm install` / `go build` do not appear hung.
+- The user is prompted once with a grouped list of every command before any run. Override with `--setup` (run without prompting) or `--no-setup` (skip entirely). The two flags are mutually exclusive. Without a terminal on stdin one of them is required, and `mws clone` fails before creating anything when neither is given.
+- Child stdout and stderr stream live to the terminal (both on mws's stderr, so stdout keeps only the new copy's path); long-running `pnpm install` / `go build` do not appear hung.
 - If any setup command failed, `mws clone` exits non-zero with a summary of `<folder>: <cmd>` failures. The working copy and its clones still exist; the user can read the streamed output and re-run the failing command by hand.
 - If the clone or env-copy phase failed for any repo, setup is skipped entirely.
 
@@ -93,7 +93,7 @@ Design rationale: [ADR-0006](./adr/0006-post-clone-setup-commands.md).
 
 An **Optional repo** registered for on-demand inclusion. It is *not* cloned by `mws clone` into every working copy; instead it is pulled into a specific copy when asked for:
 
-- During `mws clone`, when any `[[optional_repos]]` exist, a multiselect prompt offers them (defaulting to none). `mws clone --with <folder>` (repeatable) selects specific ones non-interactively and skips the prompt.
+- During `mws clone`, when any `[[optional_repos]]` exist, a multiselect prompt offers them (defaulting to none). `mws clone --with <folder>` (repeatable) selects specific ones and `--no-optional` selects none, both without prompting; without a terminal one of them is required.
 - `mws include <folder> [working-copy]` clones one into an existing copy (the current copy by default).
 
 Each entry uses the **same keys** as `[[repos]]` (`folder`, `url`, plus optional `[[optional_repos.envs]]` and `[[optional_repos.setup]]` tables). `folder` must be unique across both `[[repos]]` and `[[optional_repos]]` -- it maps to a single clone-target directory. Register entries with `mws add-repo --optional <url> [folder]`, which appends here without cloning into existing copies.
@@ -138,12 +138,12 @@ Commands (non-interactive; run from anywhere inside a working copy or one of its
 | `mws wt new <name> [--branch <b>] [--base <ref>] [--no-setup]` | Create the worktree and print its absolute path as the last stdout line. `--branch` creates or reuses `<b>` in every native repo instead of `<prefix><name>`; `--base` is the start point for new branches (default: HEAD of the launching checkout). An existing branch that no worktree has checked out is reused. Re-running for an existing worktree prints its path and exits 0. |
 | `mws wt ls [--all]` | List worktrees (`--all`: of every working copy) with per-repo `branch@sha`, dirty state, commits reachable from no other ref, pids running inside, and age. Also reports `orphan` (registered, directory gone) and `unmanaged` (no marker, or registered outside the worktrees dir) entries. |
 | `mws wt path <name>` | Print the worktree's absolute path. |
-| `mws wt exec <name> -- <cmd> [args...]` | Run `<cmd>` with cwd = the worktree root and stdio inherited; mws exits with the command's exit code. |
-| `mws wt rm <name>... [--force] [--keep-branch]` | Remove worktrees. Checks every name first; one refusal removes nothing. `--force` discards modified and untracked files, commits on a detached HEAD that no branch reaches, and root files mws did not create or that changed since creation; `--keep-branch` keeps every branch. |
+| `mws wt exec <name> -- <cmd> [args...]` | Run `<cmd>` with cwd = the worktree root and stdio inherited; mws exits with the command's exit code (4 when the worktree is not found, 1 when the command cannot start). |
+| `mws wt rm <name>... [--force] [--keep-branch] [--dry-run]` | Remove worktrees. Checks every name first; one refusal removes nothing. `--force` discards modified and untracked files, commits on a detached HEAD that no branch reaches, and root files mws did not create or that changed since creation; `--keep-branch` keeps every branch; `--dry-run` runs every check and lists what would be removed. |
 | `mws wt prune [--dry-run]` | Repair stale registrations, run `git worktree prune` in the meta repo and every native repo, then remove every clean, idle, fully merged worktree (except the one it runs in, and any with a native repo on a detached HEAD). Reports what it kept and why. |
 | `mws wt hook create\|remove\|subagent-stop` | Hidden adapters for Claude Code's `WorktreeCreate`, `WorktreeRemove` and `SubagentStop` hooks; they read the hook's JSON payload on stdin. `mws init` wires them into the skeleton's `.claude/settings.json`. `mws wt hook --help` documents each. |
 
-Exit codes: `0` ok, `1` failure, `2` usage, `3` refused by a safety check (unmanaged directory, modified or untracked files, unreachable detached commits, changed root files, live process, branch checked out elsewhere, repo mid-merge or rebase). `hook create` and `hook remove` exit 1 for every error so Claude fails closed; `hook subagent-stop` always exits 0.
+Exit codes: `0` ok, `1` failure, `2` usage, `3` refused by a safety check (unmanaged directory, modified or untracked files, unreachable detached commits, changed root files, live process, branch checked out elsewhere, repo mid-merge or rebase), `4` no worktree by that name (`path`, `exec`; `rm` only when every name is gone, otherwise it skips the missing ones and lists them under `not_found`). `hook create` and `hook remove` exit 1 for every error so Claude fails closed; `hook subagent-stop` always exits 0.
 
 `--json` (a flag of `mws worktree`) makes `new`, `path`, `ls`, `rm` and `prune` print one JSON object on stdout; `exec` and `hook` do not print JSON.
 
@@ -151,10 +151,11 @@ Exit codes: `0` ok, `1` failure, `2` usage, `3` refused by a safety check (unman
 new     {name, path, copy, branch, reused, repos:[{folder, path, branch, base?}]}
 path    {name, path, copy}
 ls      {worktrees:[{name, path, copy, state, detail?, repos:[{folder, branch, sha?, dirty, unique_commits}],
-                     dirty, live:[pid], created?, age_seconds?}]}      # state: managed | orphan | unmanaged
-rm      {removed:[{name, path, branches:[{folder, branch, deleted, unique_commits, reason?}]}]}
+                     root_files:[...], dirty, live:[pid], created?, age_seconds?}]}   # state: managed | orphan | unmanaged
+rm      {removed:[{name, path, branches:[{folder, branch, deleted, unique_commits, reason?}]}], not_found:[name]}
+rm --dry-run  {dry_run: true, removed:[{name, path}], not_found:[name]}
 prune   {dry_run, repaired:[...], dropped:[...], removed:[...as rm...], kept:[{name, path, reasons:[...]}]}
-error   {error:{code, message}}                  # code: usage | refused | failure | setup_failed
+error   {error:{code, message}}                  # code: usage | refused | not_found | failure | setup_failed
 ```
 
 `base` in `new` is a full commit id (the branch tip for a reused branch) and is omitted for a reused worktree. A setup failure under `--json` prints the full result object plus `error` (`setup_failed`) and exits 1.
@@ -213,7 +214,7 @@ What `mws clone peer` does with this config:
 Most fields are written by `mws` subcommands:
 
 - `mws init <name>` writes the initial file with `project_name` and an empty `[[repos]]` list.
-- `mws add-repo` appends a `[[repos]]` entry interactively (and clones it into every working copy).
+- `mws add-repo <url> [folder]` appends a `[[repos]]` entry (prompting for it when run with no arguments on a terminal) and clones it into every working copy. `mws init --repo <url>` registers repos at creation.
 - `mws add-repo --optional` appends an `[[optional_repos]]` entry without cloning it anywhere; pull it into a copy later with `mws clone --with` or `mws include`.
 
 `[[repos.envs]]` and `[[repos.setup]]` are hand-edited today; there are no dedicated subcommands. The schema is round-trip-safe: `mws` reads and writes the file using `BurntSushi/toml`, preserving every key it recognises. Unknown keys are ignored on parse but dropped on the next write -- avoid adding fields that mws does not understand.
@@ -233,3 +234,4 @@ The file is tracked by the meta workspace's git. Commit changes alongside the ha
 - [ADR-0009](./adr/0009-optional-repos.md) - optional repos pulled into copies on demand
 - [ADR-0010](./adr/0010-soft-delete-working-copies.md) - why `mws rm` trashes instead of deleting
 - [ADR-0011](./adr/0011-worktrees-are-children-of-a-working-copy.md) - why worktrees live inside the working copy
+- [ADR-0012](./adr/0012-headless-cli-contract.md) - prompts, output streams, exit codes and retries for agents and scripts

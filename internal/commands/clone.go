@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/sustinbebustin/mws/internal/atomicfile"
+	"github.com/sustinbebustin/mws/internal/clierr"
 	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/git"
 	"github.com/sustinbebustin/mws/internal/project"
@@ -31,52 +32,109 @@ const (
 	setupSkip                        // --no-setup
 )
 
+// optionalKind is how clone picks [[optional_repos]].
+type optionalKind int
+
+const (
+	optionalAsk   optionalKind = iota // no flag -- prompt the user
+	optionalNamed                     // --with
+	optionalNone                      // --no-optional
+)
+
+// optionalChoice is clone's [[optional_repos]] selection; names is set only
+// for optionalNamed.
+type optionalChoice struct {
+	kind  optionalKind
+	names []string
+}
+
+// optionalChoiceFlags maps --with / --no-optional to an optionalChoice,
+// rejecting both at once.
+func optionalChoiceFlags(cmd *cobra.Command, with []string) (optionalChoice, error) {
+	if err := exclusiveFlags(cmd, "with", "no-optional"); err != nil {
+		return optionalChoice{}, err
+	}
+	switch {
+	case cmd.Flags().Changed("no-optional"):
+		return optionalChoice{kind: optionalNone}, nil
+	case len(with) > 0:
+		return optionalChoice{kind: optionalNamed, names: with}, nil
+	}
+	return optionalChoice{kind: optionalAsk}, nil
+}
+
+// setupChoiceFlags maps the --setup / --no-setup pair to a setupChoice,
+// rejecting both at once.
+func setupChoiceFlags(cmd *cobra.Command) (setupChoice, error) {
+	if err := exclusiveFlags(cmd, "setup", "no-setup"); err != nil {
+		return setupAsk, err
+	}
+	switch {
+	case cmd.Flags().Changed("setup"):
+		return setupForceRun, nil
+	case cmd.Flags().Changed("no-setup"):
+		return setupSkip, nil
+	}
+	return setupAsk, nil
+}
+
 func newCloneCmd() *cobra.Command {
-	var doSetup, noSetup bool
 	var with []string
 	cmd := &cobra.Command{
 		Use:   "clone <name>",
 		Short: "Create a new working copy inside this meta workspace",
-		Long: `clone creates a new working copy at <meta-root>/<name>/. It clones each
-registered native repo from its configured URL into the new working copy,
-fans the harness symlinks out from .mws/, and copies any env files mapped in
-.mws.toml from env staging into the working copy.
+		Long: `clone creates a new working copy at <meta-root>/<name>/ and prints its path as
+the last stdout line. It clones each registered native repo from its
+configured URL into the new working copy, fans the harness symlinks out from
+.mws/, and copies any env files mapped in .mws.toml from env staging into the
+working copy.
 
 Native repos are checked out on each repo's default branch -- a deliberate
 fresh-start semantic.
 
 When [[optional_repos]] are registered, clone offers them in a multiselect
-prompt (default none). Use --with <folder> (repeatable) to include specific
-optional repos non-interactively and skip the prompt.
+prompt (default none). --with <folder> (repeatable) includes specific ones and
+--no-optional includes none, both without prompting.
 
 After clone and env-copy succeed, any [[repos.setup]] commands run inside
 each cloned repo via sh -c. By default a single confirmation prompt summarises
 all configured commands. Use --setup to run without prompting or --no-setup
-to skip entirely.`,
+to skip entirely. Without a terminal, every choice above must come from a
+flag; clone fails before creating anything otherwise.
+
+Re-running for an existing working copy finishes it: registered repos (and
+--with ones) that are missing are cloned and get their env files, setup runs
+for those (or for every repo with --setup), and the path is printed. Repos
+already there are left as they are.`,
+		Example: `  mws clone feature-x
+  mws clone feature-x --no-optional --no-setup
+  mws clone feature-x --with docs --with infra --setup
+  cd "$(mws clone feature-x --no-optional --setup | tail -n1)"`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var name string
 			if len(args) == 1 {
 				name = args[0]
 			}
-			choice := setupAsk
-			switch {
-			case doSetup:
-				choice = setupForceRun
-			case noSetup:
-				choice = setupSkip
+			choice, err := setupChoiceFlags(cmd)
+			if err != nil {
+				return err
 			}
-			return runClone(cmd.Context(), newConsoleReporter(), name, choice, with)
+			optional, err := optionalChoiceFlags(cmd, with)
+			if err != nil {
+				return err
+			}
+			return runClone(cmd.Context(), newConsoleReporter(), cmd.OutOrStdout(), name, choice, optional)
 		},
 	}
-	cmd.Flags().BoolVar(&doSetup, "setup", false, "run [[repos.setup]] commands without prompting")
-	cmd.Flags().BoolVar(&noSetup, "no-setup", false, "skip [[repos.setup]] commands without prompting")
+	cmd.Flags().Bool("setup", false, "run [[repos.setup]] commands without prompting")
+	cmd.Flags().Bool("no-setup", false, "skip [[repos.setup]] commands without prompting")
 	cmd.Flags().StringSliceVar(&with, "with", nil, "include named optional repo(s) in this working copy (repeatable)")
-	cmd.MarkFlagsMutuallyExclusive("setup", "no-setup")
+	cmd.Flags().Bool("no-optional", false, "include no optional repos, without prompting")
 	return cmd
 }
 
-func runClone(ctx context.Context, r Reporter, name string, choice setupChoice, with []string) error {
+func runClone(ctx context.Context, r Reporter, out io.Writer, name string, choice setupChoice, optional optionalChoice) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -94,6 +152,9 @@ func runClone(ctx context.Context, r Reporter, name string, choice setupChoice, 
 	}
 
 	if name == "" {
+		if !canPrompt() {
+			return noPrompt("no working copy name given", "mws clone <name> --no-optional --setup", "mws clone <name> --no-optional --no-setup")
+		}
 		if err := huh.NewInput().
 			Title("New working copy name").
 			Description(clonePromptDescription(ws)).
@@ -105,21 +166,46 @@ func runClone(ctx context.Context, r Reporter, name string, choice setupChoice, 
 		name = strings.TrimSpace(name)
 	}
 	if err := project.ValidateName(name); err != nil {
-		return err
-	}
-
-	// Resolve optional repos before any filesystem mutation: an unknown --with
-	// name or a cancelled prompt must fail without leaving a half-built copy.
-	selected, err := resolveOptional(cfg, with)
-	if err != nil {
-		return err
+		return usagef("working copy name %q: %w", name, err)
 	}
 
 	target := filepath.Join(ws.CopiesRoot(), name)
+	existing := false
 	if _, err := os.Stat(target); err == nil {
-		return fmt.Errorf("path already exists: %s", target)
+		if !looksLikeWorkingCopy(ws.MetaRoot, target) {
+			return clierr.Refusedf("%s already exists and is not a working copy of %s; nothing was changed; choose another name", target, ws.MetaRoot)
+		}
+		existing = true
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
+	}
+
+	// Resolve every choice before any filesystem mutation: an unknown --with
+	// name, a cancelled prompt or a missing flag must fail without leaving a
+	// half-built copy.
+	var selected []config.Repo
+	if existing && optional.kind == optionalAsk {
+		// A retry keeps the optional repos the copy already has; it does not
+		// ask again.
+		selected = presentRepos(target, cfg.OptionalRepos)
+	} else if selected, err = resolveOptional(cfg, optional); err != nil {
+		return err
+	}
+	repos := append(append([]config.Repo{}, cfg.Repos...), selected...)
+	missing := missingRepos(target, repos)
+	// Setup runs for the repos this run clones, or for all of them on --setup
+	// (so a retry after a failed setup runs it again).
+	setupRepos := missing
+	if choice == setupForceRun {
+		setupRepos = repos
+	}
+	items := collectSetup(setupRepos)
+	if err := requireSetupChoice(choice, items, "mws clone "+name); err != nil {
+		return err
+	}
+	if existing && len(missing) == 0 && len(items) == 0 {
+		r.Info(fmt.Sprintf("Working copy %s already exists and has every repo", target))
+		return handOffCopy(r, out, target)
 	}
 
 	if err := os.MkdirAll(target, 0o755); err != nil {
@@ -135,7 +221,7 @@ func runClone(ctx context.Context, r Reporter, name string, choice setupChoice, 
 	}
 
 	var failed []string
-	for _, repo := range append(append([]config.Repo{}, cfg.Repos...), selected...) {
+	for _, repo := range missing {
 		if err := cloneNative(ctx, r, repo, target); err != nil {
 			r.Fail(fmt.Sprintf("%s: %v", repo.Folder, err))
 			failed = append(failed, repo.Folder)
@@ -145,35 +231,71 @@ func runClone(ctx context.Context, r Reporter, name string, choice setupChoice, 
 	}
 
 	if len(failed) > 0 {
-		return fmt.Errorf("clone completed with errors: %d repo(s) failed: %s", len(failed), strings.Join(failed, ", "))
+		return fmt.Errorf("clone completed with errors: %d repo(s) failed: %s; the rest are in place, so rerunning the same command clones only these",
+			len(failed), strings.Join(failed, ", "))
 	}
 
-	items := collectSetup(append(append([]config.Repo{}, cfg.Repos...), selected...))
 	run, err := confirmSetup(choice, items)
 	if err != nil {
 		return err
 	}
 	if run {
-		setupFailed := runSetup(ctx, r, target, items, os.Stdout, os.Stderr)
+		setupFailed := runSetup(ctx, r, target, items, os.Stderr, os.Stderr)
 		if len(setupFailed) > 0 {
-			return fmt.Errorf("clone completed but %d setup command(s) failed:\n  %s",
+			return fmt.Errorf("clone completed but %d setup command(s) failed:\n  %s\nfix the cause, then rerun with --setup to run every setup command again",
 				len(setupFailed), strings.Join(setupFailed, "\n  "))
 		}
 	}
 
 	r.OK(fmt.Sprintf("Working copy ready at %s", target))
+	return handOffCopy(r, out, target)
+}
 
-	// Shell-integration handoff: if the user's mws shell function set MWS_CD_FILE,
-	// drop the absolute target path there so the parent shell can cd into it.
-	// Otherwise emit a copy-pasteable hint -- a child process can't chdir its parent.
+// missingRepos returns the repos of list with no directory in the copy at
+// target.
+func missingRepos(target string, list []config.Repo) []config.Repo {
+	var out []config.Repo
+	for _, repo := range list {
+		if _, err := os.Stat(filepath.Join(target, repo.Folder)); err != nil {
+			out = append(out, repo)
+		}
+	}
+	return out
+}
+
+// presentRepos returns the repos of list that the copy at target holds.
+func presentRepos(target string, list []config.Repo) []config.Repo {
+	var out []config.Repo
+	for _, repo := range list {
+		if _, err := os.Stat(filepath.Join(target, repo.Folder)); err == nil {
+			out = append(out, repo)
+		}
+	}
+	return out
+}
+
+// requireSetupChoice fails before anything changes when setup commands would
+// need the confirmation prompt and there is no terminal. invocation is the
+// command line to repeat with --setup or --no-setup.
+func requireSetupChoice(choice setupChoice, items []setupItem, invocation string) error {
+	if len(items) == 0 || choice != setupAsk || canPrompt() {
+		return nil
+	}
+	return noPrompt("setup commands are configured and neither --setup nor --no-setup was given",
+		invocation+" --setup", invocation+" --no-setup")
+}
+
+// handOffCopy prints the working copy's path as the last stdout line and, when
+// the user's mws shell function set MWS_CD_FILE, writes it there so the
+// parent shell can cd into it -- a child process can't chdir its parent.
+func handOffCopy(r Reporter, out io.Writer, target string) error {
 	if cdFile := os.Getenv("MWS_CD_FILE"); cdFile != "" {
 		if err := os.WriteFile(cdFile, []byte(target), 0o600); err != nil {
 			r.Warn(fmt.Sprintf("could not write MWS_CD_FILE %s: %v", cdFile, err))
 		}
-	} else {
-		r.Info(fmt.Sprintf("Next: cd %s", target))
 	}
-	return nil
+	_, err := fmt.Fprintln(out, target)
+	return err
 }
 
 // clonePromptDescription renders the help text shown under the "New working
@@ -189,22 +311,30 @@ func clonePromptDescription(ws *project.Workspace) string {
 // With no optional repos registered it returns nil without prompting. When
 // --with names are supplied they select non-interactively: each must match a
 // registered optional folder or the clone fails before any optional repo is
-// cloned. Otherwise the user is offered a multiselect defaulting to none.
-func resolveOptional(cfg *config.Config, with []string) ([]config.Repo, error) {
-	if len(cfg.OptionalRepos) == 0 {
+// cloned. --no-optional selects none. Otherwise the user is offered a
+// multiselect defaulting to none.
+func resolveOptional(cfg *config.Config, choice optionalChoice) ([]config.Repo, error) {
+	switch choice.kind {
+	case optionalNone:
 		return nil, nil
-	}
-	if len(with) > 0 {
-		out := make([]config.Repo, 0, len(with))
-		for _, name := range with {
+	case optionalNamed:
+		out := make([]config.Repo, 0, len(choice.names))
+		for _, name := range choice.names {
 			folder := strings.TrimSpace(name)
 			repo, ok := cfg.OptionalRepo(folder)
 			if !ok {
-				return nil, fmt.Errorf("--with %q: no optional repo registered with that folder (registered: %s)", folder, listOptionalFolders(cfg))
+				return nil, usagef("--with %q: no optional repo registered with that folder (registered: %s)", folder, listOptionalFolders(cfg))
 			}
 			out = append(out, repo)
 		}
 		return out, nil
+	}
+	if len(cfg.OptionalRepos) == 0 {
+		return nil, nil
+	}
+	if !canPrompt() {
+		return nil, noPrompt(fmt.Sprintf("optional repos are registered (%s) and neither --with nor --no-optional was given", listOptionalFolders(cfg)),
+			"mws clone <name> --no-optional", "mws clone <name> --with <folder>")
 	}
 	opts := make([]huh.Option[string], 0, len(cfg.OptionalRepos))
 	for _, repo := range cfg.OptionalRepos {
@@ -297,6 +427,8 @@ func confirmSetup(choice setupChoice, items []setupItem) (bool, error) {
 	case setupSkip:
 		return false, nil
 	}
+	// Callers check requireSetupChoice before changing anything, so a
+	// terminal is there to ask on.
 	var ok bool
 	if err := huh.NewConfirm().
 		Title("Run setup commands?").

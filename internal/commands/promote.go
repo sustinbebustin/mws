@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 
+	"github.com/sustinbebustin/mws/internal/clierr"
 	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/project"
 )
@@ -22,7 +23,12 @@ func newPromoteCmd() *cobra.Command {
 		Long: `promote moves a file or directory that lives only in the current working
 copy into the meta's .mws/ harness dir, replaces the original with a symlink,
 and backfills the symlink into every other working copy so the item is now
-shared across all copies.`,
+shared across all copies.
+
+With no path, it prompts with the entries that can be promoted; without a
+terminal, it lists them in the error instead.`,
+		Example: `  mws promote .mcp.json
+  mws promote scripts`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var arg string
@@ -62,6 +68,9 @@ func runPromote(r Reporter, arg string) error {
 		if len(candidates) == 0 {
 			return errors.New("no promotable top-level entries (everything is already a symlink or already exists in the harness)")
 		}
+		if !canPrompt() {
+			return noPrompt(fmt.Sprintf("no path given (promotable: %s)", strings.Join(candidates, ", ")), "mws promote <path>")
+		}
 		opts := make([]huh.Option[string], 0, len(candidates))
 		for _, name := range candidates {
 			opts = append(opts, huh.NewOption(name, name))
@@ -93,11 +102,16 @@ func runPromote(r Reporter, arg string) error {
 	if err != nil {
 		return fmt.Errorf("lstat %s: %w", abs, err)
 	}
-	if st.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("%s is already a symlink; nothing to promote", abs)
-	}
 	if filepath.Dir(rel) != "." {
-		return fmt.Errorf("promote only handles top-level entries; got nested path %q", rel)
+		return usagef("promote only handles top-level entries; got nested path %q", rel)
+	}
+	if st.Mode()&os.ModeSymlink != 0 {
+		// A retried promote finds the entry already linked into the harness.
+		if alreadyPromoted(abs, filepath.Join(harnessRoot, rel)) {
+			r.Info(fmt.Sprintf("%s is already promoted into the harness; nothing to do.", rel))
+			return nil
+		}
+		return clierr.Refusedf("%s is already a symlink, not into the harness; nothing to promote", abs)
 	}
 
 	dst := filepath.Join(harnessRoot, rel)
@@ -172,6 +186,17 @@ func promoteCandidates(workingCopy, harnessRoot string) ([]string, error) {
 		out = append(out, e.Name())
 	}
 	return out, nil
+}
+
+// alreadyPromoted reports whether the symlink at link resolves to the harness
+// entry at harnessEntry.
+func alreadyPromoted(link, harnessEntry string) bool {
+	resolved, err := filepath.EvalSymlinks(link)
+	if err != nil {
+		return false
+	}
+	h, err := filepath.EvalSymlinks(harnessEntry)
+	return err == nil && h == resolved
 }
 
 func hasParentSegment(rel string) bool {

@@ -2,12 +2,12 @@ package worktree
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/sustinbebustin/mws/internal/clierr"
 	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/git"
 	"github.com/sustinbebustin/mws/internal/project"
@@ -89,9 +89,8 @@ func Prune(ctx context.Context, r Reporter, opts PruneOptions) (PruneResult, err
 			continue
 		}
 		removed, err := Remove(ctx, r, RemoveOptions{Workspace: ws, Config: opts.Config, Names: []string{e.Name}, OnlyIfMerged: true})
-		var we *Error
 		switch {
-		case errors.As(err, &we) && we.Kind == Refused:
+		case err != nil && clierr.KindOf(err) == clierr.Refused:
 			// Changed since it was listed, e.g. an agent started or committed inside it.
 			res.Kept = append(res.Kept, Kept{Name: e.Name, Path: e.Path, Reasons: []string{err.Error()}})
 		case err != nil:

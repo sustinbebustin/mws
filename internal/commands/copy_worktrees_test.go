@@ -1,6 +1,9 @@
 package commands
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -48,7 +51,7 @@ func TestRestoreRepairsWorktrees(t *testing.T) {
 			writeFileAll(t, filepath.Join(f.wtPath("x"), "frontend", "wip.txt"), "unsaved")
 
 			withCwd(t, f.meta, func() {
-				if err := runRm(t.Context(), nopReporter{}, "c", true, false); err != nil {
+				if err := runRm(t.Context(), nopReporter{}, "c", rmFlags{yes: true}); err != nil {
 					t.Fatalf("runRm: %v", err)
 				}
 				if err := runRestore(t.Context(), nopReporter{}, "c", tc.as, true); err != nil {
@@ -72,7 +75,7 @@ func TestRestoreSurvivesAMetaPruneWhileTrashed(t *testing.T) {
 	writeFileAll(t, filepath.Join(f.wtPath("x"), "frontend", "wip.txt"), "unsaved")
 
 	withCwd(t, f.meta, func() {
-		if err := runRm(t.Context(), nopReporter{}, "c", true, false); err != nil {
+		if err := runRm(t.Context(), nopReporter{}, "c", rmFlags{yes: true}); err != nil {
 			t.Fatalf("runRm: %v", err)
 		}
 		gitT(t, f.meta, "worktree", "prune")
@@ -93,7 +96,7 @@ func TestRelinkRepairsHarnessSymlinksInWorktrees(t *testing.T) {
 	gitignore := readFile(t, filepath.Join(root, ".gitignore"))
 
 	withCwd(t, f.meta, func() {
-		if err := runRelink(nopReporter{}); err != nil {
+		if err := runRelink(nopReporter{}, relinkFlags{}); err != nil {
 			t.Fatalf("runRelink: %v", err)
 		}
 	})
@@ -113,14 +116,16 @@ func TestTrashPurgeDropsMetaWorktreeRegistrations(t *testing.T) {
 		name  string
 		purge func(t *testing.T) error
 	}{
-		{"prune", func(t *testing.T) error { return runTrashPrune(t.Context(), nopReporter{}) }},
-		{"empty", func(t *testing.T) error { return runTrashEmpty(t.Context(), nopReporter{}, true) }},
+		{"prune", func(t *testing.T) error { return runTrashPrune(t.Context(), nopReporter{}, false) }},
+		{"empty", func(t *testing.T) error {
+			return runTrashEmpty(t.Context(), nopReporter{}, confirmFlags{yes: true})
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := seedWtWorkspace(t)
 			mustNew(t, f.copy, "x", "--no-setup")
 			withCwd(t, f.meta, func() {
-				if err := runRm(t.Context(), nopReporter{}, "c", true, false); err != nil {
+				if err := runRm(t.Context(), nopReporter{}, "c", rmFlags{yes: true}); err != nil {
 					t.Fatalf("runRm: %v", err)
 				}
 				entries, _, err := trash.List(f.meta)
@@ -173,7 +178,7 @@ func TestRmRefusesWhileAWorktreeIsLive(t *testing.T) {
 	agent := startIn(t, filepath.Join(f.wtPath("x"), "frontend"))
 
 	var err error
-	withCwd(t, f.meta, func() { err = runRm(t.Context(), nopReporter{}, "c", true, false) })
+	withCwd(t, f.meta, func() { err = runRm(t.Context(), nopReporter{}, "c", rmFlags{yes: true}) })
 	if err == nil {
 		t.Fatal("rm removed a copy whose worktree has a live process")
 	}
@@ -198,14 +203,26 @@ func TestListCountsWorktreesPerCopyWithoutListingThem(t *testing.T) {
 	mustNew(t, f.copy, "a", "--no-setup")
 	mustNew(t, f.copy, "b", "--no-setup")
 
-	rec := &recordingReporter{}
+	var out, jsonOut bytes.Buffer
 	withCwd(t, f.wtPath("a"), func() {
-		if err := runList(rec); err != nil {
+		if err := runList(output{stdout: &out, stderr: io.Discard, json: false}); err != nil {
 			t.Fatalf("runList: %v", err)
 		}
+		if err := runList(output{stdout: &jsonOut, stderr: io.Discard, json: true}); err != nil {
+			t.Fatalf("runList --json: %v", err)
+		}
 	})
-	want := []string{"* c  (+2 worktrees)"}
-	if !slices.Equal(rec.infos, want) {
-		t.Fatalf("list lines = %q, want %q", rec.infos, want)
+	if got, want := out.String(), "* c  (+2 worktrees)\n"; got != want {
+		t.Fatalf("list stdout = %q, want %q", got, want)
+	}
+	var got struct {
+		Copies []copyJSON `json:"copies"`
+	}
+	if err := json.Unmarshal(jsonOut.Bytes(), &got); err != nil {
+		t.Fatalf("list --json: %v\n%s", err, jsonOut.String())
+	}
+	want := []copyJSON{{Name: "c", Path: f.copy, Current: true, Worktrees: 2}}
+	if !slices.Equal(got.Copies, want) {
+		t.Fatalf("list --json copies = %+v, want %+v", got.Copies, want)
 	}
 }

@@ -22,7 +22,8 @@ and copies of the working copy's per-copy state.
 Every subcommand is non-interactive. Results go to stdout, progress to stderr.
 --json prints one JSON object, or {"error": {"code", "message"}} on failure.
 
-Exit codes: 0 ok, 1 failure, 2 usage, 3 refused by a safety check.`
+Exit codes: 0 ok, 1 failure, 2 usage, 3 refused by a safety check, 4 no
+worktree by that name.`
 
 func newWorktreeCmd() *cobra.Command {
 	var jsonOut bool
@@ -33,9 +34,6 @@ func newWorktreeCmd() *cobra.Command {
 		Long:    worktreeLong,
 	}
 	cmd.PersistentFlags().BoolVar(&jsonOut, "json", false, "print results as JSON")
-	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
-		return &worktree.Error{Kind: worktree.Usage, Err: err}
-	})
 	cmd.AddCommand(
 		newWorktreeNewCmd(&jsonOut),
 		newWorktreePathCmd(&jsonOut),
@@ -77,7 +75,7 @@ checked out elsewhere and a repo in the middle of a merge or rebase.`,
   mws wt new 04 --branch feat/save-roof --base main --json`,
 		Args: usageCheckedArgs(cobra.ExactArgs(1), jsonOut),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			o := newWtOutput(cmd, *jsonOut)
+			o := newOutput(cmd, *jsonOut)
 			ws, cfg, err := o.locate()
 			if err != nil {
 				return err
@@ -95,9 +93,13 @@ func newWorktreePathCmd(jsonOut *bool) *cobra.Command {
 	return &cobra.Command{
 		Use:   "path <name>",
 		Short: "Print the absolute path of a worktree",
-		Args:  usageCheckedArgs(cobra.ExactArgs(1), jsonOut),
+		Long: `path prints the absolute path of the managed worktree <name> of this working
+copy. A name with no worktree exits 4; one mws does not manage exits 3.`,
+		Example: `  mws wt path 04
+  cd "$(mws wt path 04)"`,
+		Args: usageCheckedArgs(cobra.ExactArgs(1), jsonOut),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorktreePath(cmd.Context(), newWtOutput(cmd, *jsonOut), args[0])
+			return runWorktreePath(cmd.Context(), newOutput(cmd, *jsonOut), args[0])
 		},
 	}
 }
@@ -111,7 +113,7 @@ type wtNewJSON struct {
 
 // runWorktreeNew is `wt new` in an already located workspace; the
 // WorktreeCreate hook calls it with the workspace of Claude's project dir.
-func runWorktreeNew(ctx context.Context, o wtOutput, ws *project.Workspace, cfg *config.Config, name string, f wtNewFlags) error {
+func runWorktreeNew(ctx context.Context, o output, ws *project.Workspace, cfg *config.Config, name string, f wtNewFlags) error {
 	r := o.reporter()
 	res, err := worktree.New(ctx, r, worktree.NewOptions{
 		Workspace: ws,
@@ -178,7 +180,7 @@ func runWorktreeSetup(ctx context.Context, r Reporter, cfg *config.Config, res w
 		res.Name, res.Path, len(failed), strings.Join(failed, "\n  "))}
 }
 
-func runWorktreePath(ctx context.Context, o wtOutput, name string) error {
+func runWorktreePath(ctx context.Context, o output, name string) error {
 	ws, cfg, err := o.locate()
 	if err != nil {
 		return err

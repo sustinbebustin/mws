@@ -122,13 +122,16 @@ func TestRoundTripWithSetup(t *testing.T) {
 	}
 }
 
-func TestAddRepoDedup(t *testing.T) {
+func TestRegisterDedup(t *testing.T) {
 	c := &Config{}
-	if !c.AddRepo(Repo{Folder: "frontend", URL: "a"}) {
-		t.Fatal("first add should succeed")
+	if got := c.Register(Repo{Folder: "frontend", URL: "a"}, ListDefault); got != Registered {
+		t.Fatalf("first register = %v, want Registered", got)
 	}
-	if c.AddRepo(Repo{Folder: "frontend", URL: "b"}) {
-		t.Fatal("duplicate folder should be rejected")
+	if got := c.Register(Repo{Folder: "frontend", URL: "a"}, ListDefault); got != AlreadyRegistered {
+		t.Fatalf("same folder and URL = %v, want AlreadyRegistered", got)
+	}
+	if got := c.Register(Repo{Folder: "frontend", URL: "b"}, ListDefault); got != FolderTaken {
+		t.Fatalf("same folder, other URL = %v, want FolderTaken", got)
 	}
 	if len(c.Repos) != 1 {
 		t.Fatalf("got %d repos, want 1", len(c.Repos))
@@ -187,13 +190,13 @@ func TestOptionalReposOmittedWhenEmpty(t *testing.T) {
 	}
 }
 
-func TestAddOptionalRepoDedup(t *testing.T) {
+func TestRegisterOptionalDedup(t *testing.T) {
 	c := &Config{}
-	if !c.AddOptionalRepo(Repo{Folder: "worker", URL: "a"}) {
-		t.Fatal("first add should succeed")
+	if got := c.Register(Repo{Folder: "worker", URL: "a"}, ListOptional); got != Registered {
+		t.Fatalf("first register = %v, want Registered", got)
 	}
-	if c.AddOptionalRepo(Repo{Folder: "worker", URL: "b"}) {
-		t.Fatal("duplicate optional folder should be rejected")
+	if got := c.Register(Repo{Folder: "worker", URL: "b"}, ListOptional); got != FolderTaken {
+		t.Fatalf("duplicate optional folder = %v, want FolderTaken", got)
 	}
 	if len(c.OptionalRepos) != 1 || c.OptionalRepos[0].URL != "a" {
 		t.Fatalf("optional repos unexpected: %+v", c.OptionalRepos)
@@ -202,13 +205,14 @@ func TestAddOptionalRepoDedup(t *testing.T) {
 
 func TestFolderUniqueAcrossLists(t *testing.T) {
 	c := &Config{Repos: []Repo{{Folder: "shared", URL: "a"}}}
-	if c.AddOptionalRepo(Repo{Folder: "shared", URL: "b"}) {
-		t.Fatal("optional folder colliding with a default repo should be rejected")
+	// Even the same URL: a folder lives in one list only.
+	if got := c.Register(Repo{Folder: "shared", URL: "a"}, ListOptional); got != FolderTaken {
+		t.Fatalf("optional folder colliding with a default repo = %v, want FolderTaken", got)
 	}
 
 	c2 := &Config{OptionalRepos: []Repo{{Folder: "shared", URL: "a"}}}
-	if c2.AddRepo(Repo{Folder: "shared", URL: "b"}) {
-		t.Fatal("default folder colliding with an optional repo should be rejected")
+	if got := c2.Register(Repo{Folder: "shared", URL: "b"}, ListDefault); got != FolderTaken {
+		t.Fatalf("default folder colliding with an optional repo = %v, want FolderTaken", got)
 	}
 }
 

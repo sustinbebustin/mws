@@ -7,11 +7,13 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 
+	"github.com/sustinbebustin/mws/internal/clierr"
 	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/project"
 	"github.com/sustinbebustin/mws/internal/trash"
@@ -33,7 +35,12 @@ If a name was trashed more than once, restore prompts for which entry to bring
 back. --yes skips every prompt and takes the most recent match -- or, with no
 name given, the most recently trashed copy of any name. restore never
 overwrites: if a working copy already holds the name, use --as to restore under
-a different one.`,
+a different one. Without a terminal, give a name (or --yes) wherever restore
+would prompt. A name with no trash entry exits 4 (not found); the message says
+when a working copy of that name exists, as after a retried restore.`,
+		Example: `  mws restore feature-x
+  mws restore feature-x --yes
+  mws restore feature-x --as feature-x-old`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var name string
@@ -59,6 +66,10 @@ func runRestore(ctx context.Context, r Reporter, name, as string, yes bool) erro
 	sweepTrash(r, ws.MetaRoot, policy)
 
 	entry, err := selectEntry(ws.MetaRoot, name, yes, policy)
+	if clierr.KindOf(err) == clierr.NotFound && looksLikeWorkingCopy(ws.MetaRoot, filepath.Join(ws.CopiesRoot(), name)) {
+		// A retried restore finds the copy back in place and the trash without it.
+		return clierr.NotFoundf("no trashed working copy named %q, but %s is a working copy, so a previous restore already brought it back", name, filepath.Join(ws.CopiesRoot(), name))
+	}
 	if err != nil {
 		return err
 	}
@@ -88,7 +99,9 @@ func runRestore(ctx context.Context, r Reporter, name, as string, yes bool) erro
 	if err != nil {
 		return fmt.Errorf("restored %s but failed to relink the harness: %w. Run `mws relink` to retry", dest, err)
 	}
-	r.OK(fmt.Sprintf("Relinked %d harness %s", len(linked), plural(len(linked), "entry", "entries")))
+	if len(linked) > 0 {
+		r.OK(fmt.Sprintf("Relinked %d harness %s", len(linked), plural(len(linked), "entry", "entries")))
+	}
 
 	// Worktree links are absolute and still name the trash (or the old name).
 	repaired, err := worktree.RepairCopy(ctx, ws.MetaRoot, dest, cfg.WorktreePolicy())
@@ -112,12 +125,13 @@ func selectEntry(metaRoot, name string, yes bool, policy config.TrashPolicy) (tr
 		}
 		switch {
 		case len(matches) == 0:
-			return trash.Entry{}, fmt.Errorf("no trashed working copy named %q in %s. Run `mws trash list` to see what is there", name, trash.Root(metaRoot))
+			return trash.Entry{}, clierr.NotFoundf("no trashed working copy named %q in %s. Run `mws trash list` to see what is there", name, trash.Root(metaRoot))
 		case len(matches) == 1 || yes:
 			// Find returns newest first, so matches[0] is the most recent.
 			return matches[0], nil
 		default:
-			return promptEntry(matches, policy, fmt.Sprintf("%q was trashed %d times. Which one?", name, len(matches)))
+			return promptEntry(matches, policy, fmt.Sprintf("%q was trashed %d times. Which one?", name, len(matches)),
+				fmt.Sprintf("%q was trashed %d times", name, len(matches)))
 		}
 	}
 
@@ -126,15 +140,25 @@ func selectEntry(metaRoot, name string, yes bool, policy config.TrashPolicy) (tr
 		return trash.Entry{}, err
 	}
 	if len(entries) == 0 {
-		return trash.Entry{}, fmt.Errorf("the trash at %s is empty; there is nothing to restore", trash.Root(metaRoot))
+		return trash.Entry{}, clierr.NotFoundf("the trash at %s is empty; there is nothing to restore", trash.Root(metaRoot))
 	}
 	if yes {
 		return entries[0], nil
 	}
-	return promptEntry(entries, policy, "Select a working copy to restore")
+	return promptEntry(entries, policy, "Select a working copy to restore", "no name given")
 }
 
-func promptEntry(entries []trash.Entry, policy config.TrashPolicy, title string) (trash.Entry, error) {
+// promptEntry asks which of entries to restore. Without a terminal it fails
+// with missing, which says why there is a choice to make.
+func promptEntry(entries []trash.Entry, policy config.TrashPolicy, title, missing string) (trash.Entry, error) {
+	if !canPrompt() {
+		names := make([]string, len(entries))
+		for i, e := range entries {
+			names[i] = e.Name
+		}
+		return trash.Entry{}, noPrompt(fmt.Sprintf("%s (trashed: %s)", missing, strings.Join(names, ", ")),
+			"mws restore <name>", "mws restore <name> --yes   (the most recent entry of that name)")
+	}
 	now := time.Now().UTC()
 	opts := make([]huh.Option[string], 0, len(entries))
 	byID := make(map[string]trash.Entry, len(entries))

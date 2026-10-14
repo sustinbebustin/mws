@@ -12,7 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optional `[worktrees]` table in `.mws.toml`: `dir` (default `.wt`), `branch_prefix` (default `wt/`), `repo_setup` (default `true`) and `[[worktrees.setup]]` commands. A config that omits the table round-trips unchanged.
 - Hidden `mws wt hook create|remove|subagent-stop` adapt Claude Code's `WorktreeCreate`, `WorktreeRemove` and `SubagentStop` hooks, so `claude -w`, `EnterWorktree` and `isolation: "worktree"` subagents use the same layout; a finished subagent's worktree is removed when it holds no work. `mws init` now writes the three hook entries into the skeleton's `.claude/settings.json`; existing workspaces add them by hand.
 
+- Every command runs headless. Without a terminal on stdin mws never prompts: a missing input fails with exit `2` and the invocation that supplies it, and a confirmation needs `--yes`. New flags: `mws init --description --copies-dir --parent --repo --yes`, `mws clone --no-optional`, `mws relink --prefer peer|meta|skip`. See ADR 0012.
+- `--dry-run` on `mws rm`, `mws trash prune`, `mws trash empty`, `mws migrate`, `mws relink` and `mws wt rm`. `--json` on `mws list` and `mws trash list`. Aliases `mws ls`, `mws trash ls` and `mws wt list`. Every command's `--help` shows examples.
+
 ### Changed
+- Results go to stdout and progress to stderr for every command. `mws init` and `mws clone` print the new working copy's path as the last stdout line; the `Next: cd <path>` hint is gone.
+- One exit-code scheme for the whole CLI: `0` ok, `1` failure, `2` usage (unknown commands, including under `mws wt` and `mws trash`, unknown flags, bad arguments, conflicting flags), `3` refused, `4` not found. `mws rm`, `mws restore`, `mws wt path`, `wt exec` and `wt rm` exit `4` (JSON code `not_found`) for a missing name, instead of `1`; `rm` and `restore` say when an earlier run already removed or restored it.
+- Retries finish the job: `clone` of an existing copy clones only the repos it lacks and runs their setup (all setup again with `--setup`), `add-repo` of the same URL fills in copies that lack it, `promote` of a promoted entry succeeds, `wt rm a b` skips names already removed, and `relink` no longer rewrites links that are already correct.
+- `mws relink` inspects every copy first and refuses, changing nothing, when a diverged file would need a prompt without a terminal or when `--prefer peer` would overwrite one copy's edit with another's. It exits non-zero when any working copy fails, after relinking the others.
 - `mws list` shows `(+N worktrees)` per working copy. `mws rm <copy>` refuses while one of its worktrees has a live process and lists its worktrees in the confirmation. `mws restore` repairs the worktrees' git links, `mws relink` refreshes harness links in worktree roots, and `mws trash prune|empty` prune stale meta worktree registrations. `mws sync-env` still updates only the working copy.
 
 ## [0.5.0] - 2026-08-11

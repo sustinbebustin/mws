@@ -9,44 +9,79 @@ import (
 
 // LinkHarnessIntoWorkingCopy creates a symlink in workingCopy for every
 // top-level entry of <metaRoot>/.mws/. Existing entries in workingCopy that are
-// NOT symlinks are left untouched; existing symlinks are recreated so they
-// point at the current harness entry. Symlink targets are relative paths from
-// workingCopy back into the harness.
+// NOT symlinks are left untouched; existing symlinks that point elsewhere are
+// recreated so they point at the current harness entry, and correct ones are
+// kept. Symlink targets are relative paths from workingCopy back into the
+// harness.
 //
-// Returns the names that were created/refreshed (sorted by name as returned by os.ReadDir).
+// Returns the names that were created or repointed (sorted by name as returned
+// by os.ReadDir), so running it twice returns nothing the second time.
 func LinkHarnessIntoWorkingCopy(metaRoot, workingCopy string) ([]string, error) {
+	if err := os.MkdirAll(workingCopy, 0o755); err != nil {
+		return nil, fmt.Errorf("mkdir working copy %s: %w", workingCopy, err)
+	}
+	links, err := pendingHarnessLinks(metaRoot, workingCopy)
+	if err != nil {
+		return nil, err
+	}
+	linked := make([]string, 0, len(links))
+	for _, l := range links {
+		if err := AtomicSymlink(l.target, filepath.Join(workingCopy, l.name)); err != nil {
+			return nil, err
+		}
+		linked = append(linked, l.name)
+	}
+	return linked, nil
+}
+
+// PendingHarnessLinks returns the names LinkHarnessIntoWorkingCopy would create
+// or repoint in workingCopy, without changing anything.
+func PendingHarnessLinks(metaRoot, workingCopy string) ([]string, error) {
+	links, err := pendingHarnessLinks(metaRoot, workingCopy)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, len(links))
+	for i, l := range links {
+		names[i] = l.name
+	}
+	return names, nil
+}
+
+// harnessLink is one symlink to write: name in the working copy, pointing at
+// target, relative to the working copy.
+type harnessLink struct{ name, target string }
+
+func pendingHarnessLinks(metaRoot, workingCopy string) ([]harnessLink, error) {
 	harness := filepath.Join(metaRoot, HarnessDirName)
 	entries, err := os.ReadDir(harness)
 	if err != nil {
 		return nil, fmt.Errorf("read harness %s: %w", harness, err)
 	}
-	if err := os.MkdirAll(workingCopy, 0o755); err != nil {
-		return nil, fmt.Errorf("mkdir working copy %s: %w", workingCopy, err)
-	}
-
 	rel, err := filepath.Rel(workingCopy, harness)
 	if err != nil {
 		return nil, fmt.Errorf("relpath harness -> working copy: %w", err)
 	}
 
-	var linked []string
+	var links []harnessLink
 	for _, e := range entries {
 		name := e.Name()
 		target := filepath.Join(rel, name)
 		linkPath := filepath.Join(workingCopy, name)
 
-		// Preserve any non-symlink that already exists at linkPath -- the user
-		// chose to keep a local copy of a harness entry.
-		if st, err := os.Lstat(linkPath); err == nil && st.Mode()&os.ModeSymlink == 0 {
-			continue
+		if st, err := os.Lstat(linkPath); err == nil {
+			// Preserve any non-symlink that already exists at linkPath -- the
+			// user chose to keep a local copy of a harness entry.
+			if st.Mode()&os.ModeSymlink == 0 {
+				continue
+			}
+			if cur, err := os.Readlink(linkPath); err == nil && cur == target {
+				continue
+			}
 		}
-
-		if err := AtomicSymlink(target, linkPath); err != nil {
-			return nil, err
-		}
-		linked = append(linked, name)
+		links = append(links, harnessLink{name: name, target: target})
 	}
-	return linked, nil
+	return links, nil
 }
 
 // AtomicSymlink creates a symlink at linkPath pointing to target. If linkPath

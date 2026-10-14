@@ -199,7 +199,7 @@ func (w *Workspace) EnumerateCopies() ([]string, error) {
 func (w *Workspace) ResolveCopy(name string) (string, error) {
 	if name == "" {
 		if w.WorkingCopy == "" {
-			return "", errors.New("working copy name required (none could be inferred from cwd)")
+			return "", fmt.Errorf("no working copy named, and the current directory is not inside one; pass the copy's name as an argument (`mws list` shows them) or run from inside a working copy of %s", w.MetaRoot)
 		}
 		name = filepath.Base(w.WorkingCopy)
 	}
