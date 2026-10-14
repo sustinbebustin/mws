@@ -50,6 +50,10 @@ mws shell-init fish | source     # add to ~/.config/fish/config.fish
 
 The wrapper only intercepts `mws clone`; every other subcommand is a pure passthrough. See [docs/adr/0008-shell-integration-for-auto-cd.md](docs/adr/0008-shell-integration-for-auto-cd.md) for the design.
 
+### Agent skill (optional)
+
+[`skills/mws`](skills/mws/SKILL.md) teaches coding agents to drive mws headless. Copy it to `~/.claude/skills/mws`, or run `bunx skills add sustinbebustin/mws`.
+
 ## Quick start
 
 1. Create a meta workspace.
