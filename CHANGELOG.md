@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Worktrees. `mws worktree` (alias `mws wt`) creates a worktree of a working copy at `<copy>/.wt/<name>/`: a `git worktree` of every native repo on `wt/<name>` (started at the launching checkout's HEAD), the harness symlinks, the copy's root files and env targets copied in, and setup run. Subcommands: `new`, `ls [--all]`, `path`, `exec`, `rm [--force] [--keep-branch]` and `prune [--dry-run]`; all non-interactive, with `--json` and exit codes `0` ok, `1` failure, `2` usage, `3` refused by a safety check. `rm` never discards uncommitted work or an unmerged branch, and never removes a worktree a foreign process runs in. See ADR 0011.
+- Optional `[worktrees]` table in `.mws.toml`: `dir` (default `.wt`), `branch_prefix` (default `wt/`), `repo_setup` (default `true`) and `[[worktrees.setup]]` commands. A config that omits the table round-trips unchanged.
+- Hidden `mws wt hook create|remove|subagent-stop` adapt Claude Code's `WorktreeCreate`, `WorktreeRemove` and `SubagentStop` hooks, so `claude -w`, `EnterWorktree` and `isolation: "worktree"` subagents use the same layout; a finished subagent's worktree is removed when it holds no work. `mws init` now writes the three hook entries into the skeleton's `.claude/settings.json`; existing workspaces add them by hand.
+
+### Changed
+- `mws list` shows `(+N worktrees)` per working copy. `mws rm <copy>` refuses while one of its worktrees has a live process and lists its worktrees in the confirmation. `mws restore` repairs the worktrees' git links, `mws relink` refreshes harness links in worktree roots, and `mws trash prune|empty` prune stale meta worktree registrations. `mws sync-env` still updates only the working copy.
+
 ## [0.5.0] - 2026-08-11
 
 ### Added
