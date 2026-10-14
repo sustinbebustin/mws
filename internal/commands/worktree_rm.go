@@ -31,9 +31,9 @@ outside rm's own process tree is running in. The live check needs /proc; on
 other systems it is skipped with a warning.`,
 		Example: `  mws wt rm 04
   mws wt rm 04 05 --keep-branch --json`,
-		Args: wtArgs(cobra.MinimumNArgs(1), jsonOut),
+		Args: usageCheckedArgs(cobra.MinimumNArgs(1), jsonOut),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorktreeRm(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), *jsonOut, args, f)
+			return runWorktreeRm(cmd.Context(), newWtOutput(cmd, *jsonOut), args, f)
 		},
 	}
 	cmd.Flags().BoolVar(&f.force, "force", false, "discard modified and untracked files in the native repos")
@@ -41,12 +41,12 @@ other systems it is skipped with a warning.`,
 	return cmd
 }
 
-func runWorktreeRm(ctx context.Context, out, errW io.Writer, jsonOut bool, names []string, f wtRmFlags) error {
-	ws, cfg, err := locateForWorktree()
+func runWorktreeRm(ctx context.Context, o wtOutput, names []string, f wtRmFlags) error {
+	ws, cfg, err := o.locate()
 	if err != nil {
-		return emitWtError(out, jsonOut, err)
+		return err
 	}
-	removed, err := worktree.Remove(ctx, consoleReporter{w: errW}, worktree.RemoveOptions{
+	removed, err := worktree.Remove(ctx, o.reporter(), worktree.RemoveOptions{
 		Workspace:  ws,
 		Config:     cfg,
 		Names:      names,
@@ -54,25 +54,24 @@ func runWorktreeRm(ctx context.Context, out, errW io.Writer, jsonOut bool, names
 		KeepBranch: f.keepBranch,
 	})
 	if err != nil {
-		return emitWtError(out, jsonOut, err)
+		return o.fail(err)
 	}
-	if jsonOut {
-		return writeJSON(out, struct {
-			Removed []worktree.Removed `json:"removed"`
-		}{removed})
-	}
-	for _, r := range removed {
-		if _, err := fmt.Fprintf(out, "removed %s\n", r.Path); err != nil {
-			return err
-		}
-		for _, b := range r.Branches {
-			if b.Deleted {
-				continue
-			}
-			if _, err := fmt.Fprintf(out, "kept %s:%s, %s\n", b.Folder, b.Branch, b.Reason); err != nil {
+	return o.result(struct {
+		Removed []worktree.Removed `json:"removed"`
+	}{removed}, func(w io.Writer) error {
+		for _, r := range removed {
+			if _, err := fmt.Fprintf(w, "removed %s\n", r.Path); err != nil {
 				return err
 			}
+			for _, b := range r.Branches {
+				if b.Deleted {
+					continue
+				}
+				if _, err := fmt.Fprintf(w, "kept %s:%s, %s\n", b.Folder, b.Branch, b.Reason); err != nil {
+					return err
+				}
+			}
 		}
-	}
-	return nil
+		return nil
+	})
 }

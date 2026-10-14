@@ -2,11 +2,9 @@ package commands
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -50,17 +48,6 @@ func newWorktreeCmd() *cobra.Command {
 	return cmd
 }
 
-// wtArgs validates positional args with check, tagging a mismatch as a usage
-// error and printing it as JSON under --json (flags are parsed before args).
-func wtArgs(check cobra.PositionalArgs, jsonOut *bool) cobra.PositionalArgs {
-	return func(cmd *cobra.Command, args []string) error {
-		if err := check(cmd, args); err != nil {
-			return emitWtError(cmd.OutOrStdout(), *jsonOut, &worktree.Error{Kind: worktree.Usage, Err: fmt.Errorf("%w; see `%s --help`", err, cmd.CommandPath())})
-		}
-		return nil
-	}
-}
-
 type wtNewFlags struct {
 	branch, base string
 	noSetup      bool
@@ -88,9 +75,14 @@ keeps the worktree, prints its path and exits 1. Refuses (exit 3) a branch
 checked out elsewhere and a repo in the middle of a merge or rebase.`,
 		Example: `  mws wt new 04
   mws wt new 04 --branch feat/save-roof --base main --json`,
-		Args: wtArgs(cobra.ExactArgs(1), jsonOut),
+		Args: usageCheckedArgs(cobra.ExactArgs(1), jsonOut),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorktreeNew(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), *jsonOut, args[0], f)
+			o := newWtOutput(cmd, *jsonOut)
+			ws, cfg, err := o.locate()
+			if err != nil {
+				return err
+			}
+			return runWorktreeNew(cmd.Context(), o, ws, cfg, args[0], f)
 		},
 	}
 	cmd.Flags().StringVar(&f.branch, "branch", "", "branch to create or reuse in every native repo (default <prefix><name>)")
@@ -103,43 +95,24 @@ func newWorktreePathCmd(jsonOut *bool) *cobra.Command {
 	return &cobra.Command{
 		Use:   "path <name>",
 		Short: "Print the absolute path of a worktree",
-		Args:  wtArgs(cobra.ExactArgs(1), jsonOut),
+		Args:  usageCheckedArgs(cobra.ExactArgs(1), jsonOut),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorktreePath(cmd.Context(), cmd.OutOrStdout(), *jsonOut, args[0])
+			return runWorktreePath(cmd.Context(), newWtOutput(cmd, *jsonOut), args[0])
 		},
 	}
 }
 
-// newJSON is the `wt new --json` shape. Error is set only when setup failed
+// wtNewJSON is the `wt new --json` shape. Error is set only when setup failed
 // after the worktree was created.
-type newJSON struct {
+type wtNewJSON struct {
 	worktree.Result
 	Error *jsonError `json:"error,omitempty"`
 }
 
-type jsonError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
-// setupFailedError reports setup commands that failed in a worktree that was
-// otherwise created and is kept.
-type setupFailedError struct{ err error }
-
-func (e *setupFailedError) Error() string { return e.err.Error() }
-func (e *setupFailedError) ExitCode() int { return 1 }
-
-func runWorktreeNew(ctx context.Context, out, errW io.Writer, jsonOut bool, name string, f wtNewFlags) error {
-	ws, cfg, err := locateForWorktree()
-	if err != nil {
-		return emitWtError(out, jsonOut, err)
-	}
-	return createWorktree(ctx, out, errW, jsonOut, ws, cfg, name, f)
-}
-
-// createWorktree is `wt new` in an already located workspace.
-func createWorktree(ctx context.Context, out, errW io.Writer, jsonOut bool, ws *project.Workspace, cfg *config.Config, name string, f wtNewFlags) error {
-	r := consoleReporter{w: errW}
+// runWorktreeNew is `wt new` in an already located workspace; the
+// WorktreeCreate hook calls it with the workspace of Claude's project dir.
+func runWorktreeNew(ctx context.Context, o wtOutput, ws *project.Workspace, cfg *config.Config, name string, f wtNewFlags) error {
+	r := o.reporter()
 	res, err := worktree.New(ctx, r, worktree.NewOptions{
 		Workspace: ws,
 		Config:    cfg,
@@ -149,7 +122,7 @@ func createWorktree(ctx context.Context, out, errW io.Writer, jsonOut bool, ws *
 		Version:   version,
 	})
 	if err != nil {
-		return emitWtError(out, jsonOut, err)
+		return o.fail(err)
 	}
 	if res.Reused {
 		r.Info(fmt.Sprintf("Reused existing worktree %s", res.Path))
@@ -159,20 +132,18 @@ func createWorktree(ctx context.Context, out, errW io.Writer, jsonOut bool, ws *
 
 	var setupErr error
 	if !res.Reused && !f.noSetup {
-		setupErr = runWorktreeSetup(ctx, r, cfg, res, errW)
+		setupErr = runWorktreeSetup(ctx, r, cfg, res, o.stderr)
 	}
 
-	if jsonOut {
-		payload := newJSON{Result: res}
-		if setupErr != nil {
-			payload.Error = toJSONError(setupErr)
-		}
-		if err := writeJSON(out, payload); err != nil {
-			return errors.Join(setupErr, err)
-		}
-		return setupErr
+	payload := wtNewJSON{Result: res}
+	if setupErr != nil {
+		payload.Error = toJSONError(setupErr)
 	}
-	if _, err := fmt.Fprintln(out, res.Path); err != nil {
+	err = o.result(payload, func(w io.Writer) error {
+		_, err := fmt.Fprintln(w, res.Path)
+		return err
+	})
+	if err != nil {
 		return errors.Join(setupErr, err)
 	}
 	return setupErr
@@ -207,104 +178,21 @@ func runWorktreeSetup(ctx context.Context, r Reporter, cfg *config.Config, res w
 		res.Name, res.Path, len(failed), strings.Join(failed, "\n  "))}
 }
 
-func runWorktreePath(ctx context.Context, out io.Writer, jsonOut bool, name string) error {
-	ws, cfg, err := locateForWorktree()
+func runWorktreePath(ctx context.Context, o wtOutput, name string) error {
+	ws, cfg, err := o.locate()
 	if err != nil {
-		return emitWtError(out, jsonOut, err)
+		return err
 	}
 	p, err := worktree.Resolve(ctx, ws, cfg.WorktreePolicy(), name)
 	if err != nil {
-		return emitWtError(out, jsonOut, err)
+		return o.fail(err)
 	}
-	if jsonOut {
-		return writeJSON(out, struct {
-			Name string `json:"name"`
-			Path string `json:"path"`
-			Copy string `json:"copy"`
-		}{name, p, ws.WorkingCopy})
-	}
-	_, err = fmt.Fprintln(out, p)
-	return err
-}
-
-// locateForWorktree resolves the workspace from cwd and loads its config.
-func locateForWorktree() (*project.Workspace, *config.Config, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, nil, &worktree.Error{Kind: worktree.Failure, Err: fmt.Errorf("read current directory: %w", err)}
-	}
-	return locateWorktreeAt(cwd, "run mws worktree from inside a working copy")
-}
-
-// locateWorktreeAt resolves the workspace containing dir and loads its
-// config; hint says how to recover when dir is outside every workspace.
-func locateWorktreeAt(dir, hint string) (*project.Workspace, *config.Config, error) {
-	ws, err := project.Locate(dir)
-	if err != nil {
-		return nil, nil, &worktree.Error{Kind: worktree.Usage, Err: fmt.Errorf("%s: %w; %s", dir, err, hint)}
-	}
-	cfg, err := config.Load(ws.MetaRoot)
-	if err != nil {
-		return nil, nil, &worktree.Error{Kind: worktree.Failure, Err: err}
-	}
-	return ws, cfg, nil
-}
-
-// emitWtError prints err as the JSON error object when jsonOut is set, and
-// returns it for the exit code and the stderr message.
-func emitWtError(out io.Writer, jsonOut bool, err error) error {
-	if !jsonOut {
+	return o.result(struct {
+		Name string `json:"name"`
+		Path string `json:"path"`
+		Copy string `json:"copy"`
+	}{name, p, ws.WorkingCopy}, func(w io.Writer) error {
+		_, err := fmt.Fprintln(w, p)
 		return err
-	}
-	return errors.Join(err, writeJSON(out, struct {
-		Error *jsonError `json:"error"`
-	}{toJSONError(err)}))
-}
-
-func toJSONError(err error) *jsonError {
-	code := "failure"
-	var we *worktree.Error
-	var se *setupFailedError
-	switch {
-	case errors.As(err, &se):
-		code = "setup_failed"
-	case errors.As(err, &we) && we.Kind == worktree.Usage:
-		code = "usage"
-	case errors.As(err, &we) && we.Kind == worktree.Refused:
-		code = "refused"
-	}
-	return &jsonError{Code: code, Message: err.Error()}
-}
-
-func writeJSON(w io.Writer, v any) error {
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(v)
-}
-
-// ExitCode maps an error returned by the root command to the process exit
-// code: 0 for nil, the error's own code when it carries one, else 1.
-func ExitCode(err error) int {
-	if err == nil {
-		return 0
-	}
-	var coded interface{ ExitCode() int }
-	if errors.As(err, &coded) {
-		return coded.ExitCode()
-	}
-	return 1
-}
-
-// exitStatusError passes a child command's exit status through. The child
-// already reported its own failure, so it carries no message of its own.
-type exitStatusError struct{ code int }
-
-func (e *exitStatusError) Error() string { return fmt.Sprintf("command exited with status %d", e.code) }
-func (e *exitStatusError) ExitCode() int { return e.code }
-
-// Silent reports whether err only carries an exit status, so main prints
-// nothing for it.
-func Silent(err error) bool {
-	var es *exitStatusError
-	return errors.As(err, &es)
+	})
 }

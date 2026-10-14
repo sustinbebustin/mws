@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -30,33 +31,36 @@ or a native repo worktree registered outside the worktrees dir. mws never
 removes unmanaged entries.`,
 		Example: `  mws wt ls
   mws wt ls --all --json`,
-		Args: wtArgs(cobra.NoArgs, jsonOut),
+		Args: usageCheckedArgs(cobra.NoArgs, jsonOut),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runWorktreeLs(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), *jsonOut, all)
+			return runWorktreeLs(cmd.Context(), newWtOutput(cmd, *jsonOut), all)
 		},
 	}
 	cmd.Flags().BoolVar(&all, "all", false, "list the worktrees of every working copy")
 	return cmd
 }
 
-func runWorktreeLs(ctx context.Context, out, errW io.Writer, jsonOut, all bool) error {
-	ws, cfg, err := locateForWorktree()
+func runWorktreeLs(ctx context.Context, o wtOutput, all bool) error {
+	ws, cfg, err := o.locate()
 	if err != nil {
-		return emitWtError(out, jsonOut, err)
+		return err
 	}
-	entries, err := worktree.List(ctx, consoleReporter{w: errW}, worktree.ListOptions{Workspace: ws, Config: cfg, All: all})
+	entries, err := worktree.List(ctx, o.reporter(), worktree.ListOptions{Workspace: ws, Config: cfg, All: all})
 	if err != nil {
-		return emitWtError(out, jsonOut, err)
+		return o.fail(err)
 	}
-	if jsonOut {
-		if entries == nil {
-			entries = []worktree.Entry{}
-		}
-		return writeJSON(out, struct {
-			Worktrees []worktree.Entry `json:"worktrees"`
-		}{entries})
+	if entries == nil {
+		entries = []worktree.Entry{}
 	}
-	tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
+	return o.result(struct {
+		Worktrees []worktree.Entry `json:"worktrees"`
+	}{entries}, func(w io.Writer) error { return printWorktrees(w, entries, all) })
+}
+
+// printWorktrees writes one aligned line per entry; with all, each name is
+// prefixed with its working copy.
+func printWorktrees(w io.Writer, entries []worktree.Entry, all bool) error {
+	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 	for i := range entries {
 		e := &entries[i]
 		name := e.Name
@@ -95,11 +99,16 @@ func describeLive(pids []int) string {
 	if len(pids) == 0 {
 		return "idle"
 	}
+	return "live " + joinPIDs(pids, ",")
+}
+
+// joinPIDs formats pids as decimal numbers separated by sep.
+func joinPIDs(pids []int, sep string) string {
 	s := make([]string, len(pids))
 	for i, p := range pids {
-		s[i] = fmt.Sprint(p)
+		s[i] = strconv.Itoa(p)
 	}
-	return "live " + strings.Join(s, ",")
+	return strings.Join(s, sep)
 }
 
 func describeAge(e *worktree.Entry) string {

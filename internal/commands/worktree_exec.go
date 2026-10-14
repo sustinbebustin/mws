@@ -21,29 +21,28 @@ stdout and stderr inherited. mws exits with the command's exit code; it fails
 with 1 only when the worktree is not found or the command cannot start.`,
 		Example: `  mws wt exec 04 -- just typecheck
   mws wt exec 04 -- git -C frontend log --oneline -3`,
-		Args: wtArgs(func(cmd *cobra.Command, args []string) error {
+		Args: usageCheckedArgs(func(cmd *cobra.Command, args []string) error {
 			if len(args) < 2 || cmd.ArgsLenAtDash() != 1 {
 				return fmt.Errorf("want a worktree name, then -- and the command to run, got %q", args)
 			}
 			return nil
 		}, jsonOut),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorktreeExec(cmd.Context(), cmd, *jsonOut, args[0], args[1:])
+			return runWorktreeExec(cmd.Context(), newWtOutput(cmd, *jsonOut), cmd.InOrStdin(), args[0], args[1:])
 		},
 	}
 }
 
-func runWorktreeExec(ctx context.Context, cmd *cobra.Command, jsonOut bool, name string, argv []string) error {
-	out := cmd.OutOrStdout()
-	ws, cfg, err := locateForWorktree()
+func runWorktreeExec(ctx context.Context, o wtOutput, in io.Reader, name string, argv []string) error {
+	ws, cfg, err := o.locate()
 	if err != nil {
-		return emitWtError(out, jsonOut, err)
+		return err
 	}
 	root, err := worktree.Resolve(ctx, ws, cfg.WorktreePolicy(), name)
 	if err != nil {
-		return emitWtError(out, jsonOut, err)
+		return o.fail(err)
 	}
-	return runIn(ctx, root, argv, cmd.InOrStdin(), out, cmd.ErrOrStderr())
+	return runIn(ctx, root, argv, in, o.stdout, o.stderr)
 }
 
 // runIn runs argv in dir with the given stdio and turns a non-zero exit into

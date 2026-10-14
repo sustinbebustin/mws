@@ -29,29 +29,32 @@ func newWorktreePruneCmd(jsonOut *bool) *cobra.Command {
 It prints what it kept and why. --dry-run reports the same and changes nothing.`,
 		Example: `  mws wt prune --dry-run
   mws wt prune --json`,
-		Args: wtArgs(cobra.NoArgs, jsonOut),
+		Args: usageCheckedArgs(cobra.NoArgs, jsonOut),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runWorktreePrune(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), *jsonOut, dryRun)
+			return runWorktreePrune(cmd.Context(), newWtOutput(cmd, *jsonOut), dryRun)
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "report what would be repaired, dropped and removed; change nothing")
 	return cmd
 }
 
-func runWorktreePrune(ctx context.Context, out, errW io.Writer, jsonOut, dryRun bool) error {
-	ws, cfg, err := locateForWorktree()
+func runWorktreePrune(ctx context.Context, o wtOutput, dryRun bool) error {
+	ws, cfg, err := o.locate()
 	if err != nil {
-		return emitWtError(out, jsonOut, err)
+		return err
 	}
-	res, err := worktree.Prune(ctx, consoleReporter{w: errW}, worktree.PruneOptions{Workspace: ws, Config: cfg, DryRun: dryRun})
+	res, err := worktree.Prune(ctx, o.reporter(), worktree.PruneOptions{Workspace: ws, Config: cfg, DryRun: dryRun})
 	if err != nil {
-		return emitWtError(out, jsonOut, err)
+		return o.fail(err)
 	}
-	if jsonOut {
-		return writeJSON(out, res)
-	}
+	return o.result(res, func(w io.Writer) error { return printPrune(w, res) })
+}
+
+// printPrune writes one line per repair, dropped registration, removal and
+// kept worktree, or "nothing to prune".
+func printPrune(w io.Writer, res worktree.PruneResult) error {
 	would := ""
-	if dryRun {
+	if res.DryRun {
 		would = "would "
 	}
 	var lines []string
@@ -75,6 +78,6 @@ func runWorktreePrune(ctx context.Context, out, errW io.Writer, jsonOut, dryRun 
 	if len(lines) == 0 {
 		lines = append(lines, "nothing to prune")
 	}
-	_, err = fmt.Fprintln(out, strings.Join(lines, "\n"))
+	_, err := fmt.Fprintln(w, strings.Join(lines, "\n"))
 	return err
 }

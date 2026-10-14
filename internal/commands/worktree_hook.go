@@ -128,11 +128,11 @@ func runHookCreate(ctx context.Context, in io.Reader, out, errW io.Writer) error
 	if start == "" {
 		return fmt.Errorf(`neither $%s nor the payload's "cwd" is set, so there is no working copy to create worktree %s in; nothing was created`, claudeProjectDirEnv, p.Name)
 	}
-	ws, cfg, err := locateWorktreeAt(start, "Claude Code's project directory must be a working copy (or a worktree of one) of a meta workspace")
+	ws, cfg, err := locateWorkspace(start, "Claude Code's project directory must be a working copy (or a worktree of one) of a meta workspace")
 	if err != nil {
 		return err
 	}
-	err = createWorktree(ctx, out, errW, false, ws, cfg, p.Name, wtNewFlags{})
+	err = runWorktreeNew(ctx, wtOutput{stdout: out, stderr: errW}, ws, cfg, p.Name, wtNewFlags{})
 	var se *setupFailedError
 	if errors.As(err, &se) {
 		consoleReporter{w: errW}.Warn(se.Error())
@@ -219,7 +219,7 @@ func runHookSubagentStop(ctx context.Context, r Reporter, in io.Reader) error {
 // marked worktree in its copy's worktrees dir, that worktree's name ("" when
 // it does not). Registration is checked later by worktree.Resolve.
 func locateManagedRoot(dir string) (*project.Workspace, *config.Config, string, error) {
-	ws, cfg, err := locateWorktreeAt(dir, "it is not inside a meta workspace")
+	ws, cfg, err := locateWorkspace(dir, "it is not inside a meta workspace")
 	if err != nil {
 		return nil, nil, "", err
 	}
