@@ -35,13 +35,22 @@ type Workspace struct {
 	// WorkingCopy is the absolute path to the working copy the search started from,
 	// or empty when the starting directory was the meta root itself.
 	WorkingCopy string
+	// Worktree is the absolute path to the worktree of WorkingCopy the search
+	// started from, or empty when start was not inside one. A worktree is a
+	// marked directory at <WorkingCopy>/<worktrees dir>/<name>/.
+	Worktree string
 }
+
+// WorktreeMarkerFileName marks a worktree root. Only directories carrying it
+// are treated (and ever removed) as worktrees.
+const WorktreeMarkerFileName = ".mws-worktree.toml"
 
 // Locate walks from start towards filesystem root looking for a directory that
 // contains .mws.toml. The first match is the meta root. If start was nested
 // inside the meta, WorkingCopy is set to the direct child of the copies root
 // that contains start. The copies root is the meta root, or
-// <metaRoot>/<working_copies_dir> when that key is set in .mws.toml.
+// <metaRoot>/<working_copies_dir> when that key is set in .mws.toml. If start
+// was inside a worktree of that copy, Worktree is set to its root.
 func Locate(start string) (*Workspace, error) {
 	start, err := filepath.Abs(start)
 	if err != nil {
@@ -53,12 +62,15 @@ func Locate(start string) (*Workspace, error) {
 		if isValidMeta(dir) {
 			// Best-effort config load: if the file is malformed, downstream
 			// commands that need the config will surface the real parse error.
-			// We only use it here to discover working_copies_dir.
-			copiesDir := ""
-			if cfg, err := config.Load(dir); err == nil {
-				copiesDir = cfg.WorkingCopiesDir
+			// We only use it here to discover working_copies_dir and the
+			// worktrees dir.
+			cfg, err := config.Load(dir)
+			if err != nil {
+				cfg = &config.Config{}
 			}
-			return resolveWorkspace(dir, start, copiesDir), nil
+			ws := resolveWorkspace(dir, start, cfg.WorkingCopiesDir)
+			ws.Worktree = resolveWorktree(ws.WorkingCopy, start, cfg.WorktreePolicy().Dir)
+			return ws, nil
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -96,6 +108,28 @@ func resolveWorkspace(metaRoot, start, copiesDir string) *Workspace {
 	}
 	ws.WorkingCopy = filepath.Join(metaRoot, copiesDir, parts[0])
 	return ws
+}
+
+// resolveWorktree returns the worktree root containing start, given the
+// working copy containing start and the worktrees dir name, or "" when start
+// is not inside a marked worktree.
+func resolveWorktree(copyPath, start, worktreesDir string) string {
+	if copyPath == "" {
+		return ""
+	}
+	rel, err := filepath.Rel(copyPath, start)
+	if err != nil {
+		return ""
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	if len(parts) < 2 || parts[0] != worktreesDir {
+		return ""
+	}
+	root := filepath.Join(copyPath, worktreesDir, parts[1])
+	if st, err := os.Stat(filepath.Join(root, WorktreeMarkerFileName)); err != nil || !st.Mode().IsRegular() {
+		return ""
+	}
+	return root
 }
 
 // CopiesRoot returns the directory under which working copies live: the meta

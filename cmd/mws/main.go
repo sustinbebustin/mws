@@ -21,7 +21,7 @@ func run() int {
 
 	if err := commands.NewRootCmd().ExecuteContext(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		return 1
+		return commands.ExitCode(err)
 	}
 	return 0
 }

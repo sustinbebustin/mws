@@ -31,6 +31,7 @@ func NewRootCmd() *cobra.Command {
 		newSyncEnvCmd(),
 		newStageEnvCmd(),
 		newShellInitCmd(),
+		newWorktreeCmd(),
 		newVersionCmd(),
 	)
 
