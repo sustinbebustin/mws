@@ -74,8 +74,10 @@ func New(ctx context.Context, r Reporter, opts NewOptions) (Result, error) {
 	if branch == "" {
 		branch = policy.BranchPrefix + opts.Name
 	}
-	if err := git.CheckBranchName(ctx, branch); err != nil {
+	if err := git.CheckBranchName(ctx, branch); errors.Is(err, git.ErrInvalidBranchName) {
 		return Result{}, &Error{Kind: Usage, Err: err}
+	} else if err != nil {
+		return Result{}, failuref("check branch name %q: %w", branch, err)
 	}
 
 	copyPath := ws.WorkingCopy
@@ -180,8 +182,10 @@ func planRepos(ctx context.Context, copyPath, launch, branch, base string) ([]pl
 				return nil, refusedf("%s: branch %s is already checked out at %s, and git allows a branch in one worktree only; nothing was created; use another name or --branch, or switch that checkout off %s", folder, branch, h.Path, branch)
 			}
 		}
-		if git.BranchExists(ctx, p.src, branch) {
-			p.reuse = true
+		if p.reuse, err = git.BranchExists(ctx, p.src, branch); err != nil {
+			return nil, failuref("%s: look up branch %s: %w", folder, branch, err)
+		}
+		if p.reuse {
 			if p.base, err = git.ResolveCommit(ctx, p.src, branch); err != nil {
 				return nil, failuref("%s: %w", folder, err)
 			}
@@ -190,11 +194,13 @@ func planRepos(ctx context.Context, copyPath, launch, branch, base string) ([]pl
 			if ref == "" {
 				ref = "HEAD"
 			}
-			if p.base, err = git.ResolveCommit(ctx, from, ref); err != nil {
-				if base != "" {
-					return nil, usagef("%s: --base %w; nothing was created", folder, err)
-				}
-				return nil, failuref("%s: resolve HEAD: %w", folder, err)
+			p.base, err = git.ResolveCommit(ctx, from, ref)
+			switch {
+			case err == nil:
+			case base != "" && errors.Is(err, git.ErrNotFound):
+				return nil, usagef("%s: --base %w; nothing was created", folder, err)
+			default:
+				return nil, failuref("%s: resolve %s: %w", folder, ref, err)
 			}
 		}
 		plan = append(plan, p)
@@ -262,8 +268,9 @@ func (b *builder) build(ctx context.Context, r Reporter, opts NewOptions, plan [
 			// Registered before the attempt: a failing checkout hook leaves the
 			// branch and registration behind even though git reports failure.
 			b.onRollback(func(ctx context.Context) error {
-				if !git.BranchExists(ctx, p.src, branch) {
-					return nil
+				exists, err := git.BranchExists(ctx, p.src, branch)
+				if err != nil || !exists {
+					return err
 				}
 				return git.DeleteBranch(ctx, p.src, branch)
 			})

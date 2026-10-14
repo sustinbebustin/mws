@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -134,24 +135,52 @@ func DeleteBranch(ctx context.Context, repoDir, branch string) error {
 	return run(ctx, repoDir, "branch", "--quiet", "-D", branch)
 }
 
-// BranchExists reports whether refs/heads/<branch> exists in repoDir.
-func BranchExists(ctx context.Context, repoDir, branch string) bool {
-	return run(ctx, repoDir, "show-ref", "--verify", "--quiet", "refs/heads/"+branch) == nil
+// ErrNotFound reports that a ref does not resolve to a commit.
+var ErrNotFound = errors.New("not found")
+
+// ErrInvalidBranchName reports a name git does not accept as a branch.
+var ErrInvalidBranchName = errors.New("not a valid git branch name")
+
+// captureAnswer runs git like capture, except that a normal exit with
+// answerCode is git's answer to the question asked (no such ref, invalid
+// name) and comes back as ok == false with a nil error.
+func captureAnswer(ctx context.Context, cwd string, answerCode int, args ...string) (out string, ok bool, err error) {
+	out, err = capture(ctx, cwd, args...)
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == answerCode {
+		return "", false, nil
+	}
+	return out, err == nil, err
 }
 
-// ResolveCommit resolves ref to a full commit id in repoDir.
+// BranchExists reports whether refs/heads/<branch> exists in repoDir.
+func BranchExists(ctx context.Context, repoDir, branch string) (bool, error) {
+	_, ok, err := captureAnswer(ctx, repoDir, 1, "show-ref", "--verify", "--quiet", "refs/heads/"+branch)
+	return ok, err
+}
+
+// ResolveCommit resolves ref to a full commit id in repoDir, failing with
+// ErrNotFound when ref names no commit there.
 func ResolveCommit(ctx context.Context, repoDir, ref string) (string, error) {
-	out, err := capture(ctx, repoDir, "rev-parse", "--verify", "--quiet", "--end-of-options", ref+"^{commit}")
+	out, ok, err := captureAnswer(ctx, repoDir, 1, "rev-parse", "--verify", "--quiet", "--end-of-options", ref+"^{commit}")
 	if err != nil {
-		return "", fmt.Errorf("%q is not a commit in %s", ref, repoDir)
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("%q is not a commit in %s: %w", ref, repoDir, ErrNotFound)
 	}
 	return strings.TrimSpace(out), nil
 }
 
-// CheckBranchName reports whether name is a valid branch name.
+// CheckBranchName fails with ErrInvalidBranchName when name is not a valid
+// branch name.
 func CheckBranchName(ctx context.Context, name string) error {
-	if err := run(ctx, "", "check-ref-format", "--branch", name); err != nil {
-		return fmt.Errorf("%q is not a valid git branch name", name)
+	_, ok, err := captureAnswer(ctx, "", 128, "check-ref-format", "--branch", name)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("%q is %w", name, ErrInvalidBranchName)
 	}
 	return nil
 }
