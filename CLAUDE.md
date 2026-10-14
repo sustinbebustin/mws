@@ -28,6 +28,6 @@ Single-context layout: [CONTEXT.md](./CONTEXT.md) at the repo root + ADRs in [do
 - Reuse `project.LinkHarnessIntoWorkingCopy` for any symlink fan-out. It walks `<meta>/.mws/` and links every entry with no exclusions -- do not introduce a hardcoded list or skip filter.
 - For commands that target a working copy, use `(*project.Workspace).ResolveCopy` (defaults to cwd's copy, rejects reserved names like `.mws`, `.envs`, `.git` via `project.ValidateName`).
 - Never build a path under `<meta>/.trash/` by hand; go through `internal/trash`. Commands read the resolved `config.TrashPolicy()`, never the raw `*config.Trash` pointer.
-- `huh` for prompts, `lipgloss` for styled output. Terse status lines with `[OK]` / `[WARN]` / `[FAIL]` prefixes.
+- `huh` for prompts, through `runForm` / `runField` in `prompt.go`. Colour goes through `internal/ui`, bound per stream with `ui.Detect`; it only adds escape codes on a terminal and never changes the text (ADR-0013). Terse status lines with `[OK]` / `[WARN]` / `[FAIL]` prefixes.
 - Errors as values; surface them through Cobra's `RunE`.
 - Unit-test where breakage would be silent (parsing, symlinking, filesystem mutation). Skip TDD on Cobra glue and interactive prompts.
