@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/sustinbebustin/mws/internal/config"
+	"github.com/sustinbebustin/mws/internal/git"
 	"github.com/sustinbebustin/mws/internal/project"
 	"github.com/sustinbebustin/mws/internal/trash"
 )
@@ -51,10 +53,11 @@ func newTrashPruneCmd() *cobra.Command {
 		Short: "Purge trashed working copies past their retention window",
 		Long: `prune purges every trash entry older than trash.retention_days. This is the
 same sweep that 'mws rm', 'mws restore', and 'mws trash' run on their own; use
-it to force one without removing or restoring anything.`,
+it to force one without removing or restoring anything. It then drops the
+meta repo's registrations of worktrees whose directories are gone.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTrashPrune(newConsoleReporter())
+			return runTrashPrune(cmd.Context(), newConsoleReporter())
 		},
 	}
 }
@@ -64,9 +67,12 @@ func newTrashEmptyCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "empty",
 		Short: "Purge every trashed working copy, regardless of age",
-		Args:  cobra.NoArgs,
+		Long: `empty purges every trash entry, including those still inside their
+retention window, then drops the meta repo's registrations of worktrees whose
+directories are gone.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTrashEmpty(newConsoleReporter(), yes)
+			return runTrashEmpty(cmd.Context(), newConsoleReporter(), yes)
 		},
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation")
@@ -99,7 +105,7 @@ func runTrashList(r Reporter) error {
 	return nil
 }
 
-func runTrashPrune(r Reporter) error {
+func runTrashPrune(ctx context.Context, r Reporter) error {
 	ws, cfg, err := locateForTrash()
 	if err != nil {
 		return err
@@ -107,6 +113,7 @@ func runTrashPrune(r Reporter) error {
 	policy := cfg.TrashPolicy()
 	if policy.Retention <= 0 {
 		r.Info("trash.retention_days is 0, so nothing expires. Use `mws trash empty` to purge everything.")
+		pruneMetaWorktrees(ctx, r, ws.MetaRoot)
 		return nil
 	}
 	purged, err := trash.Sweep(ws.MetaRoot, policy.Retention)
@@ -119,10 +126,24 @@ func runTrashPrune(r Reporter) error {
 	if len(purged) == 0 {
 		r.Info(fmt.Sprintf("Nothing past the %s retention window.", humanDuration(policy.Retention)))
 	}
+	pruneMetaWorktrees(ctx, r, ws.MetaRoot)
 	return nil
 }
 
-func runTrashEmpty(r Reporter, yes bool) error {
+// pruneMetaWorktrees drops the meta repo's registrations of worktrees whose
+// directories are gone, such as those of purged copies. Copies still in the
+// trash keep theirs: rm points them into the trash. A failure only warns,
+// since the purge itself succeeded.
+func pruneMetaWorktrees(ctx context.Context, r Reporter, metaRoot string) {
+	if _, err := os.Lstat(filepath.Join(metaRoot, ".git")); err != nil {
+		return // not a git repository, so no worktrees
+	}
+	if err := git.PruneWorktrees(ctx, metaRoot); err != nil {
+		r.Warn(fmt.Sprintf("Could not drop stale worktree registrations from the meta repo: %v. Run `git worktree prune` in %s", err, metaRoot))
+	}
+}
+
+func runTrashEmpty(ctx context.Context, r Reporter, yes bool) error {
 	// empty ignores the retention policy on purpose -- it purges everything.
 	ws, _, err := locateForTrash()
 	if err != nil {
@@ -169,6 +190,7 @@ func runTrashEmpty(r Reporter, yes bool) error {
 	if len(skipped) > 0 {
 		r.OK(fmt.Sprintf("Purged %d unreadable %s", len(skipped), plural(len(skipped), "entry", "entries")))
 	}
+	pruneMetaWorktrees(ctx, r, ws.MetaRoot)
 	return nil
 }
 

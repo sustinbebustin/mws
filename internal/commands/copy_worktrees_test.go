@@ -109,6 +109,38 @@ func TestRelinkRepairsHarnessSymlinksInWorktrees(t *testing.T) {
 	}
 }
 
+func TestTrashPurgeDropsMetaWorktreeRegistrations(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		purge func(t *testing.T) error
+	}{
+		{"prune", func(t *testing.T) error { return runTrashPrune(t.Context(), nopReporter{}) }},
+		{"empty", func(t *testing.T) error { return runTrashEmpty(t.Context(), nopReporter{}, true) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := seedWtWorkspace(t)
+			mustNew(t, f.copy, "x", "--no-setup")
+			withCwd(t, f.meta, func() {
+				if err := runRm(t.Context(), nopReporter{}, "c", true, false); err != nil {
+					t.Fatalf("runRm: %v", err)
+				}
+				entries, _, err := trash.List(f.meta)
+				if err != nil || len(entries) != 1 {
+					t.Fatalf("trash.List = %v, %v; want one entry", entries, err)
+				}
+				// Past the default 7-day retention.
+				writeFileAll(t, filepath.Join(entries[0].Path, "entry.toml"), "name = \"c\"\ndeleted_at = 2000-01-01T00:00:00Z\n")
+				if err := tc.purge(t); err != nil {
+					t.Fatalf("purge: %v", err)
+				}
+			})
+			if got := gitT(t, f.meta, "worktree", "list", "--porcelain"); strings.Count(got, "worktree ") != 1 {
+				t.Fatalf("meta registrations after purge:\n%s\nwant only the meta root", got)
+			}
+		})
+	}
+}
+
 func TestRmConfirmationListsWorktrees(t *testing.T) {
 	f := seedWtWorkspace(t)
 	mustNew(t, f.copy, "x", "--no-setup")
