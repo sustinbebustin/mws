@@ -42,6 +42,7 @@ func newWorktreeCmd() *cobra.Command {
 		newWorktreeNewCmd(&jsonOut),
 		newWorktreePathCmd(&jsonOut),
 		newWorktreeRmCmd(&jsonOut),
+		newWorktreeExecCmd(&jsonOut),
 	)
 	return cmd
 }
@@ -203,19 +204,9 @@ func runWorktreePath(ctx context.Context, out io.Writer, jsonOut bool, name stri
 	if err != nil {
 		return emitWtError(out, jsonOut, err)
 	}
-	if ws.WorkingCopy == "" {
-		return emitWtError(out, jsonOut, &worktree.Error{Kind: worktree.Usage, Err: fmt.Errorf("not inside a working copy: run mws worktree from a working copy (or a worktree of one) under %s", ws.MetaRoot)})
-	}
-	if err := project.ValidateName(name); err != nil {
-		return emitWtError(out, jsonOut, &worktree.Error{Kind: worktree.Usage, Err: fmt.Errorf("invalid worktree name %q: %w", name, err)})
-	}
-	p := worktree.Path(ws.WorkingCopy, cfg.WorktreePolicy(), name)
-	managed, err := worktree.IsManaged(ctx, ws.MetaRoot, p)
+	p, err := worktree.Resolve(ctx, ws, cfg.WorktreePolicy(), name)
 	if err != nil {
-		return emitWtError(out, jsonOut, &worktree.Error{Kind: worktree.Failure, Err: fmt.Errorf("check worktree %s: %w", p, err)})
-	}
-	if !managed {
-		return emitWtError(out, jsonOut, &worktree.Error{Kind: worktree.Failure, Err: fmt.Errorf("no worktree named %s in working copy %s (nothing managed at %s); create it with `mws wt new %s`", name, ws.WorkingCopy, p, name)})
+		return emitWtError(out, jsonOut, err)
 	}
 	if jsonOut {
 		return writeJSON(out, struct {
@@ -288,4 +279,18 @@ func ExitCode(err error) int {
 		return coded.ExitCode()
 	}
 	return 1
+}
+
+// exitStatusError passes a child command's exit status through. The child
+// already reported its own failure, so it carries no message of its own.
+type exitStatusError struct{ code int }
+
+func (e *exitStatusError) Error() string { return fmt.Sprintf("command exited with status %d", e.code) }
+func (e *exitStatusError) ExitCode() int { return e.code }
+
+// Silent reports whether err only carries an exit status, so main prints
+// nothing for it.
+func Silent(err error) bool {
+	var es *exitStatusError
+	return errors.As(err, &es)
 }

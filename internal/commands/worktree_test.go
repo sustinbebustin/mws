@@ -141,7 +141,7 @@ func runWt(t *testing.T, cwd string, args ...string) wtResult {
 		root.SetErr(&errb)
 		err = root.ExecuteContext(context.Background())
 	})
-	if err != nil {
+	if err != nil && !Silent(err) {
 		errb.WriteString(err.Error())
 	}
 	return wtResult{stdout: out.String(), stderr: errb.String(), code: ExitCode(err)}

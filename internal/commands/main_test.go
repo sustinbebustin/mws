@@ -16,7 +16,7 @@ func TestMain(m *testing.M) {
 		root := NewRootCmd()
 		root.SetArgs(os.Args[1:])
 		err := root.ExecuteContext(context.Background())
-		if err != nil {
+		if err != nil && !Silent(err) {
 			fmt.Fprintln(os.Stderr, err)
 		}
 		os.Exit(ExitCode(err))

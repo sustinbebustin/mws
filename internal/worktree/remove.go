@@ -45,9 +45,10 @@ func readInnerRepos(ctx context.Context, copyPath, root string) ([]innerRepo, er
 	return repos, nil
 }
 
-// resolveManaged returns the root of the managed worktree called name in the
-// workspace's copy.
-func resolveManaged(ctx context.Context, ws *project.Workspace, policy config.WorktreePolicy, name string) (string, error) {
+// Resolve returns the root of the managed worktree called name in the
+// workspace's copy: a failure when nothing is there, refused when what is
+// there is not marked and registered.
+func Resolve(ctx context.Context, ws *project.Workspace, policy config.WorktreePolicy, name string) (string, error) {
 	if ws.WorkingCopy == "" {
 		return "", usagef("not inside a working copy: run mws worktree from a working copy (or a worktree of one) under %s", ws.MetaRoot)
 	}
@@ -113,7 +114,7 @@ func Remove(ctx context.Context, r Reporter, opts RemoveOptions) ([]Removed, err
 	policy := opts.Config.WorktreePolicy()
 	targets := make([]target, 0, len(opts.Names))
 	for _, name := range opts.Names {
-		root, err := resolveManaged(ctx, ws, policy, name)
+		root, err := Resolve(ctx, ws, policy, name)
 		if err != nil {
 			return nil, err
 		}
