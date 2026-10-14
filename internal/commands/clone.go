@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
@@ -155,12 +156,11 @@ func runClone(ctx context.Context, r Reporter, out io.Writer, name string, choic
 		if !canPrompt() {
 			return noPrompt("no working copy name given", "mws clone <name> --no-optional --setup", "mws clone <name> --no-optional --no-setup")
 		}
-		if err := huh.NewInput().
+		if err := runField(huh.NewInput().
 			Title("New working copy name").
 			Description(clonePromptDescription(ws)).
 			Validate(project.ValidateName).
-			Value(&name).
-			Run(); err != nil {
+			Value(&name)); err != nil {
 			return err
 		}
 		name = strings.TrimSpace(name)
@@ -341,15 +341,11 @@ func resolveOptional(cfg *config.Config, choice optionalChoice) ([]config.Repo, 
 		opts = append(opts, huh.NewOption(repo.Folder, repo.Folder))
 	}
 	var picked []string
-	ms := huh.NewMultiSelect[string]().
+	if err := runField(huh.NewMultiSelect[string]().
 		Title("Include optional repos?").
 		Description("Space to select, enter to confirm. Select none to skip.").
 		Options(opts...).
-		Value(&picked)
-	// Build the form explicitly so the keybinding help footer shows: the field's
-	// own .Run() shortcut forces WithShowHelp(false), hiding how to toggle a
-	// choice or skip the prompt.
-	if err := huh.NewForm(huh.NewGroup(ms)).WithShowHelp(true).Run(); err != nil {
+		Value(&picked)); err != nil {
 		return nil, err
 	}
 	out := make([]config.Repo, 0, len(picked))
@@ -389,9 +385,11 @@ func cloneNative(ctx context.Context, r Reporter, repo config.Repo, target strin
 		return fmt.Errorf("no remote URL configured in .mws.toml")
 	}
 	r.Heading(fmt.Sprintf("Cloning %s ...", repo.Folder))
+	start := time.Now()
 	if err := git.Clone(ctx, repo.URL, dst); err != nil {
 		return err
 	}
+	r.Done(fmt.Sprintf("%s: cloned", repo.Folder), time.Since(start))
 	return checkoutDefault(ctx, r, dst)
 }
 
@@ -430,13 +428,12 @@ func confirmSetup(choice setupChoice, items []setupItem) (bool, error) {
 	// Callers check requireSetupChoice before changing anything, so a
 	// terminal is there to ask on.
 	var ok bool
-	if err := huh.NewConfirm().
+	if err := runField(huh.NewConfirm().
 		Title("Run setup commands?").
 		Description(setupPromptBody(items)).
 		Affirmative("Run").
 		Negative("Skip").
-		Value(&ok).
-		Run(); err != nil {
+		Value(&ok)); err != nil {
 		return false, err
 	}
 	return ok, nil
@@ -508,6 +505,7 @@ func runSetup(ctx context.Context, r Reporter, target string, items []setupItem,
 			lastHeading = it.Folder
 		}
 		r.Info(fmt.Sprintf("$ %s", it.Cmd))
+		start := time.Now()
 
 		cmd := exec.CommandContext(ctx, "sh", "-c", it.Cmd)
 		cmd.Dir = filepath.Join(target, it.Folder)
@@ -522,7 +520,7 @@ func runSetup(ctx context.Context, r Reporter, target string, items []setupItem,
 			skipFolder = it.Folder
 			continue
 		}
-		r.OK(fmt.Sprintf("%s: %s", it.Folder, it.Cmd))
+		r.Done(fmt.Sprintf("%s: %s", it.Folder, it.Cmd), time.Since(start))
 	}
 	return failed
 }

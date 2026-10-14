@@ -167,7 +167,7 @@ func promptEntry(entries []trash.Entry, policy config.TrashPolicy, title, missin
 		opts = append(opts, huh.NewOption(fmt.Sprintf("%s  (%s)", e.Name, entryAgeLine(e, policy, now)), e.ID))
 	}
 	var id string
-	if err := huh.NewSelect[string]().Title(title).Options(opts...).Value(&id).Run(); err != nil {
+	if err := runField(huh.NewSelect[string]().Title(title).Options(opts...).Value(&id)); err != nil {
 		return trash.Entry{}, err
 	}
 	return byID[id], nil

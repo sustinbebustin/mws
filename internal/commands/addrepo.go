@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
@@ -69,7 +70,7 @@ func runAddRepo(ctx context.Context, r Reporter, repoURL, folder string, optiona
 		if !canPrompt() {
 			return noPrompt("no repo URL given", "mws add-repo <url> [folder]", "mws add-repo <url> [folder] --optional")
 		}
-		if err := huh.NewForm(huh.NewGroup(
+		if err := runForm(huh.NewGroup(
 			huh.NewInput().
 				Title("Repo URL").
 				Description("git@host:org/name.git or https://host/org/name").
@@ -79,7 +80,7 @@ func runAddRepo(ctx context.Context, r Reporter, repoURL, folder string, optiona
 				Title("Local folder").
 				Description("Defaults to the repo name from the URL.").
 				Value(&folder),
-		)).Run(); err != nil {
+		)); err != nil {
 			return err
 		}
 		repoURL = strings.TrimSpace(repoURL)
@@ -132,12 +133,13 @@ func runAddRepo(ctx context.Context, r Reporter, repoURL, folder string, optiona
 			continue
 		}
 		r.Heading(fmt.Sprintf("Cloning into %s ...", filepath.Base(peer)))
+		start := time.Now()
 		if err := git.Clone(ctx, repoURL, target); err != nil {
 			r.Fail(fmt.Sprintf("%s: %v", filepath.Base(peer), err))
 			failed = append(failed, filepath.Base(peer))
 			continue
 		}
-		r.OK(fmt.Sprintf("%s: cloned %s", filepath.Base(peer), folder))
+		r.Done(fmt.Sprintf("%s: cloned %s", filepath.Base(peer), folder), time.Since(start))
 	}
 	if len(failed) > 0 {
 		return fmt.Errorf("add-repo completed with errors: %d working copy clone(s) failed: %s", len(failed), strings.Join(failed, ", "))

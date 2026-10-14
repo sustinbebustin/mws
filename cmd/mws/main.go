@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -21,7 +20,7 @@ func run() int {
 
 	if err := commands.Execute(ctx, os.Args[1:]); err != nil {
 		if !commands.Silent(err) {
-			fmt.Fprintln(os.Stderr, err)
+			commands.PrintError(os.Stderr, err)
 		}
 		return commands.ExitCode(err)
 	}

@@ -5,9 +5,12 @@ package commands
 
 import (
 	"context"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/sustinbebustin/mws/internal/ui"
 )
 
 const rootLong = `mws spins up an AI-harness layer (meta workspace) around one or more native
@@ -20,6 +23,58 @@ shows the invocation supplying it, and a confirmation needs --yes. Results go
 to stdout, progress to stderr; list commands take --json.
 
 Exit codes: 0 ok, 1 failure, 2 usage, 3 refused by a safety check, 4 not found.`
+
+// Command groups, in the order help lists them.
+const (
+	groupWorkspace = "workspace"
+	groupCopies    = "copies"
+	groupEnv       = "env"
+	groupWorktrees = "worktrees"
+	groupShell     = "shell"
+)
+
+// usageTemplate is cobra's default usage template with the section labels
+// and command names passed through the style template funcs, so help is
+// coloured on a terminal and unchanged elsewhere.
+const usageTemplate = `{{heading "Usage:"}}{{if .Runnable}}
+  {{.UseLine}}{{end}}{{if .HasAvailableSubCommands}}
+  {{.CommandPath}} [command]{{end}}{{if gt (len .Aliases) 0}}
+
+{{heading "Aliases:"}}
+  {{.NameAndAliases}}{{end}}{{if .HasExample}}
+
+{{heading "Examples:"}}
+{{.Example}}{{end}}{{if .HasAvailableSubCommands}}{{$cmds := .Commands}}{{if eq (len .Groups) 0}}
+
+{{heading "Available Commands:"}}{{range $cmds}}{{if (or .IsAvailableCommand (eq .Name "help"))}}
+  {{cmdName (rpad .Name .NamePadding)}} {{.Short}}{{end}}{{end}}{{else}}{{range $group := .Groups}}
+
+{{heading .Title}}{{range $cmds}}{{if (and (eq .GroupID $group.ID) (or .IsAvailableCommand (eq .Name "help")))}}
+  {{cmdName (rpad .Name .NamePadding)}} {{.Short}}{{end}}{{end}}{{end}}{{if not .AllChildCommandsHaveGroup}}
+
+{{heading "Additional Commands:"}}{{range $cmds}}{{if (and (eq .GroupID "") (or .IsAvailableCommand (eq .Name "help")))}}
+  {{cmdName (rpad .Name .NamePadding)}} {{.Short}}{{end}}{{end}}{{end}}{{end}}{{end}}{{if .HasAvailableLocalFlags}}
+
+{{heading "Flags:"}}
+{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}
+
+{{heading "Global Flags:"}}
+{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasHelpSubCommands}}
+
+{{heading "Additional help topics:"}}{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
+  {{cmdName (rpad .CommandPath .CommandPathPadding)}} {{.Short}}{{end}}{{end}}{{end}}{{if .HasAvailableSubCommands}}
+
+Use "{{.CommandPath}} [command] --help" for more information about a command.{{end}}
+`
+
+func init() {
+	// Help always goes to stdout, so the styles follow the process's stdout.
+	cobra.AddTemplateFunc("heading", func(s string) string { return ui.Detect(os.Stdout).Heading(s) })
+	cobra.AddTemplateFunc("cmdName", func(s string) string {
+		name := strings.TrimRight(s, " ")
+		return ui.Detect(os.Stdout).Bold(name) + s[len(name):]
+	})
+}
 
 // NewRootCmd builds the mws root cobra command with all subcommands registered.
 func NewRootCmd() *cobra.Command {
@@ -34,28 +89,30 @@ func NewRootCmd() *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.CompletionOptions.DisableDefaultCmd = true
+	root.SetUsageTemplate(usageTemplate)
 	root.SetFlagErrorFunc(func(c *cobra.Command, err error) error {
 		return usagef("%w; see `%s --help`", err, c.CommandPath())
 	})
-
-	root.AddCommand(
-		newInitCmd(),
-		newAddRepoCmd(),
-		newCloneCmd(),
-		newIncludeCmd(),
-		newPromoteCmd(),
-		newListCmd(),
-		newRmCmd(),
-		newRestoreCmd(),
-		newTrashCmd(),
-		newRelinkCmd(),
-		newMigrateCmd(),
-		newSyncEnvCmd(),
-		newStageEnvCmd(),
-		newShellInitCmd(),
-		newWorktreeCmd(),
-		newVersionCmd(),
+	root.AddGroup(
+		&cobra.Group{ID: groupWorkspace, Title: "Workspace:"},
+		&cobra.Group{ID: groupCopies, Title: "Working copies:"},
+		&cobra.Group{ID: groupEnv, Title: "Env files:"},
+		&cobra.Group{ID: groupWorktrees, Title: "Worktrees:"},
+		&cobra.Group{ID: groupShell, Title: "Shell and info:"},
 	)
+	root.SetHelpCommandGroupID(groupShell)
+
+	add := func(group string, cmds ...*cobra.Command) {
+		for _, c := range cmds {
+			c.GroupID = group
+			root.AddCommand(c)
+		}
+	}
+	add(groupWorkspace, newInitCmd(), newAddRepoCmd(), newPromoteCmd(), newRelinkCmd(), newMigrateCmd())
+	add(groupCopies, newCloneCmd(), newIncludeCmd(), newListCmd(), newRmCmd(), newRestoreCmd(), newTrashCmd())
+	add(groupEnv, newStageEnvCmd(), newSyncEnvCmd())
+	add(groupWorktrees, newWorktreeCmd())
+	add(groupShell, newShellInitCmd(), newVersionCmd())
 	tagUsageArgs(root)
 
 	return root
