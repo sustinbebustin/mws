@@ -34,10 +34,11 @@ the mws layout. Each subcommand reads the hook's JSON payload on stdin.
   remove         WorktreeRemove. Payload {worktree_path}. Removes the worktree
                  like ` + "`mws wt rm`" + ` without --force; exits 1 on any refusal
                  so Claude keeps the directory.
-  subagent-stop  SubagentStop. Payload {cwd}. Always exits 0. When cwd is in
-                 a worktree mws manages, removes it only if every native repo
-                 is clean and no branch holds a commit no other ref reaches;
-                 otherwise keeps it and says why on stderr.
+  subagent-stop  SubagentStop. Payload {cwd, agent_id}. Always exits 0. When
+                 cwd is in the worktree agent-<agent_id> and mws manages it,
+                 removes it only if every native repo is clean and no branch
+                 holds a commit no other ref reaches; otherwise keeps it and
+                 says why on stderr. Any other worktree is left alone.
 
 Wire them in .claude/settings.json as command hooks, e.g.
   "WorktreeCreate": [{"hooks": [{"type": "command", "command": "mws wt hook create"}]}]`
@@ -177,18 +178,25 @@ func runHookRemove(ctx context.Context, in io.Reader, errW io.Writer) error {
 
 // subagentStopPayload is the part of the SubagentStop payload mws reads.
 type subagentStopPayload struct {
-	Cwd string `json:"cwd"`
+	Cwd     string `json:"cwd"`
+	AgentID string `json:"agent_id"`
 }
 
-// runHookSubagentStop removes the worktree the subagent ran in when it is
-// managed and holds no work. A nil error with nothing removed means cwd was
-// not in a worktree mws manages.
+// agentWorktreePrefix starts the name Claude gives an isolated subagent's
+// worktree: agent-<agent_id>.
+const agentWorktreePrefix = "agent-"
+
+// runHookSubagentStop removes the stopping subagent's own isolation worktree
+// when it is managed and holds no work. A subagent without isolation stops
+// with its session's cwd, which may be another worktree; that one is never
+// touched. A nil error with nothing removed means cwd was not in the agent's
+// own worktree.
 func runHookSubagentStop(ctx context.Context, r Reporter, in io.Reader) error {
 	var p subagentStopPayload
 	if err := decodePayload(in, &p); err != nil {
 		return err
 	}
-	if p.Cwd == "" {
+	if p.Cwd == "" || p.AgentID == "" {
 		return nil
 	}
 	ws, cfg, name, err := locateManagedRoot(p.Cwd)
@@ -199,7 +207,7 @@ func runHookSubagentStop(ctx context.Context, r Reporter, in io.Reader) error {
 	if err != nil {
 		return fmt.Errorf("left %s alone: %w", p.Cwd, err)
 	}
-	if name == "" {
+	if name != agentWorktreePrefix+p.AgentID {
 		return nil
 	}
 	managed, err := worktree.IsManaged(ctx, ws.MetaRoot, ws.Worktree)

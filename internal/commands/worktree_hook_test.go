@@ -186,7 +186,7 @@ func TestWtHookSubagentStopKeepsCommittedWork(t *testing.T) {
 	mustNew(t, f.copy, "agent-a1", "--no-setup")
 	commitIn(t, filepath.Join(f.wtPath("agent-a1"), "frontend"), "work.txt")
 
-	res := runHook(t, f, f.copy, "subagent-stop", map[string]string{"cwd": f.wtPath("agent-a1")})
+	res := runHook(t, f, f.copy, "subagent-stop", map[string]string{"cwd": f.wtPath("agent-a1"), "agent_id": "a1"})
 	if res.code != 0 {
 		t.Fatalf("exit %d, want 0\nstderr: %s", res.code, res.stderr)
 	}
@@ -209,7 +209,7 @@ func TestWtHookSubagentStopKeepsDirtyWorktree(t *testing.T) {
 	wip := filepath.Join(f.wtPath("agent-a1"), "backend", "wip.txt")
 	writeFileAll(t, wip, "unsaved")
 
-	res := runHook(t, f, f.copy, "subagent-stop", map[string]string{"cwd": filepath.Join(f.wtPath("agent-a1"), "backend")})
+	res := runHook(t, f, f.copy, "subagent-stop", map[string]string{"cwd": filepath.Join(f.wtPath("agent-a1"), "backend"), "agent_id": "a1"})
 	if res.code != 0 {
 		t.Fatalf("exit %d, want 0\nstderr: %s", res.code, res.stderr)
 	}
@@ -218,6 +218,28 @@ func TestWtHookSubagentStopKeepsDirtyWorktree(t *testing.T) {
 	}
 	if got := readFile(t, wip); got != "unsaved" {
 		t.Fatalf("wip.txt = %q", got)
+	}
+}
+
+// A subagent without isolation stops with the cwd of the session that spawned
+// it, which may be a worktree of its own (`claude -w x`, EnterWorktree); only
+// the stopping agent's own agent-<agent_id> worktree is removed.
+func TestWtHookSubagentStopIgnoresOtherAgentsWorktrees(t *testing.T) {
+	f := seedWtWorkspace(t)
+	for _, name := range []string{"x", "agent-a1"} {
+		mustNew(t, f.copy, name, "--no-setup")
+		for _, payload := range []map[string]string{
+			{"cwd": f.wtPath(name)},
+			{"cwd": f.wtPath(name), "agent_id": "a2"},
+		} {
+			res := runHook(t, f, f.copy, "subagent-stop", payload)
+			if res.code != 0 || res.stderr != "" {
+				t.Fatalf("%v: exit %d stderr %q, want a silent no-op", payload, res.code, res.stderr)
+			}
+			if _, err := os.Stat(filepath.Join(f.wtPath(name), project.WorktreeMarkerFileName)); err != nil {
+				t.Fatalf("%v removed worktree %s: %v", payload, name, err)
+			}
+		}
 	}
 }
 
@@ -260,7 +282,7 @@ func TestWtHookSubagentStopIgnoresItsOwnProcessTree(t *testing.T) {
 	sh := exec.Command("sh", "-c", `"$0" wt hook subagent-stop; exit $?`, self)
 	sh.Dir = f.wtPath("agent-a1")
 	sh.Env = append(os.Environ(), cliEnv+"=1", claudeProjectDirEnv+"="+f.copy)
-	sh.Stdin = strings.NewReader(hookJSON(t, map[string]string{"cwd": f.wtPath("agent-a1")}))
+	sh.Stdin = strings.NewReader(hookJSON(t, map[string]string{"cwd": f.wtPath("agent-a1"), "agent_id": "a1"}))
 	out, err := sh.CombinedOutput()
 	if err != nil {
 		t.Fatalf("subagent-stop from inside the worktree: %v\n%s", err, out)
