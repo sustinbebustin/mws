@@ -3,7 +3,9 @@ package commands
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -158,6 +160,124 @@ func TestWtHookRemoveRefusesForeignPath(t *testing.T) {
 	}
 	if got := readFile(t, filepath.Join(plain, "a.txt")); got != "keep me" {
 		t.Fatalf("refused remove touched %s: %q", plain, got)
+	}
+}
+
+func TestWtHookSubagentStopRemovesIdleWorktree(t *testing.T) {
+	f := seedWtWorkspace(t)
+	mustNew(t, f.copy, "agent-a1", "--no-setup")
+
+	res := runHook(t, f, f.copy, "subagent-stop", map[string]string{"cwd": f.wtPath("agent-a1"), "agent_id": "a1"})
+	if res.code != 0 {
+		t.Fatalf("exit %d\nstderr: %s", res.code, res.stderr)
+	}
+	assertRemoved(t, f, "agent-a1")
+	for _, folder := range []string{"backend", "frontend"} {
+		if branchExists(t, f, folder, "wt/agent-a1") {
+			t.Fatalf("%s kept wt/agent-a1 although it holds no unique commit", folder)
+		}
+	}
+}
+
+// wt rm would delete the directory and keep the branch; a finished subagent's
+// committed work must stay where the user can find it.
+func TestWtHookSubagentStopKeepsCommittedWork(t *testing.T) {
+	f := seedWtWorkspace(t)
+	mustNew(t, f.copy, "agent-a1", "--no-setup")
+	commitIn(t, filepath.Join(f.wtPath("agent-a1"), "frontend"), "work.txt")
+
+	res := runHook(t, f, f.copy, "subagent-stop", map[string]string{"cwd": f.wtPath("agent-a1")})
+	if res.code != 0 {
+		t.Fatalf("exit %d, want 0\nstderr: %s", res.code, res.stderr)
+	}
+	if !strings.Contains(res.stderr, "frontend") || !strings.Contains(res.stderr, "1 commit not merged anywhere") {
+		t.Fatalf("stderr should say why the worktree was kept:\n%s", res.stderr)
+	}
+	if got := readFile(t, filepath.Join(f.wtPath("agent-a1"), "frontend", "work.txt")); got != "work.txt" {
+		t.Fatalf("work.txt = %q", got)
+	}
+	for _, folder := range []string{"backend", "frontend"} {
+		if !branchExists(t, f, folder, "wt/agent-a1") {
+			t.Fatalf("%s lost wt/agent-a1", folder)
+		}
+	}
+}
+
+func TestWtHookSubagentStopKeepsDirtyWorktree(t *testing.T) {
+	f := seedWtWorkspace(t)
+	mustNew(t, f.copy, "agent-a1", "--no-setup")
+	wip := filepath.Join(f.wtPath("agent-a1"), "backend", "wip.txt")
+	writeFileAll(t, wip, "unsaved")
+
+	res := runHook(t, f, f.copy, "subagent-stop", map[string]string{"cwd": filepath.Join(f.wtPath("agent-a1"), "backend")})
+	if res.code != 0 {
+		t.Fatalf("exit %d, want 0\nstderr: %s", res.code, res.stderr)
+	}
+	if !strings.Contains(res.stderr, "kept worktree agent-a1") || !strings.Contains(res.stderr, "backend") {
+		t.Fatalf("stderr should say why the worktree was kept:\n%s", res.stderr)
+	}
+	if got := readFile(t, wip); got != "unsaved" {
+		t.Fatalf("wip.txt = %q", got)
+	}
+}
+
+// Anything that is not a managed worktree is left alone, silently, and a
+// payload mws cannot read still exits 0.
+func TestWtHookSubagentStopIgnoresNonWorktrees(t *testing.T) {
+	f := seedWtWorkspace(t)
+	writeFileAll(t, filepath.Join(f.wtPath("plain"), project.WorktreeMarkerFileName), "name = \"plain\"\n")
+
+	for _, cwd := range []string{f.copy, f.repo("frontend"), f.meta, f.root, f.wtPath("plain")} {
+		res := runHook(t, f, f.copy, "subagent-stop", map[string]string{"cwd": cwd})
+		if res.code != 0 || res.stdout != "" || res.stderr != "" {
+			t.Fatalf("cwd %s: exit %d stdout %q stderr %q, want a silent no-op", cwd, res.code, res.stdout, res.stderr)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(f.wtPath("plain"), project.WorktreeMarkerFileName)); err != nil {
+		t.Fatalf("unregistered marked directory was touched: %v", err)
+	}
+
+	t.Setenv(claudeProjectDirEnv, f.copy)
+	if res := runWtIn(t, f.root, "not json", "hook", "subagent-stop"); res.code != 0 {
+		t.Fatalf("unreadable payload: exit %d, want 0\nstderr: %s", res.code, res.stderr)
+	}
+}
+
+// Claude runs the hook from a shell whose cwd is the subagent's worktree;
+// that shell must not count as a live user of it.
+func TestWtHookSubagentStopIgnoresItsOwnProcessTree(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("process cwds are read from /proc")
+	}
+	f := seedWtWorkspace(t)
+	mustNew(t, f.copy, "agent-a1", "--no-setup")
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The trailing command keeps sh alive (no exec) while mws runs.
+	sh := exec.Command("sh", "-c", `"$0" wt hook subagent-stop; exit $?`, self)
+	sh.Dir = f.wtPath("agent-a1")
+	sh.Env = append(os.Environ(), cliEnv+"=1", claudeProjectDirEnv+"="+f.copy)
+	sh.Stdin = strings.NewReader(hookJSON(t, map[string]string{"cwd": f.wtPath("agent-a1")}))
+	out, err := sh.CombinedOutput()
+	if err != nil {
+		t.Fatalf("subagent-stop from inside the worktree: %v\n%s", err, out)
+	}
+	assertRemoved(t, f, "agent-a1")
+}
+
+func TestWtHookHelpIsHiddenButDocumented(t *testing.T) {
+	dir := t.TempDir()
+	if res := runWt(t, dir, "--help"); strings.Contains(res.stdout, "hook") {
+		t.Fatalf("wt --help lists the hidden hook command:\n%s", res.stdout)
+	}
+	res := runWt(t, dir, "hook", "--help")
+	for _, want := range []string{"create", "remove", "subagent-stop", claudeProjectDirEnv} {
+		if !strings.Contains(res.stdout, want) {
+			t.Fatalf("wt hook --help does not mention %s:\n%s", want, res.stdout)
+		}
 	}
 }
 

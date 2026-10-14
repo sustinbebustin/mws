@@ -66,6 +66,20 @@ func newWorktreeHookCmd() *cobra.Command {
 				return hookFailed(runHookRemove(cmd.Context(), cmd.InOrStdin(), cmd.ErrOrStderr()))
 			},
 		},
+		&cobra.Command{
+			Use:   "subagent-stop",
+			Short: "SubagentStop hook: remove a finished subagent's worktree if it holds no work; always exits 0",
+			// Exit 2 from a SubagentStop hook would stop the subagent from
+			// finishing, so even stray arguments must not fail it.
+			Args: cobra.ArbitraryArgs,
+			RunE: func(cmd *cobra.Command, _ []string) error {
+				r := consoleReporter{w: cmd.ErrOrStderr()}
+				if err := runHookSubagentStop(cmd.Context(), r, cmd.InOrStdin()); err != nil {
+					r.Warn(err.Error())
+				}
+				return nil
+			},
+		},
 	)
 	return cmd
 }
@@ -151,6 +165,51 @@ func runHookRemove(ctx context.Context, in io.Reader, errW io.Writer) error {
 	removed, err := worktree.Remove(ctx, r, worktree.RemoveOptions{Workspace: ws, Config: cfg, Names: []string{name}})
 	if err != nil {
 		return err
+	}
+	reportKeptBranches(r, removed)
+	return nil
+}
+
+// subagentStopPayload is the part of the SubagentStop payload mws reads.
+type subagentStopPayload struct {
+	Cwd string `json:"cwd"`
+}
+
+// runHookSubagentStop removes the worktree the subagent ran in when it is
+// managed and holds no work. A nil error with nothing removed means cwd was
+// not in a worktree mws manages.
+func runHookSubagentStop(ctx context.Context, r Reporter, in io.Reader) error {
+	var p subagentStopPayload
+	if err := decodePayload(in, &p); err != nil {
+		return err
+	}
+	if p.Cwd == "" {
+		return nil
+	}
+	ws, cfg, name, err := locateManagedRoot(p.Cwd)
+	var we *worktree.Error
+	if errors.As(err, &we) && we.Kind == worktree.Usage {
+		return nil // outside every meta workspace: not ours
+	}
+	if err != nil {
+		return fmt.Errorf("left %s alone: %w", p.Cwd, err)
+	}
+	if name == "" {
+		return nil
+	}
+	managed, err := worktree.IsManaged(ctx, ws.MetaRoot, ws.Worktree)
+	if err != nil {
+		return fmt.Errorf("kept worktree %s: cannot check its registration: %w", name, err)
+	}
+	if !managed {
+		return nil
+	}
+	if err := os.Chdir(ws.MetaRoot); err != nil {
+		return fmt.Errorf("kept worktree %s: cannot leave it for the meta root: %w", name, err)
+	}
+	removed, err := worktree.Remove(ctx, r, worktree.RemoveOptions{Workspace: ws, Config: cfg, Names: []string{name}, OnlyIfMerged: true})
+	if err != nil {
+		return fmt.Errorf("kept worktree %s: %w", name, err)
 	}
 	reportKeptBranches(r, removed)
 	return nil
