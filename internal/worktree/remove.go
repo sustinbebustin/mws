@@ -78,6 +78,10 @@ type RemoveOptions struct {
 	Force bool
 	// KeepBranch keeps every branch, merged or not.
 	KeepBranch bool
+	// OnlyIfMerged refuses a worktree with a detached inner repo or with an
+	// inner branch holding a commit no other ref reaches, so its directory
+	// survives along with the branch.
+	OnlyIfMerged bool
 }
 
 // BranchOutcome says what happened to one inner repo's branch.
@@ -127,6 +131,15 @@ func Remove(ctx context.Context, r Reporter, opts RemoveOptions) ([]Removed, err
 				return nil, refusedf("worktree %s has modified or untracked files in %s; nothing was removed; commit or stash them there, or rerun with --force to discard them", name, strings.Join(dirty, ", "))
 			}
 		}
+		if opts.OnlyIfMerged {
+			unmerged, err := unmergedWork(ctx, repos)
+			if err != nil {
+				return nil, failuref("inspect worktree %s: %w", name, err)
+			}
+			if len(unmerged) > 0 {
+				return nil, refusedf("worktree %s holds work no other ref reaches (%s); nothing was removed; merge or push it, then run `mws wt rm %s`", name, strings.Join(unmerged, "; "), name)
+			}
+		}
 		targets = append(targets, target{name: name, root: root, repos: repos})
 	}
 
@@ -157,6 +170,26 @@ func dirtyFolders(repos []innerRepo) []string {
 		}
 	}
 	return dirty
+}
+
+// unmergedWork describes each inner repo whose commits would survive only on
+// its own branch, or that is detached (its reachability is not checked).
+func unmergedWork(ctx context.Context, repos []innerRepo) ([]string, error) {
+	var out []string
+	for _, ir := range repos {
+		if ir.branch == "" {
+			out = append(out, ir.folder+": detached HEAD")
+			continue
+		}
+		n, err := git.UniqueCommits(ctx, ir.src, ir.branch)
+		if err != nil {
+			return nil, fmt.Errorf("%s: count unmerged commits on %s: %w", ir.folder, ir.branch, err)
+		}
+		if n > 0 {
+			out = append(out, fmt.Sprintf("%s: %s, %s", ir.folder, ir.branch, unmergedReason(n)))
+		}
+	}
+	return out, nil
 }
 
 // leaveTargets moves the process out of any target so its own cwd neither
