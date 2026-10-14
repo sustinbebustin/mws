@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -152,8 +153,13 @@ func TestWtPruneDryRunChangesNothing(t *testing.T) {
 	if !out.DryRun || len(out.Removed) != 1 || out.Removed[0].Name != "done" {
 		t.Fatalf("dry run = %+v, want done as the only removal", out)
 	}
-	if len(out.Dropped) != 1 || out.Dropped[0] != f.wtPath("gone") {
-		t.Fatalf("dropped = %v, want gone's registration", out.Dropped)
+	wantDropped := []string{f.wtPath("gone")}
+	if runtime.GOOS != "linux" {
+		// seedPruneMix deletes busy's directory where liveness is unavailable.
+		wantDropped = []string{f.wtPath("busy"), f.wtPath("gone")}
+	}
+	if got := slices.Sorted(slices.Values(out.Dropped)); !slices.Equal(got, wantDropped) {
+		t.Fatalf("dropped = %v, want %v", out.Dropped, wantDropped)
 	}
 	if _, err := os.Stat(f.wtPath("done")); err != nil {
 		t.Fatalf("dry run removed done: %v", err)
