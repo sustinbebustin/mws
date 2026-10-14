@@ -137,7 +137,7 @@ For parallel agents inside one working copy, `mws wt new <name>` creates a **wor
 | `mws relink` | Refresh harness symlinks across every working copy; handles diverged content interactively. |
 | `mws sync-env [name]` | Copy staged env files from `.envs/` into a working copy (overwrites). |
 | `mws stage-env [name]` | Inverse of `sync-env`: capture a working copy's env files into staging as the new default. |
-| `mws worktree` (`mws wt`) `new\|ls\|path\|exec\|rm\|prune` | Manage worktrees of the current working copy: `new <name>` creates one and prints its path, `ls [--all]` shows branches, dirty state and liveness, `path <name>` prints its path, `exec <name> -- <cmd>` runs in it, `rm <name>...` removes (refuses to lose work; `--force` discards uncommitted files), `prune` removes every clean, idle, merged one. `--json` everywhere; exit `3` = refused by a safety check. |
+| `mws worktree` (`mws wt`) `new\|ls\|path\|exec\|rm\|prune` | Manage worktrees of the current working copy: `new <name>` creates one and prints its path, `ls [--all]` shows branches, dirty state and liveness, `path <name>` prints its path, `exec <name> -- <cmd>` runs in it, `rm <name>...` removes (refuses to lose work; `--force` discards uncommitted files and unreachable detached commits), `prune` removes every clean, idle, merged one. `--json` everywhere; exit `3` = refused by a safety check. |
 | `mws migrate <path>` | Convert an old sibling-meta layout to meta-at-root. |
 
 ## Configuration

@@ -139,11 +139,11 @@ Commands (non-interactive; run from anywhere inside a working copy or one of its
 | `mws wt ls [--all]` | List worktrees (`--all`: of every working copy) with per-repo `branch@sha`, dirty state, commits reachable from no other ref, pids running inside, and age. Also reports `orphan` (registered, directory gone) and `unmanaged` (no marker, or registered outside the worktrees dir) entries. |
 | `mws wt path <name>` | Print the worktree's absolute path. |
 | `mws wt exec <name> -- <cmd> [args...]` | Run `<cmd>` with cwd = the worktree root and stdio inherited; mws exits with the command's exit code. |
-| `mws wt rm <name>... [--force] [--keep-branch]` | Remove worktrees. Checks every name first; one refusal removes nothing. `--force` discards modified and untracked files; `--keep-branch` keeps every branch. |
+| `mws wt rm <name>... [--force] [--keep-branch]` | Remove worktrees. Checks every name first; one refusal removes nothing. `--force` discards modified and untracked files, and commits on a detached HEAD that no branch reaches; `--keep-branch` keeps every branch. |
 | `mws wt prune [--dry-run]` | Repair stale registrations, run `git worktree prune` in the meta repo and every native repo, then remove every clean, idle, fully merged worktree (except the one it runs in, and any with a native repo on a detached HEAD). Reports what it kept and why. |
 | `mws wt hook create\|remove\|subagent-stop` | Hidden adapters for Claude Code's `WorktreeCreate`, `WorktreeRemove` and `SubagentStop` hooks; they read the hook's JSON payload on stdin. `mws init` wires them into the skeleton's `.claude/settings.json`. `mws wt hook --help` documents each. |
 
-Exit codes: `0` ok, `1` failure, `2` usage, `3` refused by a safety check (unmanaged directory, modified or untracked files, live process, branch checked out elsewhere, repo mid-merge or rebase). `hook create` and `hook remove` exit 1 for every error so Claude fails closed; `hook subagent-stop` always exits 0.
+Exit codes: `0` ok, `1` failure, `2` usage, `3` refused by a safety check (unmanaged directory, modified or untracked files, unreachable detached commits, live process, branch checked out elsewhere, repo mid-merge or rebase). `hook create` and `hook remove` exit 1 for every error so Claude fails closed; `hook subagent-stop` always exits 0.
 
 `--json` (a flag of `mws worktree`) makes `new`, `path`, `ls`, `rm` and `prune` print one JSON object on stdout; `exec` and `hook` do not print JSON.
 

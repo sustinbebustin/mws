@@ -114,6 +114,21 @@ func UniqueCommits(ctx context.Context, repoDir, branch string) (int, error) {
 }
 
 // DeleteBranch force-deletes a local branch.
+// DetachedUniqueCommits counts the commits on the detached HEAD of the
+// worktree at dir that no local branch, tag or remote-tracking branch
+// reaches: the work lost if that worktree is removed.
+func DetachedUniqueCommits(ctx context.Context, dir string) (int, error) {
+	out, err := capture(ctx, dir, "rev-list", "--count", "HEAD", "--not", "--branches", "--tags", "--remotes")
+	if err != nil {
+		return 0, err
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return 0, fmt.Errorf("git rev-list --count printed %q: %w", strings.TrimSpace(out), err)
+	}
+	return n, nil
+}
+
 func DeleteBranch(ctx context.Context, repoDir, branch string) error {
 	return run(ctx, repoDir, "branch", "--quiet", "-D", branch)
 }

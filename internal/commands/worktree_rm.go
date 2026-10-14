@@ -26,7 +26,8 @@ reported. --keep-branch keeps every branch.
 
 Every worktree is checked before anything is removed. rm refuses (exit 3) a
 directory that is not both marked and registered, a native repo with modified
-or untracked files (--force discards them), and a worktree some process
+or untracked files or with commits on a detached HEAD that no branch reaches
+(--force discards both), and a worktree some process
 outside rm's own process tree is running in. The live check needs /proc; on
 other systems it is skipped with a warning.`,
 		Example: `  mws wt rm 04
@@ -36,7 +37,7 @@ other systems it is skipped with a warning.`,
 			return runWorktreeRm(cmd.Context(), newWtOutput(cmd, *jsonOut), args, f)
 		},
 	}
-	cmd.Flags().BoolVar(&f.force, "force", false, "discard modified and untracked files in the native repos")
+	cmd.Flags().BoolVar(&f.force, "force", false, "discard modified and untracked files, and unreachable detached commits, in the native repos")
 	cmd.Flags().BoolVar(&f.keepBranch, "keep-branch", false, "keep every branch, merged or not")
 	return cmd
 }

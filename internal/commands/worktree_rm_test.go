@@ -112,6 +112,43 @@ func TestWtRmKeepsBranchWithUnmergedCommits(t *testing.T) {
 	}
 }
 
+// A detached HEAD's commits live only in that worktree's HEAD and reflog,
+// which git deletes along with the worktree.
+func TestWtRmRefusesDetachedCommitsUnlessForced(t *testing.T) {
+	f := seedWtWorkspace(t)
+	mustNew(t, f.copy, "x", "--no-setup")
+	inner := filepath.Join(f.wtPath("x"), "frontend")
+	gitT(t, inner, "switch", "-q", "--detach")
+	commitIn(t, inner, "a.txt")
+	head := gitT(t, inner, "rev-parse", "HEAD")
+
+	res := runWt(t, f.copy, "rm", "x", "--json")
+	if res.code != 3 {
+		t.Fatalf("exit %d, want 3\nstderr: %s", res.code, res.stderr)
+	}
+	e := decodeError(t, res)
+	if e.Code != "refused" || !strings.Contains(e.Message, "frontend") || !strings.Contains(e.Message, head[:12]) || !strings.Contains(e.Message, "--force") {
+		t.Fatalf("error = %+v, want refused naming frontend, its HEAD and --force", e)
+	}
+
+	if res := runWt(t, f.copy, "rm", "x", "--force"); res.code != 0 {
+		t.Fatalf("--force: exit %d\nstderr: %s", res.code, res.stderr)
+	}
+	assertRemoved(t, f, "x")
+}
+
+// Detaching without committing loses nothing, so it does not block rm.
+func TestWtRmRemovesCleanDetachedRepo(t *testing.T) {
+	f := seedWtWorkspace(t)
+	mustNew(t, f.copy, "x", "--no-setup")
+	gitT(t, filepath.Join(f.wtPath("x"), "frontend"), "switch", "-q", "--detach")
+
+	if res := runWt(t, f.copy, "rm", "x"); res.code != 0 {
+		t.Fatalf("exit %d\nstderr: %s", res.code, res.stderr)
+	}
+	assertRemoved(t, f, "x")
+}
+
 func TestWtRmDeletesBranchMergedIntoIntegration(t *testing.T) {
 	f := seedWtWorkspace(t)
 	mustNew(t, f.copy, "x", "--no-setup")

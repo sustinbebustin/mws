@@ -74,7 +74,8 @@ type RemoveOptions struct {
 	Workspace *project.Workspace
 	Config    *config.Config
 	Names     []string
-	// Force discards modified and untracked files in the inner repos.
+	// Force discards modified and untracked files, and commits on a detached
+	// HEAD that no ref reaches, in the inner repos.
 	Force bool
 	// KeepBranch keeps every branch, merged or not.
 	KeepBranch bool
@@ -130,6 +131,13 @@ func Remove(ctx context.Context, r Reporter, opts RemoveOptions) ([]Removed, err
 			if dirty := dirtyFolders(repos); len(dirty) > 0 {
 				return nil, refusedf("worktree %s has modified or untracked files in %s; nothing was removed; commit or stash them there, or rerun with --force to discard them", name, strings.Join(dirty, ", "))
 			}
+			detached, err := detachedWork(ctx, repos)
+			if err != nil {
+				return nil, failuref("inspect worktree %s: %w", name, err)
+			}
+			if len(detached) > 0 {
+				return nil, refusedf("worktree %s has commits on a detached HEAD that no branch reaches (%s), and git deletes them with the worktree; nothing was removed; create a branch there (`git switch -c <branch>`), or rerun with --force to discard them", name, strings.Join(detached, "; "))
+			}
 		}
 		if opts.OnlyIfMerged {
 			unmerged, err := unmergedWork(ctx, repos)
@@ -170,6 +178,30 @@ func dirtyFolders(repos []innerRepo) []string {
 		}
 	}
 	return dirty
+}
+
+// detachedWork describes each detached inner repo whose HEAD holds commits no
+// ref reaches, naming the HEAD so the work can still be recovered.
+func detachedWork(ctx context.Context, repos []innerRepo) ([]string, error) {
+	var out []string
+	for _, ir := range repos {
+		if ir.branch != "" {
+			continue
+		}
+		n, err := git.DetachedUniqueCommits(ctx, ir.dir)
+		if err != nil {
+			return nil, fmt.Errorf("%s: count commits on the detached HEAD: %w", ir.folder, err)
+		}
+		if n == 0 {
+			continue
+		}
+		head, err := git.ResolveCommit(ctx, ir.dir, "HEAD")
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", ir.folder, err)
+		}
+		out = append(out, fmt.Sprintf("%s: %s at %s", ir.folder, unmergedReason(n), shortID(head)))
+	}
+	return out, nil
 }
 
 // unmergedWork describes each inner repo whose commits would survive only on
