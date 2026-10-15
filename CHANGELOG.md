@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - The shell wrapper cds into the copy after `mws restore` as well as `mws clone`; `restore` writes `MWS_CD_FILE`.
 
+### Fixed
+- `mws add-repo` appends a `[[repos]]` or `[[optional_repos]]` block to `.mws.toml` instead of rewriting it, so comments, layout and unknown keys survive. When the appended file would not parse or validate, the file is left unchanged and the command exits `1` naming the cause.
+
 ### Removed
 - `mws migrate`, the sibling-meta to meta-at-root converter.
 
