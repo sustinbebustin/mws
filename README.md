@@ -6,7 +6,7 @@
 
 A small Go CLI for managing **meta workspaces** -- a directory layout that wraps one or more native git repos with a shared AI-harness layer and cheap parallel working copies.
 
-1. `mws init my-project` creates a meta workspace: a git repo at the root with the harness under `.mws/` and a first working copy at `main/`.
+1. `mws init my-project` creates a meta workspace: a git repo at the root, with the harness under `.mws/` committed as its first commit, and a first working copy at `main/`. Init needs a git identity (`user.name`, `user.email`) and fails before creating anything without one.
 2. `mws add-repo <url>` registers a native repo and clones it into every working copy.
 3. `mws clone <peer>` spins up another working copy that shares the same harness via symlinks, with its own independent native git clones inside.
 
@@ -134,7 +134,7 @@ For parallel agents inside one working copy, `mws wt new <name>` creates a **wor
 | `mws add-repo <url> [folder]` | Register a native repo in `.mws.toml` and clone it into every working copy. With `--optional`, register it under `[[optional_repos]]` without cloning anywhere. Re-running with the same URL fills in copies that lack it. |
 | `mws clone <name>` | Create a new working copy and print its path. Native repos are freshly cloned from each configured URL and checked out on the default branch. When optional repos exist, prompts to include them; `--with <folder>` (repeatable) or `--no-optional` decides without prompting. Re-running for an existing copy clones only the repos it lacks and prints its path. |
 | `mws include <folder> [copy]` | Clone a registered optional repo into a working copy (the current one by default). |
-| `mws promote <path>` | Move a top-level file or directory from the current working copy into `.mws/`, symlink it back, and backfill the symlink into every other working copy. |
+| `mws promote <path>` | Move a top-level file or directory from the current working copy into `.mws/`, symlink it back, backfill the symlink into every other working copy, and link it into every copy's worktrees. Refuses an mws marker (`.mws-*`) and any `[[renders]]` target. |
 | `mws list` (`ls`) | List working copies in the current meta workspace; `--json`. |
 | `mws rm <copy>` | Remove a working copy. Confirms first (`--yes` skips), then moves it to `.trash/` so it can be brought back; `--purge` deletes outright, `--dry-run` previews. |
 | `mws restore [copy]` | Bring a trashed working copy back and repair its harness symlinks. `--as <newname>` restores under a different name. |
