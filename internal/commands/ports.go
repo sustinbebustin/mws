@@ -51,8 +51,120 @@ func newPortsCmd() *cobra.Command {
 	}
 	cmd.PersistentFlags().BoolVar(&jsonOut, "json", false, "print results as JSON")
 	addExportFlag(cmd, &export)
-	cmd.AddCommand(newPortsShowCmd(&jsonOut), newPortsClaimCmd(&jsonOut), newPortsReleaseCmd(&jsonOut))
+	cmd.AddCommand(newPortsShowCmd(&jsonOut), newPortsLsCmd(&jsonOut), newPortsClaimCmd(&jsonOut), newPortsReleaseCmd(&jsonOut))
 	return cmd
+}
+
+func newPortsLsCmd(jsonOut *bool) *cobra.Command {
+	return &cobra.Command{
+		Use:   "ls",
+		Short: "List every working copy's Port slot and the next free slot",
+		Long: `ls prints one line per live working copy: "default" for a copy on the
+default ports, "slot N" for one holding a lease, flagged "conflict: <copies>"
+when two or more leases name the same slot, and a copy whose lease mws cannot
+read as "invalid lease". The last line names the next free slot, the one a
+claim without --slot would take if no listener holds its ports.
+
+--json prints {"copies": [{"copy", "path", "slot", "conflict", "error"}],
+"conflicts": [{"slot", "copies"}], "next_free"}, with next_free null when
+.mws.toml has no [ports] table or every slot is held.`,
+		Example: `  mws ports ls
+  mws ports ls --json`,
+		Args: usageCheckedArgs(cobra.NoArgs, jsonOut),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runPortsLs(newOutput(cmd, *jsonOut))
+		},
+	}
+}
+
+// portsLsCopy is one working copy in `ports ls`. Error is set, and Slot is
+// 0, when its lease is unreadable.
+type portsLsCopy struct {
+	Copy     string `json:"copy"`
+	Path     string `json:"path"`
+	Slot     int    `json:"slot"`
+	Conflict bool   `json:"conflict"`
+	Error    string `json:"error,omitempty"`
+}
+
+type portsConflictJSON struct {
+	Slot   int      `json:"slot"`
+	Copies []string `json:"copies"`
+}
+
+func runPortsLs(o output) error {
+	ws, cfg, err := o.locate()
+	if err != nil {
+		return err
+	}
+	copies, err := ws.EnumerateCopies()
+	if err != nil {
+		return o.fail(clierr.Failuref("list the working copies of %s: %w", ws.MetaRoot, err))
+	}
+	r := o.reporter()
+	rows := make([]portsLsCopy, 0, len(copies))
+	held := make([]ports.Holding, 0, len(copies))
+	for _, c := range copies {
+		row := portsLsCopy{Copy: filepath.Base(c), Path: c}
+		slot, err := ports.ReadSlot(c)
+		if err != nil {
+			row.Error = err.Error()
+			r.Warn(err.Error())
+		} else {
+			row.Slot = slot
+			held = append(held, ports.Holding{Copy: row.Copy, Slot: slot})
+		}
+		rows = append(rows, row)
+	}
+	conflicts := ports.Conflicts(held)
+	conflictsJSON := make([]portsConflictJSON, 0, len(conflicts))
+	inConflict := map[string][]string{}
+	for _, c := range conflicts {
+		conflictsJSON = append(conflictsJSON, portsConflictJSON{Slot: c.Slot, Copies: c.Copies})
+		for _, name := range c.Copies {
+			inConflict[name] = c.Copies
+		}
+	}
+	for i := range rows {
+		_, rows[i].Conflict = inConflict[rows[i].Copy]
+	}
+	var nextFree *int
+	nextNote := "none: .mws.toml has no [ports] table"
+	if policy, ok := cfg.PortPolicy(); ok {
+		if slot, err := ports.NextFree(held, policy.Limit, nil); err == nil {
+			nextFree = &slot
+		} else {
+			nextNote = fmt.Sprintf("none: all %d slots are held", policy.Limit)
+		}
+	}
+	return o.result(struct {
+		Copies    []portsLsCopy       `json:"copies"`
+		Conflicts []portsConflictJSON `json:"conflicts"`
+		NextFree  *int                `json:"next_free"`
+	}{rows, conflictsJSON, nextFree}, func(w io.Writer) error {
+		width := 0
+		for _, row := range rows {
+			width = max(width, len(row.Copy))
+		}
+		for _, row := range rows {
+			state := slotLabel(row.Slot)
+			switch {
+			case row.Error != "":
+				state = "invalid lease"
+			case row.Conflict:
+				state += "  conflict: " + strings.Join(inConflict[row.Copy], ", ")
+			}
+			if _, err := fmt.Fprintf(w, "%-*s  %s\n", width, row.Copy, state); err != nil {
+				return err
+			}
+		}
+		if nextFree != nil {
+			_, err := fmt.Fprintf(w, "next free slot: %d\n", *nextFree)
+			return err
+		}
+		_, err := fmt.Fprintf(w, "next free slot: %s\n", nextNote)
+		return err
+	})
 }
 
 func addExportFlag(cmd *cobra.Command, export *bool) {

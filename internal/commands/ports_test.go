@@ -212,6 +212,52 @@ func TestPortsShowPrintsTheExportSet(t *testing.T) {
 	}
 }
 
+func TestPortsLsShowsSlotsConflictsAndTheNextFreeSlot(t *testing.T) {
+	f := seedEnvWorkspace(t)
+	f.withFreePort(t)
+	mustMkdir(t, filepath.Join(f.copy("c"), "frontend"))
+	mustPorts(t, f.meta, "claim", "a", "--slot", "1")
+	writeFileAll(t, ports.LeasePath(f.copy("b")), readFile(t, ports.LeasePath(f.copy("a"))))
+
+	res := mustPorts(t, f.meta, "ls")
+	lines := strings.Split(strings.TrimSuffix(res.stdout, "\n"), "\n")
+	want := []string{
+		"a  slot 1  conflict: a, b",
+		"b  slot 1  conflict: a, b",
+		"c  default",
+		"next free slot: 2",
+	}
+	if !slices.Equal(lines, want) {
+		t.Errorf("ls lines = %q, want %q", lines, want)
+	}
+
+	res = mustPorts(t, f.meta, "ls", "--json")
+	var out struct {
+		Copies []struct {
+			Copy     string `json:"copy"`
+			Slot     int    `json:"slot"`
+			Conflict bool   `json:"conflict"`
+		} `json:"copies"`
+		Conflicts []struct {
+			Slot   int      `json:"slot"`
+			Copies []string `json:"copies"`
+		} `json:"conflicts"`
+		NextFree *int `json:"next_free"`
+	}
+	if err := json.Unmarshal([]byte(res.stdout), &out); err != nil {
+		t.Fatalf("stdout is not one JSON object: %v\n%s", err, res.stdout)
+	}
+	if len(out.Copies) != 3 || out.Copies[0].Slot != 1 || !out.Copies[1].Conflict || out.Copies[2].Slot != 0 || out.Copies[2].Conflict {
+		t.Errorf("copies = %+v, want a and b on slot 1 in conflict, c on the defaults", out.Copies)
+	}
+	if len(out.Conflicts) != 1 || out.Conflicts[0].Slot != 1 || !slices.Equal(out.Conflicts[0].Copies, []string{"a", "b"}) {
+		t.Errorf("conflicts = %+v, want slot 1 held by a, b", out.Conflicts)
+	}
+	if out.NextFree == nil || *out.NextFree != 2 {
+		t.Errorf("next_free = %v, want 2", out.NextFree)
+	}
+}
+
 func TestPortsReleaseAfterClaimRestoresTheBytesOfAFreshClone(t *testing.T) {
 	f := seedWtWorkspace(t)
 	f.cfg.Ports = freePortTable(t)
