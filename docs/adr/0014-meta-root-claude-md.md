@@ -9,4 +9,4 @@ Mixing the two meant every project's own `CLAUDE.md` opened with mws boilerplate
 ## Consequences
 
 - Agents launched from a working copy see both files: mws notes first, then the project's.
-- Meta workspaces created before this change keep their old single `CLAUDE.md`; `mws migrate` adds `!/CLAUDE.md` to the allowlist it writes but does not render the new file.
+- Meta workspaces created before this change keep their old single `CLAUDE.md`; re-running `mws init` is not supported, so add `!/CLAUDE.md` to the allowlist by hand.
