@@ -140,8 +140,9 @@ For parallel agents inside one working copy, `mws wt new <name>` creates a **wor
 | `mws restore [copy]` | Bring a trashed working copy back and repair its harness symlinks. `--as <newname>` restores under a different name. |
 | `mws trash [ls\|prune\|empty]` | Inspect the trash, purge entries past their retention window, or empty it completely; `prune` and `empty` take `--dry-run`. `--json` on all three (`prune` and `empty` list the purged entries). |
 | `mws relink` | Refresh harness symlinks across every working copy. Diverged content is asked about, or settled by `--prefer copy\|harness\|skip`; `--dry-run` previews. |
-| `mws sync-env [copy]` | Copy staged env files from `.envs/` into a working copy (overwrites). |
-| `mws stage-env [copy]` | Inverse of `sync-env`: capture a working copy's env files into staging as the new default. |
+| `mws env sync [copy]` | Copy staged env files from `.envs/` into a working copy (overwrites); `--all` for every copy, `--dry-run` previews. |
+| `mws env stage [copy]` | Inverse of `env sync`: capture a working copy's env files into staging as the new default; `--dry-run` previews. Refuses inside a worktree. |
+| `mws env diff [copy]` | Report each env file as `same`, `differs`, `missing in copy` or `missing in staging`; exits `1` unless all are the same. `--all` for every copy. All three `env` commands take `--json` and cover the optional repos present in the copy. |
 | `mws worktree` (`mws wt`) `new\|ls\|path\|exec\|rm\|prune` | Manage worktrees of the current working copy: `new <name>` creates one and prints its path, `ls [--all]` shows branches, dirty state and liveness, `path <name>` prints its path, `exec <name> -- <cmd>` runs in it, `rm <name>...` removes (refuses to lose work; `--force` discards uncommitted files, unreachable detached commits and changed root files; `--dry-run` previews), `prune` removes every clean, idle, merged one. `--json` everywhere. |
 
 ### Scripting and agents
@@ -173,7 +174,7 @@ project_name = "my-project"
 
 On `mws clone`:
 
-- **Env files** are copied (not symlinked) into the new working copy at their target paths, so peers can hold different ports or service keys. `.envs/` is allowlist-gitignored -- secrets stay local. `mws sync-env` re-pushes staged defaults; `mws stage-env` captures the current working copy back into staging.
+- **Env files** are copied (not symlinked) into the new working copy at their target paths, so peers can hold different ports or service keys. `.envs/` is allowlist-gitignored -- secrets stay local. `mws env sync` re-pushes staged defaults; `mws env stage` captures the current working copy back into staging; `mws env diff` shows drift.
 - **Setup commands** run via `sh -c` from the cloned repo's directory after env-copy completes. You are prompted before any run; `--setup` skips the prompt, `--no-setup` skips execution. Without a terminal one of the two is required.
 
 Full schema and rationale: [`docs/config.md`](./docs/config.md).

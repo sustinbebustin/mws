@@ -47,7 +47,7 @@ when a working copy of that name exists, as after a retried restore.`,
 			if len(args) == 1 {
 				name = args[0]
 			}
-			return runRestore(cmd.Context(), newConsoleReporter(), name, as, yes)
+			return runRestore(cmd.Context(), reporterFor(cmd.ErrOrStderr()), name, as, yes)
 		},
 	}
 	cmd.Flags().StringVar(&as, "as", "", "restore under a different working copy name")
@@ -111,6 +111,8 @@ func runRestore(ctx context.Context, r Reporter, name, as string, yes bool) erro
 	if n := len(repaired); n > 0 {
 		r.OK(fmt.Sprintf("Repaired %d %s", n, plural(n, "worktree", "worktrees")))
 	}
+
+	renderEnv(r, ws.MetaRoot, cfg, dest, false)
 	return nil
 }
 

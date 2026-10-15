@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `mws env diff [copy|--all]` reports each env file as `same`, `differs`, `missing in copy` or `missing in staging`, exiting `0` only when all are the same.
+
 ### Changed
+- `mws sync-env` and `mws stage-env` are replaced by `mws env sync [copy] [--all] [--dry-run]` and `mws env stage [copy] [--dry-run]` (no aliases; the old names exit `2`). The `env` group takes `--json`. Both cover the optional repos present in a copy and exit `1` when any file fails to copy, after copying the rest. `env stage` refuses (exit `3`) inside a worktree.
+- `mws clone`, `mws include` and `mws restore` materialise env files through the same path as `mws env sync`: each renders every env file of the copy from staging (`restore` now resets a restored copy's env files to staging).
 - `mws promote` refuses (exit `3`) an mws marker (`.mws-*`) and any `[[renders]]` target, and leaves both out of its candidate list.
 - `mws promote` links the promoted entry into every copy's worktrees, so they no longer wait for `mws relink`. A copy or worktree it fails to link now makes it exit `1`, naming `mws relink` to finish.
 - `ls` is the only list spelling: `mws ls`, `mws trash ls`, `mws wt ls`. `mws list`, `mws trash list` and `mws wt list` are unknown commands (exit `2`).

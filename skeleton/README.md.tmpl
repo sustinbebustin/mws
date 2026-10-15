@@ -37,4 +37,4 @@ mws add-repo <git-url> [folder]
 - Edit harness content under `.mws/`. Working copies see the change instantly through symlinks.
 - New top-level files added directly in a working copy stay local until you `mws promote <path>` them into `.mws/`.
 - Native repos inside each working copy are independent git clones -- every working copy has its own `.git/` inside each repo dir.
-- Env files: populate them in a working copy, then `mws stage-env <copy>` to capture defaults. Subsequent `mws clone` reproduces them automatically. `mws sync-env <copy>` resets a copy back to staged defaults.
+- Env files: populate them in a working copy, then `mws env stage <copy>` to capture defaults. Subsequent `mws clone` reproduces them automatically. `mws env sync <copy>` resets a copy back to staged defaults; `mws env diff <copy>` shows what differs.

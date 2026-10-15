@@ -63,3 +63,21 @@ func runMWSIn(t *testing.T, cwd, stdin string, args ...string) mwsResult {
 	}
 	return mwsResult{stdout: out.String(), stderr: errb.String(), code: ExitCode(err)}
 }
+
+// withCwd temporarily changes the working directory for the duration of fn.
+func withCwd(t *testing.T, dir string, fn func()) {
+	t.Helper()
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(old); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	fn()
+}

@@ -390,7 +390,7 @@ func executeInit(ctx context.Context, r Reporter, p *initPlan) error {
 	}
 
 	if anyEnvMapping(p.Repos) {
-		r.Info(fmt.Sprintf("Populate env files inside %s and run `mws stage-env %s` to capture them into staging.", mainCopy, firstWorkingCopyName))
+		r.Info(fmt.Sprintf("Populate env files inside %s and run `mws env stage %s` to capture them into staging.", mainCopy, firstWorkingCopyName))
 	}
 	if len(failed) > 0 {
 		return fmt.Errorf("init completed with errors: %d repo(s) failed to clone: %s", len(failed), strings.Join(failed, ", "))

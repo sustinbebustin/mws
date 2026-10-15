@@ -42,7 +42,7 @@ Re-running for a repo already in the copy skips the clone and succeeds.`,
 			if err != nil {
 				return err
 			}
-			return runInclude(cmd.Context(), newConsoleReporter(), folder, copyName, choice)
+			return runInclude(cmd.Context(), reporterFor(cmd.ErrOrStderr()), folder, copyName, choice)
 		},
 	}
 	cmd.Flags().Bool("setup", false, "run [[optional_repos.setup]] commands without prompting")
@@ -82,7 +82,7 @@ func runInclude(ctx context.Context, r Reporter, folder, copyName string, choice
 	if err := cloneNative(ctx, r, repo, target); err != nil {
 		return fmt.Errorf("%s: %w", repo.Folder, err)
 	}
-	copyEnvsFor(r, ws.MetaRoot, repo, target)
+	renderEnv(r, ws.MetaRoot, cfg, target, false)
 
 	run, err := confirmSetup(choice, items)
 	if err != nil {

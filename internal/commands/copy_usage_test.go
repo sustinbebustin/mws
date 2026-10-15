@@ -26,8 +26,9 @@ func TestCopyCommandsFromMetaRootWithoutCopyAreUsageErrors(t *testing.T) {
 		fix  string
 	}{
 		{[]string{"include", "extra"}, "mws include extra <copy>"},
-		{[]string{"sync-env"}, "mws sync-env <copy>"},
-		{[]string{"stage-env"}, "mws stage-env <copy>"},
+		{[]string{"env", "sync"}, "mws env sync <copy>"},
+		{[]string{"env", "stage"}, "mws env stage <copy>"},
+		{[]string{"env", "diff"}, "mws env diff <copy>"},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			assertUsage(t, runMWS(t, f.meta, tc.args...), tc.fix)
@@ -41,10 +42,11 @@ func TestCopyCommandsNameTheCopyArgumentInUsage(t *testing.T) {
 		"rm":        "mws rm <copy>",
 		"restore":   "mws restore [copy]",
 		"include":   "mws include <folder> [copy]",
-		"sync-env":  "mws sync-env [copy]",
-		"stage-env": "mws stage-env [copy]",
+		"env sync":  "mws env sync [copy]",
+		"env stage": "mws env stage [copy]",
+		"env diff":  "mws env diff [copy]",
 	} {
-		res := runMWS(t, dir, cmd, "--help")
+		res := runMWS(t, dir, append(strings.Fields(cmd), "--help")...)
 		if res.code != 0 {
 			t.Fatalf("mws %s --help: exit %d\nstderr: %s", cmd, res.code, res.stderr)
 		}

@@ -19,7 +19,7 @@ func envStagingDir(metaRoot string) string {
 
 // resolveCopy is ws.ResolveCopy with a missing copy name reported as a usage
 // error that shows the invocation naming one; invocation is the command line
-// with a `<copy>` placeholder, e.g. "mws sync-env <copy>".
+// with a `<copy>` placeholder, e.g. "mws env sync <copy>".
 func resolveCopy(ws *project.Workspace, name, invocation string) (string, error) {
 	target, err := ws.ResolveCopy(name)
 	if errors.Is(err, project.ErrNoCopyNamed) {
