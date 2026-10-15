@@ -51,7 +51,8 @@ func runPromote(r Reporter, arg string) error {
 	}
 	// Locate tolerates an unreadable .mws.toml. Load it explicitly, as the other
 	// commands do, so a malformed config is an error here rather than silence.
-	if _, err := config.Load(ws.MetaRoot); err != nil {
+	cfg, err := config.Load(ws.MetaRoot)
+	if err != nil {
 		return err
 	}
 	shown := arg
@@ -70,7 +71,7 @@ func runPromote(r Reporter, arg string) error {
 	harnessRoot := filepath.Join(ws.MetaRoot, project.HarnessDirName)
 
 	if arg == "" {
-		candidates, err := promoteCandidates(ws.WorkingCopy, harnessRoot)
+		candidates, err := promoteCandidates(cfg, ws.WorkingCopy, harnessRoot)
 		if err != nil {
 			return err
 		}
@@ -104,6 +105,9 @@ func runPromote(r Reporter, arg string) error {
 	}
 	if rel == "." || rel == ".." || filepath.IsAbs(rel) || hasParentSegment(rel) {
 		return fmt.Errorf("%s is outside the working copy %s", abs, ws.WorkingCopy)
+	}
+	if why, ok := unpromotable(cfg, rel); ok {
+		return clierr.Refusedf("%s %s; nothing was changed", rel, why)
 	}
 
 	st, err := os.Lstat(abs)
@@ -176,14 +180,18 @@ func runPromote(r Reporter, arg string) error {
 }
 
 // promoteCandidates returns sorted top-level entries in workingCopy that can be promoted:
-// not symlinks (already shared) and not present in harnessRoot (would conflict).
-func promoteCandidates(workingCopy, harnessRoot string) ([]string, error) {
+// not symlinks (already shared), not present in harnessRoot (would conflict),
+// and not unpromotable.
+func promoteCandidates(cfg *config.Config, workingCopy, harnessRoot string) ([]string, error) {
 	entries, err := os.ReadDir(workingCopy)
 	if err != nil {
 		return nil, err
 	}
 	var out []string
 	for _, e := range entries {
+		if _, ok := unpromotable(cfg, e.Name()); ok {
+			continue
+		}
 		st, err := os.Lstat(filepath.Join(workingCopy, e.Name()))
 		if err != nil || st.Mode()&os.ModeSymlink != 0 {
 			continue
@@ -194,6 +202,21 @@ func promoteCandidates(workingCopy, harnessRoot string) ([]string, error) {
 		out = append(out, e.Name())
 	}
 	return out, nil
+}
+
+// unpromotable reports why the top-level entry name must stay per-copy: an
+// mws marker or a `[[renders]]` target would otherwise become one shared
+// harness file. ok is false for any other name.
+func unpromotable(cfg *config.Config, name string) (why string, ok bool) {
+	if strings.HasPrefix(name, config.MarkerPrefix) {
+		return fmt.Sprintf("is an mws marker (a %s* file mws writes for this copy alone) and is never promoted", config.MarkerPrefix), true
+	}
+	for _, rd := range cfg.Renders {
+		if rd.Target == name {
+			return fmt.Sprintf("is a [[renders]] target, rendered per copy from %s; edit that harness source instead", rd.Source), true
+		}
+	}
+	return "", false
 }
 
 // alreadyPromoted reports whether the symlink at link resolves to the harness

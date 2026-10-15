@@ -3,6 +3,7 @@ package commands
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sustinbebustin/mws/internal/config"
@@ -54,6 +55,55 @@ func TestRunPromoteMovesEntryAndSymlinks(t *testing.T) {
 	}
 	if pSt.Mode()&os.ModeSymlink == 0 {
 		t.Fatalf("feature/NOTES.md is not a symlink")
+	}
+}
+
+// assertRefused fails unless res exited 3 with every one of want on stderr.
+func assertRefused(t *testing.T, res mwsResult, want ...string) {
+	t.Helper()
+	if res.code != 3 {
+		t.Fatalf("exit %d, want 3\nstderr: %s", res.code, res.stderr)
+	}
+	for _, w := range want {
+		if !strings.Contains(res.stderr, w) {
+			t.Errorf("stderr does not name %q:\n%s", w, res.stderr)
+		}
+	}
+}
+
+func TestPromoteRefusesAnMwsMarker(t *testing.T) {
+	f := seedWtWorkspace(t)
+	writeFileAll(t, filepath.Join(f.copy, ".mws-ports.env"), "MWS_SLOT=1\n")
+
+	assertRefused(t, runMWS(t, f.copy, "promote", ".mws-ports.env"), ".mws-ports.env", "mws marker")
+	if got := readFile(t, filepath.Join(f.copy, ".mws-ports.env")); got != "MWS_SLOT=1\n" {
+		t.Errorf("marker = %q, want it left in place", got)
+	}
+}
+
+func TestPromoteRefusesARenderTarget(t *testing.T) {
+	f := seedWtWorkspace(t)
+	f.cfg.Renders = []config.Render{{Source: ".mcp.json" + config.RenderSuffix, Target: ".mcp.json"}}
+	f.saveConfig(t)
+
+	assertRefused(t, runMWS(t, f.copy, "promote", ".mcp.json"), ".mcp.json", "[[renders]] target")
+	if got := readFile(t, filepath.Join(f.copy, ".mcp.json")); got != `{"mcpServers":{}}` {
+		t.Errorf(".mcp.json = %q, want it left in place", got)
+	}
+}
+
+func TestPromoteCandidatesOmitMarkersAndRenderTargets(t *testing.T) {
+	f := seedWtWorkspace(t)
+	f.cfg.Renders = []config.Render{{Source: ".mcp.json" + config.RenderSuffix, Target: ".mcp.json"}}
+	f.saveConfig(t)
+	writeFileAll(t, filepath.Join(f.copy, ".mws-ports.env"), "MWS_SLOT=1\n")
+
+	res := runMWS(t, f.copy, "promote")
+	assertUsage(t, res, "promotable: ", ".ports.env")
+	for _, hidden := range []string{".mws-ports.env", ".mcp.json"} {
+		if strings.Contains(res.stderr, hidden) {
+			t.Errorf("candidate list names %s:\n%s", hidden, res.stderr)
+		}
 	}
 }
 
