@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -382,8 +383,7 @@ func executeMigrateAfterRename(r Reporter, p *migratePlan, staging string) error
 // original location. Failures are reported but don't propagate -- the caller
 // is already returning an error that names the staging dir.
 func rollbackMovedPeers(r Reporter, moved []struct{ src, dst string }) {
-	for i := len(moved) - 1; i >= 0; i-- {
-		m := moved[i]
+	for _, m := range slices.Backward(moved) {
 		if err := os.Rename(m.dst, m.src); err != nil {
 			r.Warn(fmt.Sprintf("rollback: failed to restore %s -> %s: %v", m.dst, m.src, err))
 		}
