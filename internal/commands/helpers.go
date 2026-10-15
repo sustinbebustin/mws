@@ -17,6 +17,17 @@ func envStagingDir(metaRoot string) string {
 	return filepath.Join(metaRoot, project.EnvStagingDirName)
 }
 
+// resolveCopy is ws.ResolveCopy with a missing copy name reported as a usage
+// error that shows the invocation naming one; invocation is the command line
+// with a `<copy>` placeholder, e.g. "mws sync-env <copy>".
+func resolveCopy(ws *project.Workspace, name, invocation string) (string, error) {
+	target, err := ws.ResolveCopy(name)
+	if errors.Is(err, project.ErrNoCopyNamed) {
+		return "", usagef("%w (under %s); run `%s` (`mws list` shows the copies) or run from inside a working copy", err, ws.MetaRoot, invocation)
+	}
+	return target, err
+}
+
 // looksLikeWorkingCopy reports whether candidate is plausibly an mws-managed
 // working copy of metaRoot: at least one top-level entry is a symlink that
 // resolves into <metaRoot>/.mws/. Used as a guard against rm'ing a directory

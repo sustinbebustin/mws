@@ -122,7 +122,7 @@ Every top-level entry under `.mws/` is symlinked into each working copy -- disco
 
 Working copies can optionally be grouped under a single subdirectory by setting `working_copies_dir` in `.mws.toml` (e.g. `working_copies_dir = "copies"`); subsequent `mws clone`s land at `<meta>/copies/<name>/` instead of `<meta>/<name>/`. See [`docs/config.md`](./docs/config.md) for the rules and caveats.
 
-`mws rm` moves a working copy into `.trash/` rather than deleting it, so a mistaken removal costs nothing: `mws restore <name>` puts it back with its uncommitted work and env files intact. Trashed copies are purged automatically once they pass the retention window (7 days by default, configurable via `[trash]`). Note that the sweep is opportunistic -- it runs when an mws command touches the trash, not on a timer.
+`mws rm` moves a working copy into `.trash/` rather than deleting it, so a mistaken removal costs nothing: `mws restore <copy>` puts it back with its uncommitted work and env files intact. Trashed copies are purged automatically once they pass the retention window (7 days by default, configurable via `[trash]`). Note that the sweep is opportunistic -- it runs when an mws command touches the trash, not on a timer.
 
 For parallel agents inside one working copy, `mws wt new <name>` creates a **worktree** at `<copy>/.wt/<name>/`: a `git worktree` of every native repo on `wt/<name>`, the same harness symlinks, the copy's ports, env and MCP files, and setup run. `mws wt rm` refuses to lose uncommitted work or unmerged commits. The skeleton wires Claude Code's `WorktreeCreate`, `WorktreeRemove` and `SubagentStop` hooks to `mws wt hook ...`, so `claude -w` and `isolation: "worktree"` subagents use the same layout. See [`docs/config.md`](./docs/config.md#worktrees) and [ADR-0011](./docs/adr/0011-worktrees-are-children-of-a-working-copy.md).
 
@@ -136,12 +136,12 @@ For parallel agents inside one working copy, `mws wt new <name>` creates a **wor
 | `mws include <folder> [copy]` | Clone a registered optional repo into a working copy (the current one by default). |
 | `mws promote <path>` | Move a top-level file or directory from the current working copy into `.mws/`, symlink it back, and backfill the symlink into every other working copy. |
 | `mws list` (`ls`) | List working copies in the current meta workspace; `--json`. |
-| `mws rm <name>` | Remove a working copy. Confirms first (`--yes` skips), then moves it to `.trash/` so it can be brought back; `--purge` deletes outright, `--dry-run` previews. |
-| `mws restore [name]` | Bring a trashed working copy back and repair its harness symlinks. `--as <newname>` restores under a different name. |
+| `mws rm <copy>` | Remove a working copy. Confirms first (`--yes` skips), then moves it to `.trash/` so it can be brought back; `--purge` deletes outright, `--dry-run` previews. |
+| `mws restore [copy]` | Bring a trashed working copy back and repair its harness symlinks. `--as <newname>` restores under a different name. |
 | `mws trash [list\|prune\|empty]` | Inspect the trash (`--json`), purge entries past their retention window, or empty it completely; `prune` and `empty` take `--dry-run`. |
 | `mws relink` | Refresh harness symlinks across every working copy. Diverged content is asked about, or settled by `--prefer peer\|meta\|skip`; `--dry-run` previews. |
-| `mws sync-env [name]` | Copy staged env files from `.envs/` into a working copy (overwrites). |
-| `mws stage-env [name]` | Inverse of `sync-env`: capture a working copy's env files into staging as the new default. |
+| `mws sync-env [copy]` | Copy staged env files from `.envs/` into a working copy (overwrites). |
+| `mws stage-env [copy]` | Inverse of `sync-env`: capture a working copy's env files into staging as the new default. |
 | `mws worktree` (`mws wt`) `new\|ls\|path\|exec\|rm\|prune` | Manage worktrees of the current working copy: `new <name>` creates one and prints its path, `ls [--all]` shows branches, dirty state and liveness, `path <name>` prints its path, `exec <name> -- <cmd>` runs in it, `rm <name>...` removes (refuses to lose work; `--force` discards uncommitted files, unreachable detached commits and changed root files; `--dry-run` previews), `prune` removes every clean, idle, merged one. `--json` everywhere. |
 
 ### Scripting and agents

@@ -27,7 +27,7 @@ type rmFlags struct {
 func newRmCmd() *cobra.Command {
 	var f rmFlags
 	cmd := &cobra.Command{
-		Use:   "rm <name>",
+		Use:   "rm <copy>",
 		Short: "Remove a working copy",
 		Long: `rm removes a working copy directory from the meta workspace. By default
 the copy is moved into <meta>/.trash/ rather than deleted, so it can be brought
@@ -100,7 +100,7 @@ func runRm(ctx context.Context, r Reporter, name string, f rmFlags) error {
 			for i, p := range peers {
 				names[i] = filepath.Base(p)
 			}
-			return noPrompt(fmt.Sprintf("no working copy named (working copies: %s)", strings.Join(names, ", ")), "mws rm <name> --yes")
+			return noPrompt(fmt.Sprintf("no working copy named (working copies: %s)", strings.Join(names, ", ")), "mws rm <copy> --yes")
 		}
 		opts := make([]huh.Option[string], 0, len(peers))
 		for _, p := range peers {

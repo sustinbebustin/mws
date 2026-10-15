@@ -54,8 +54,17 @@ func runPromote(r Reporter, arg string) error {
 	if _, err := config.Load(ws.MetaRoot); err != nil {
 		return err
 	}
+	shown := arg
+	if shown == "" {
+		shown = "<path>"
+	}
+	if ws.Worktree != "" {
+		return usagef("promote acts on the working copy %s, not on its worktree %s; run `cd %s && mws promote %s`",
+			filepath.Base(ws.WorkingCopy), ws.Worktree, ws.WorkingCopy, shown)
+	}
 	if ws.WorkingCopy == "" {
-		return errors.New("promote must be run from a working copy, not from the meta root")
+		return usagef("promote must be run from inside a working copy, not from %s; run `cd <copy> && mws promote %s` (`mws list` shows the copies)",
+			cwd, shown)
 	}
 
 	harnessRoot := filepath.Join(ws.MetaRoot, project.HarnessDirName)

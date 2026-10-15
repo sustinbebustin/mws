@@ -14,7 +14,7 @@ import (
 )
 
 // decodeJSON parses stdout as exactly one JSON object into v.
-func decodeJSON(t *testing.T, res wtResult, v any) {
+func decodeJSON(t *testing.T, res mwsResult, v any) {
 	t.Helper()
 	if err := json.Unmarshal([]byte(res.stdout), v); err != nil {
 		t.Fatalf("stdout is not one JSON object: %v\n%s", err, res.stdout)
@@ -27,7 +27,7 @@ type jsonErrorOut struct {
 }
 
 // decodeError returns the {"error": ...} object of a failed --json run.
-func decodeError(t *testing.T, res wtResult) jsonErrorOut {
+func decodeError(t *testing.T, res mwsResult) jsonErrorOut {
 	t.Helper()
 	var out struct {
 		Error *jsonErrorOut `json:"error"`

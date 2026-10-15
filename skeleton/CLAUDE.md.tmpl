@@ -38,7 +38,7 @@ Worktrees of a copy live at `<copy>/.wt/<name>/` (`mws wt new <name>`); use the 
 ```bash
 mws list                       # working copies of this meta workspace
 mws clone <name>               # new peer working copy: clones repos, copies env files, runs setup commands
-mws rm <name>                  # move a copy to .trash/ (mws restore <name> undoes it)
+mws rm <copy>                  # move a copy to .trash/ (mws restore <copy> undoes it)
 mws promote <path>             # move a copy-local file into the harness, symlink it into every copy
 mws relink                     # re-create harness symlinks in every copy
 mws sync-env [copy]            # reset a copy's env files to staged defaults

@@ -14,7 +14,7 @@ import (
 
 func newSyncEnvCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "sync-env [name]",
+		Use:   "sync-env [copy]",
 		Short: "Copy staged env files from .envs/ into a working copy (overwrites)",
 		Long: `sync-env reads [[repos.envs]] mappings from .mws.toml and copies each
 staged file from <meta>/.envs/<repo>/<source> into <working-copy>/<repo>/<target>.
@@ -54,7 +54,7 @@ func runSyncEnv(r Reporter, name string) error {
 		return err
 	}
 
-	target, err := ws.ResolveCopy(name)
+	target, err := resolveCopy(ws, name, "mws sync-env <copy>")
 	if err != nil {
 		return err
 	}

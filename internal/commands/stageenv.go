@@ -14,7 +14,7 @@ import (
 
 func newStageEnvCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "stage-env [name]",
+		Use:   "stage-env [copy]",
 		Short: "Capture env files from a working copy into .envs/ staging (overwrites)",
 		Long: `stage-env is the inverse of sync-env. It reads [[repos.envs]] mappings from
 .mws.toml and copies each <working-copy>/<repo>/<target> into
@@ -50,7 +50,7 @@ func runStageEnv(r Reporter, name string) error {
 		return err
 	}
 
-	target, err := ws.ResolveCopy(name)
+	target, err := resolveCopy(ws, name, "mws stage-env <copy>")
 	if err != nil {
 		return err
 	}
