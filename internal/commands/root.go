@@ -29,6 +29,7 @@ const (
 	groupWorkspace = "workspace"
 	groupCopies    = "copies"
 	groupEnv       = "env"
+	groupPorts     = "ports"
 	groupWorktrees = "worktrees"
 	groupShell     = "shell"
 )
@@ -97,6 +98,7 @@ func NewRootCmd() *cobra.Command {
 		&cobra.Group{ID: groupWorkspace, Title: "Workspace:"},
 		&cobra.Group{ID: groupCopies, Title: "Working copies:"},
 		&cobra.Group{ID: groupEnv, Title: "Env files:"},
+		&cobra.Group{ID: groupPorts, Title: "Ports:"},
 		&cobra.Group{ID: groupWorktrees, Title: "Worktrees:"},
 		&cobra.Group{ID: groupShell, Title: "Shell and info:"},
 	)
@@ -111,6 +113,7 @@ func NewRootCmd() *cobra.Command {
 	add(groupWorkspace, newInitCmd(), newAddRepoCmd(), newPromoteCmd(), newRelinkCmd())
 	add(groupCopies, newCloneCmd(), newIncludeCmd(), newListCmd(), newRmCmd(), newRestoreCmd(), newTrashCmd())
 	add(groupEnv, newEnvCmd())
+	add(groupPorts, newPortsCmd())
 	add(groupWorktrees, newWorktreeCmd())
 	add(groupShell, newShellInitCmd(), newVersionCmd())
 	tagUsageArgs(root)
