@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -31,5 +32,28 @@ func TestCopyCommandsFromMetaRootWithoutCopyAreUsageErrors(t *testing.T) {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			assertUsage(t, runMWS(t, f.meta, tc.args...), tc.fix)
 		})
+	}
+}
+
+func TestPromoteFromMetaRootIsUsageError(t *testing.T) {
+	f := seedWtWorkspace(t)
+	assertUsage(t, runMWS(t, f.meta, "promote", "notes.md"), "cd <copy> && mws promote notes.md")
+}
+
+func TestPromoteInsideWorktreeIsUsageErrorNamingTheCopy(t *testing.T) {
+	f := seedWtWorkspace(t)
+	if res := runWt(t, f.copy, "new", "x", "--no-setup"); res.code != 0 {
+		t.Fatalf("wt new: exit %d\nstderr: %s", res.code, res.stderr)
+	}
+	wt := f.wtPath("x")
+	writeFileAll(t, filepath.Join(wt, "notes.md"), "local")
+
+	res := runMWS(t, wt, "promote", "notes.md")
+	assertUsage(t, res, "acts on the working copy", "cd "+f.copy+" && mws promote notes.md")
+	if strings.Contains(res.stderr, "nested") {
+		t.Errorf("stderr blames a nested path:\n%s", res.stderr)
+	}
+	if got := readFile(t, filepath.Join(wt, "notes.md")); got != "local" {
+		t.Errorf("worktree notes.md = %q, want it left in place", got)
 	}
 }
