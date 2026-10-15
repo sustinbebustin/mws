@@ -84,7 +84,7 @@ working_copies_dir  = "<segment>" # optional; single path segment under the meta
 
 ### `[[repos.envs]]`
 
-Maps a staged env file in `.envs/<folder>/` to a target inside the cloned repo. Materialised on `mws clone`, `mws include` and `mws restore` (copy, not symlink) and re-pushed by `mws env sync <copy>`. Captured into staging by `mws env stage <copy>`; `mws env diff <copy>` compares the two. The same holds for `[[optional_repos.envs]]` of every optional repo present in the copy.
+Maps a staged env file in `.envs/<folder>/` to a target inside the cloned repo. Rendered (a copy, not a symlink) on `mws clone`, `mws include` and `mws restore` and re-pushed by `mws env sync <copy>`: each `${VAR}` the copy exports is substituted at its port slot (slot 0 without a lease), every other byte, `$HOME` and `${lower}` included, is copied as is, and an unknown `${UPPER_CASE}` name stays and is reported as `[WARN]`. Captured into staging by `mws env stage <copy>`, which skips a source holding placeholders with a `[WARN]` unless `--force`; `mws env diff <copy>` compares the target with the rendered source. The same holds for `[[optional_repos.envs]]` of every optional repo present in the copy.
 
 | Key      | Type   | Required | Notes |
 |----------|--------|----------|-------|
@@ -95,7 +95,7 @@ Design rationale and trade-offs: [ADR-0005](./adr/0005-env-staging-via-copy.md).
 
 ### `[[repos.setup]]`
 
-Shell commands run by `mws clone` against the cloned repo as the last step (after env copy succeeds for every repo). Each command runs via `sh -c <cmd>` with `cwd = <working-copy>/<folder>` and the user's `PATH` and environment inherited unchanged.
+Shell commands run by `mws clone` against the cloned repo as the last step (after env render succeeds for every repo). Each command runs via `sh -c <cmd>` with `cwd = <working-copy>/<folder>`, the user's `PATH` and environment inherited, and the copy's export set (`MWS_SLOT`, `MWS_PORT_<NAME>` and aliases, `[vars]`, the other builtins) added. `[[worktrees.setup]]` gets the same variables, from the worktree's working copy.
 
 | Key   | Type   | Required | Notes |
 |-------|--------|----------|-------|

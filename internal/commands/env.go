@@ -22,7 +22,11 @@ import (
 const envLong = `env moves env files between env staging (<meta>/.envs/<repo>/<source>) and
 working copies (<copy>/<repo>/<target>), following the [[repos.envs]] mappings
 in .mws.toml and the [[optional_repos.envs]] of every optional repo present in
-the copy.
+the copy. Into a copy, files are rendered: each ${VAR} the copy's Port lease
+exports (slot 0 without a lease) is substituted, every other byte is copied
+as is, and an unknown ${UPPER_CASE} name is left in place with a warning.
+sync and diff also cover each [[renders]] target, rendered from its .render
+source under <meta>/.mws/ to the copy root.
 
 Each subcommand defaults to the working copy containing the current directory.
 --json prints one JSON object, or {"error": {"code", "message"}} on a usage or
@@ -44,11 +48,12 @@ func newEnvSyncCmd(jsonOut *bool) *cobra.Command {
 	var all, dryRun bool
 	cmd := &cobra.Command{
 		Use:   "sync [copy]",
-		Short: "Copy staged env files into a working copy (overwrites)",
-		Long: `sync copies each staged env file into its target in the working copy,
-overwriting it, so the copy is back on the staged defaults. --all syncs every
-working copy. A missing staged source is skipped with a warning; any file that
-fails to copy makes the command exit 1 after the rest are done.
+		Short: "Render staged env files into a working copy (overwrites)",
+		Long: `sync renders each staged env file and each [[renders]] source at the working
+copy's Port slot and writes it to its target in the copy, overwriting it, so
+the copy is back on the staged defaults. --all syncs every working copy. A
+missing source is skipped with a warning; any file that fails to copy makes
+the command exit 1 after the rest are done.
 
 Worktrees are not refreshed: a worktree gets copies of the working copy's env
 targets when it is created and keeps them. Run from inside a worktree, sync
@@ -57,7 +62,8 @@ updates its working copy, not the worktree.
 --dry-run prints one "would copy <source> -> <target>" line per file and
 changes nothing. --json prints
 {"dry_run", "copies": [{"copy", "path", "files": [{"repo", "from", "to", "status", "error"}]}]}
-with status copied, would_copy, skipped or failed.`,
+with status copied, would_copy, skipped or failed; repo is absent for a
+[[renders]] target.`,
 		Example: `  mws env sync
   mws env sync feature-x --dry-run
   mws env sync --all --json`,
@@ -272,14 +278,16 @@ func newEnvDiffCmd(jsonOut *bool) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "diff [copy]",
 		Short: "Compare a working copy's env files with staging",
-		Long: `diff compares each env target of the working copy (or of every copy with
---all) with its staged source and prints one line per file on stdout:
+		Long: `diff compares each env and [[renders]] target of the working copy (or of
+every copy with --all) with its source rendered at the copy's Port slot, the
+bytes sync would write, and prints one line per file on stdout:
 "<state> <target> <- <source>", where state is same, differs, missing in copy
 or missing in staging (also when both are missing). It changes nothing.
 
 Exits 0 when every file is the same, 1 otherwise. --json prints
 {"same", "copies": [{"copy", "path", "files": [{"repo", "source", "target", "state"}]}]}
-with state same, differs, missing_in_copy or missing_in_staging.`,
+with state same, differs, missing_in_copy or missing_in_staging; repo is
+absent for a [[renders]] target.`,
 		Example: `  mws env diff
   mws env diff feature-x
   mws env diff --all --json`,
