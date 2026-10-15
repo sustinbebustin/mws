@@ -318,6 +318,14 @@ func executeInit(ctx context.Context, r Reporter, p *initPlan) error {
 		return err
 	}
 
+	if err := git.CheckIdentity(ctx, p.ParentDir); err != nil {
+		return fmt.Errorf("cannot commit the new meta workspace: git has no user identity, and nothing was created.\n"+
+			"Set one, then re-run:\n"+
+			"  git config --global user.name \"Your Name\"\n"+
+			"  git config --global user.email \"you@example.com\"\n"+
+			"(detail: %v)", err)
+	}
+
 	skeletonData := skeleton.Data{
 		ProjectName: p.ProjectName,
 		Description: p.Description,
@@ -339,6 +347,11 @@ func executeInit(ctx context.Context, r Reporter, p *initPlan) error {
 		return err
 	}
 	if err := git.InitQuiet(ctx, metaDir); err != nil {
+		return err
+	}
+	// Without a commit HEAD is unborn and `mws wt new` cannot base a worktree
+	// anchor on it. The .gitignore allowlist limits this to the meta files.
+	if err := git.CommitAll(ctx, metaDir, "chore: initialize meta workspace"); err != nil {
 		return err
 	}
 	r.OK(fmt.Sprintf("Created meta workspace at %s", metaDir))

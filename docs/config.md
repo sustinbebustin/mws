@@ -383,7 +383,7 @@ Most fields are written by `mws` subcommands:
 - `mws add-repo <url> [folder]` appends a `[[repos]]` entry (prompting for it when run with no arguments on a terminal) and clones it into every working copy. `mws init --repo <url>` registers repos at creation.
 - `mws add-repo --optional` appends an `[[optional_repos]]` entry without cloning it anywhere; pull it into a copy later with `mws clone --with` or `mws include`.
 
-`[[repos.envs]]` and `[[repos.setup]]` are hand-edited today; there are no dedicated subcommands. The schema is round-trip-safe: `mws` reads and writes the file using `BurntSushi/toml`, preserving every key it recognises. Unknown keys are ignored on parse but dropped on the next write -- avoid adding fields that mws does not understand.
+`[[repos.envs]]` and `[[repos.setup]]` are hand-edited today; there are no dedicated subcommands. `mws` never rewrites an existing file: `mws init` writes it once, and `mws add-repo` appends one block to its end, keeping comments, layout and unknown keys. Unknown keys are ignored on parse.
 
 Changing `working_copies_dir` after the fact does **not** relocate any existing working copies. The new value only affects subsequent `mws clone` (and `mws init`'s first copy on a fresh workspace). Move existing peers by hand if you want them under the new prefix, then run `mws relink` from the meta root.
 

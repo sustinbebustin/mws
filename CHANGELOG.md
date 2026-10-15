@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Every `--dry-run` (`rm`, `relink`, `trash prune`, `trash empty`, `wt rm`, `wt prune`) prints only `would <verb> <object>` lines on stdout; notes go to stderr.
 - `mws trash prune` and `mws trash empty` honour `--json` and print `{"dry_run", "purged", "unreadable"}`.
 
+### Fixed
+- `mws add-repo` appends a `[[repos]]` or `[[optional_repos]]` block to `.mws.toml` instead of rewriting it, so comments, layout and unknown keys survive. When the appended file would not parse or validate, the file is left unchanged and the command exits `1` naming the cause.
+
 ### Removed
 - `mws migrate`, the sibling-meta to meta-at-root converter.
 
