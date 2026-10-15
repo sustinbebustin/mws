@@ -98,15 +98,16 @@ prompt (default none). --with <folder> (repeatable) includes specific ones and
 --no-optional includes none, both without prompting.
 
 After clone and env-copy succeed, any [[repos.setup]] commands run inside
-each cloned repo via sh -c. By default a single confirmation prompt summarises
-all configured commands. Use --setup to run without prompting or --no-setup
-to skip entirely. Without a terminal, every choice above must come from a
-flag; clone fails before creating anything otherwise.
+each cloned repo via sh -c, then the root [[setup]] commands at the copy
+root. By default a single confirmation prompt summarises all configured
+commands. Use --setup to run without prompting or --no-setup to skip
+entirely. Without a terminal, every choice above must come from a flag; clone
+fails before creating anything otherwise.
 
 Re-running for an existing working copy finishes it: registered repos (and
 --with ones) that are missing are cloned and get their env files, setup runs
-for those (or for every repo with --setup), and the path is printed. Repos
-already there are left as they are.`,
+for those, and the path is printed. Repos already there are left as they
+are; a re-run that clones nothing changes nothing and runs no setup.`,
 		Example: `  mws clone feature-x
   mws clone feature-x --no-optional --no-setup
   mws clone feature-x --with docs --with infra --setup
@@ -128,8 +129,8 @@ already there are left as they are.`,
 			return runClone(cmd.Context(), reporterFor(cmd.ErrOrStderr()), cmd.OutOrStdout(), name, choice, optional)
 		},
 	}
-	cmd.Flags().Bool("setup", false, "run [[repos.setup]] commands without prompting")
-	cmd.Flags().Bool("no-setup", false, "skip [[repos.setup]] commands without prompting")
+	cmd.Flags().Bool("setup", false, "run [[repos.setup]] and root [[setup]] commands without prompting")
+	cmd.Flags().Bool("no-setup", false, "skip [[repos.setup]] and root [[setup]] commands without prompting")
 	cmd.Flags().StringSliceVar(&with, "with", nil, "include named optional repo(s) in this working copy (repeatable)")
 	cmd.Flags().Bool("no-optional", false, "include no optional repos, without prompting")
 	return cmd
@@ -193,19 +194,15 @@ func runClone(ctx context.Context, r Reporter, out io.Writer, name string, choic
 	}
 	repos := append(append([]config.Repo{}, cfg.Repos...), selected...)
 	missing := missingRepos(target, repos)
-	// Setup runs for the repos this run clones, or for all of them on --setup
-	// (so a retry after a failed setup runs it again).
-	setupRepos := missing
-	if choice == setupForceRun {
-		setupRepos = repos
-	}
-	items := collectSetup(setupRepos)
-	if err := requireSetupChoice(choice, items, "mws clone "+name); err != nil {
-		return err
-	}
-	if existing && len(missing) == 0 && len(items) == 0 {
+	if existing && len(missing) == 0 {
 		r.Info(fmt.Sprintf("Working copy %s already exists and has every repo", target))
 		return handOffCopy(r, out, target)
+	}
+	// [[repos.setup]] runs only for the repos this run clones; the root
+	// [[setup]] follows it, after the render.
+	items := append(collectSetup(missing), rootSetupItems(cfg)...)
+	if err := requireSetupChoice(choice, items, "mws clone "+name); err != nil {
+		return err
 	}
 
 	if err := os.MkdirAll(target, 0o755); err != nil {
@@ -245,7 +242,7 @@ func runClone(ctx context.Context, r Reporter, out io.Writer, name string, choic
 		}
 		setupFailed := runSetup(ctx, r, target, exports, items, os.Stderr, os.Stderr)
 		if len(setupFailed) > 0 {
-			return fmt.Errorf("clone completed but %d setup command(s) failed:\n  %s\nfix the cause, then rerun with --setup to run every setup command again",
+			return fmt.Errorf("clone completed but %d setup command(s) failed:\n  %s\nthe working copy is kept; fix the cause, then run the failed command(s) by hand",
 				len(setupFailed), strings.Join(setupFailed, "\n  "))
 		}
 	}

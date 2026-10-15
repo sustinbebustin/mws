@@ -87,7 +87,8 @@ mws env stage feature-x                               # copy -> .envs/ (overwrit
 - After adding a harness entry under `.mws/` by hand, run `mws relink` to link it into every copy.
 - Editors that save atomically replace a symlink with a regular file. `relink` restores identical files on its own; a diverged one needs `--prefer copy` (the copy's version wins), `harness` (the harness wins) or `skip`, which is the user's call.
 - Env files are rendered, not linked: `${VAR}` placeholders get the copy's port values, so copies can differ (ports, keys). Treat `env sync` and `env stage` as overwrites (`--dry-run` previews), and read the env file contents only when the task needs them.
-- `env sync` refreshes the copy, never its worktrees; `env stage` refuses inside a worktree.
+- `env sync` refreshes the copy and each worktree's carried env, render and lease files that were not edited there (an edited one is kept with a `[WARN]`); `env stage` refuses inside a worktree.
+- Root `[[setup]]` runs at the copy root after every render (`clone`, `include`, `env sync`); headless, pass `--setup` or `--no-setup` when it is configured.
 
 ## New meta workspace
 

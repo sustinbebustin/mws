@@ -24,11 +24,13 @@ repo's default branch and copies any mapped env files, mirroring 'mws clone'.
 Register optional repos first with 'mws add-repo --optional <url> <folder>'.
 
 After clone and env-copy succeed, any [[optional_repos.setup]] commands for the
-repo run via sh -c. By default a confirmation prompt summarises them; use
---setup to run without prompting or --no-setup to skip entirely; without a
-terminal one of them is required when the repo has setup commands.
+repo run via sh -c, then the root [[setup]] commands at the copy root. By
+default a confirmation prompt summarises them; use --setup to run without
+prompting or --no-setup to skip entirely; without a terminal one of them is
+required when any of them is configured.
 
-Re-running for a repo already in the copy skips the clone and succeeds.`,
+Re-running for a repo already in the copy skips the clone and the repo's
+setup, renders the copy's env files again and succeeds.`,
 		Example: `  mws include docs
   mws include docs feature-x --no-setup`,
 		Args: cobra.RangeArgs(1, 2),
@@ -45,8 +47,8 @@ Re-running for a repo already in the copy skips the clone and succeeds.`,
 			return runInclude(cmd.Context(), reporterFor(cmd.ErrOrStderr()), folder, copyName, choice)
 		},
 	}
-	cmd.Flags().Bool("setup", false, "run [[optional_repos.setup]] commands without prompting")
-	cmd.Flags().Bool("no-setup", false, "skip [[optional_repos.setup]] commands without prompting")
+	cmd.Flags().Bool("setup", false, "run [[optional_repos.setup]] and root [[setup]] commands without prompting")
+	cmd.Flags().Bool("no-setup", false, "skip [[optional_repos.setup]] and root [[setup]] commands without prompting")
 	return cmd
 }
 
@@ -74,7 +76,13 @@ func runInclude(ctx context.Context, r Reporter, folder, copyName string, choice
 	if err != nil {
 		return err
 	}
-	items := collectSetup([]config.Repo{repo})
+	// The repo's setup runs only when this run clones it; the root [[setup]]
+	// follows every render.
+	var items []setupItem
+	if missing := missingRepos(target, []config.Repo{repo}); len(missing) > 0 {
+		items = collectSetup(missing)
+	}
+	items = append(items, rootSetupItems(cfg)...)
 	if err := requireSetupChoice(choice, items, "mws include "+repo.Folder); err != nil {
 		return err
 	}

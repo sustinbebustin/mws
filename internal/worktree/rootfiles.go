@@ -56,6 +56,12 @@ func rootChanges(root string, folders []string) ([]string, error) {
 	return out, nil
 }
 
+// hashBytes returns the hex SHA-256 of b, as fileSHA256 spells it.
+func hashBytes(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
 // fileSHA256 returns the hex SHA-256 of the file at p.
 func fileSHA256(p string) (string, error) {
 	f, err := os.Open(p)

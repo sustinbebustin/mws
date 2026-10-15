@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/ports"
 	"github.com/sustinbebustin/mws/internal/project"
+	"github.com/sustinbebustin/mws/internal/worktree"
 )
 
 const envLong = `env moves env files between env staging (<meta>/.envs/<repo>/<source>) and
@@ -55,9 +57,15 @@ the copy is back on the staged defaults. --all syncs every working copy. A
 missing source is skipped with a warning; any file that fails to copy makes
 the command exit 1 after the rest are done.
 
-Worktrees are not refreshed: a worktree gets copies of the working copy's env
-targets when it is created and keeps them. Run from inside a worktree, sync
-updates its working copy, not the worktree.
+Each worktree of the copy gets its carried files (the lease, the env targets,
+the [[renders]] targets) refreshed too, but only those whose content still
+matches what mws carried there; one edited in the worktree is left alone with
+a warning. Run from inside a worktree, sync acts on its working copy.
+
+After each copy is rendered, the root [[setup]] commands run at the copy root
+with the copy's export set in the environment. --setup runs them without
+prompting and --no-setup skips them; without a terminal one of the two is
+required when [[setup]] is configured. --dry-run runs no setup.
 
 --dry-run prints one "would copy <source> -> <target>" line per file and
 changes nothing. --json prints
@@ -66,15 +74,28 @@ with status copied, would_copy, skipped or failed; repo is absent for a
 [[renders]] target.`,
 		Example: `  mws env sync
   mws env sync feature-x --dry-run
-  mws env sync --all --json`,
+  mws env sync --all --json --no-setup`,
 		Args: usageCheckedArgs(cobra.MaximumNArgs(1), jsonOut),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runEnvSync(newOutput(cmd, *jsonOut), copyArg(args), all, dryRun)
+			o := newOutput(cmd, *jsonOut)
+			choice, err := setupChoiceFlags(cmd)
+			if err != nil {
+				return o.fail(err)
+			}
+			return runEnvSync(cmd.Context(), o, copyArg(args), all, dryRun, choice)
 		},
 	}
 	cmd.Flags().BoolVar(&all, "all", false, "sync every working copy")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "name the files that would be copied; change nothing")
+	addSetupFlags(cmd)
 	return cmd
+}
+
+// addSetupFlags adds the --setup / --no-setup pair of a render command, which
+// setupChoiceFlags reads.
+func addSetupFlags(cmd *cobra.Command) {
+	cmd.Flags().Bool("setup", false, "run the root [[setup]] commands without prompting")
+	cmd.Flags().Bool("no-setup", false, "skip the root [[setup]] commands without prompting")
 }
 
 // copyArg is the optional [copy] positional argument, or "" when absent.
@@ -105,7 +126,7 @@ func envTargets(ws *project.Workspace, name string, all bool, invocation string)
 	return []string{target}, nil
 }
 
-func runEnvSync(o output, name string, all, dryRun bool) error {
+func runEnvSync(ctx context.Context, o output, name string, all, dryRun bool, choice setupChoice) error {
 	ws, cfg, err := o.locate()
 	if err != nil {
 		return err
@@ -114,21 +135,88 @@ func runEnvSync(o output, name string, all, dryRun bool) error {
 	if err != nil {
 		return o.fail(err)
 	}
+	invocation := "mws env sync"
+	switch {
+	case all:
+		invocation += " --all"
+	case name != "":
+		invocation += " " + name
+	}
+	runRoot := false
+	if !dryRun {
+		if runRoot, err = resolveRootSetup(cfg, choice, invocation); err != nil {
+			return o.fail(err)
+		}
+	}
 	r := o.reporter()
 	res := envRunResult{DryRun: dryRun, Copies: make([]envCopyResult, 0, len(copies))}
+	var setupErrs []error
 	for _, c := range copies {
-		res.Copies = append(res.Copies, renderEnv(r, ws.MetaRoot, cfg, c, dryRun))
+		cr, err := renderCopy(ctx, r, ws.MetaRoot, cfg, c, dryRun, runRoot, o.stderr)
+		res.Copies = append(res.Copies, cr)
+		if err != nil {
+			setupErrs = append(setupErrs, err)
+		}
 	}
 	if err := res.print(o, ws.MetaRoot); err != nil {
 		return err
 	}
-	return res.failure("mws env sync")
+	if err := errors.Join(append([]error{res.failure(invocation)}, setupErrs...)...); err != nil {
+		return clierr.Failuref("%w", err)
+	}
+	return nil
+}
+
+// rootSetupItems are the root [[setup]] commands, run at the copy root.
+func rootSetupItems(cfg *config.Config) []setupItem {
+	return collectSetup([]config.Repo{{Folder: ".", Setup: cfg.Setup}})
+}
+
+// resolveRootSetup decides, before anything changes, whether the root
+// [[setup]] commands run after a render: from --setup / --no-setup, else by
+// prompting. Without a terminal and without a flag it is a usage error naming
+// invocation with each flag, whenever [[setup]] is configured.
+func resolveRootSetup(cfg *config.Config, choice setupChoice, invocation string) (bool, error) {
+	items := rootSetupItems(cfg)
+	if err := requireSetupChoice(choice, items, invocation); err != nil {
+		return false, err
+	}
+	return confirmSetup(choice, items)
+}
+
+// renderCopy renders the working copy at copyPath through renderEnv and then,
+// when runRoot is set and not under dryRun, runs the root [[setup]] commands
+// at the copy root with the copy's export set, streaming their output to
+// setupOut. It is the whole of a render for the commands that clone nothing
+// (`env sync`, `ports claim`, `ports release`); clone and include run the
+// repos' setup between the two halves and call them separately. The error
+// names the setup commands that failed; the render result stands either way.
+func renderCopy(ctx context.Context, r Reporter, metaRoot string, cfg *config.Config, copyPath string, dryRun, runRoot bool, setupOut io.Writer) (envCopyResult, error) {
+	res := renderEnv(r, metaRoot, cfg, copyPath, dryRun)
+	if dryRun || !runRoot {
+		return res, nil
+	}
+	items := rootSetupItems(cfg)
+	if len(items) == 0 {
+		return res, nil
+	}
+	exports, err := copyExports(metaRoot, cfg, copyPath)
+	if err != nil {
+		return res, fmt.Errorf("%s: no root setup command ran: %w", res.Copy, err)
+	}
+	if failed := runSetup(ctx, r, copyPath, exports, items, setupOut, setupOut); len(failed) > 0 {
+		return res, fmt.Errorf("%s: %d root setup %s failed: %s; the env files were rendered. Fix the cause and rerun with --setup",
+			res.Copy, len(failed), plural(len(failed), "command", "commands"), strings.Join(failed, "; "))
+	}
+	return res, nil
 }
 
 // renderEnv is the render path: it renders every staged env file of the
 // working copy at copyPath at the copy's Port slot and writes it to its
-// target in the copy, overwriting it. clone, include, restore and `env sync`
-// all materialise env files through it. Under dryRun it changes nothing and
+// target in the copy, overwriting it, then refreshes the carried copies of
+// those files and of the lease in each of the copy's worktrees
+// (worktree.Rerender). clone, include, restore and `env sync` all
+// materialise env files through it. Under dryRun it changes nothing and
 // reports each file as would_copy. Progress, unsubstituted placeholders and
 // per-file failures go to r; the result says what happened to each file.
 func renderEnv(r Reporter, metaRoot string, cfg *config.Config, copyPath string, dryRun bool) envCopyResult {
@@ -144,6 +232,19 @@ func renderEnv(r Reporter, metaRoot string, cfg *config.Config, copyPath string,
 	}
 	for _, f := range files {
 		res.Files = append(res.Files, renderFile(r, metaRoot, f, exports, dryRun))
+	}
+	if dryRun {
+		return res
+	}
+	rels := []string{ports.LeaseFile}
+	for _, f := range files {
+		if rel, err := filepath.Rel(copyPath, f.target); err == nil && filepath.IsLocal(rel) {
+			rels = append(rels, filepath.ToSlash(rel))
+		}
+	}
+	if err := worktree.Rerender(r, copyPath, cfg.WorktreePolicy(), rels); err != nil {
+		res.Error = err.Error()
+		r.Fail(fmt.Sprintf("%s: refreshing its worktrees: %v; the copy's own files were rendered", res.Copy, err))
 	}
 	return res
 }
@@ -522,10 +623,12 @@ func relToMeta(metaRoot, p string) string {
 }
 
 // envCopyResult is one working copy's part of an env sync or stage result.
+// Error is set when refreshing the copy's worktrees failed.
 type envCopyResult struct {
 	Copy  string          `json:"copy"`
 	Path  string          `json:"path"`
 	Files []envFileResult `json:"files"`
+	Error string          `json:"error,omitempty"`
 }
 
 // envRunResult is the result of `mws env sync|stage`.
@@ -554,17 +657,25 @@ func (res envRunResult) print(o output, metaRoot string) error {
 
 // failure is the exit-1 error when any file failed to copy, or nil.
 func (res envRunResult) failure(invocation string) error {
-	failed := 0
+	failed, worktreesFailed := 0, 0
 	for _, c := range res.Copies {
 		for _, f := range c.Files {
 			if f.Status == envFailed {
 				failed++
 			}
 		}
+		if c.Error != "" {
+			worktreesFailed++
+		}
 	}
-	if failed == 0 {
-		return nil
+	var errs []error
+	if failed > 0 {
+		errs = append(errs, clierr.Failuref("%d env %s failed to copy (see the [FAIL] lines above); the other files were copied. Fix the cause and rerun `%s`",
+			failed, plural(failed, "file", "files"), invocation))
 	}
-	return clierr.Failuref("%d env %s failed to copy (see the [FAIL] lines above); the other files were copied. Fix the cause and rerun `%s`",
-		failed, plural(failed, "file", "files"), invocation)
+	if worktreesFailed > 0 {
+		errs = append(errs, clierr.Failuref("the worktrees of %d working %s were not fully refreshed (see the [FAIL] lines above); the copies' own files were written. Fix the cause and rerun `%s`",
+			worktreesFailed, plural(worktreesFailed, "copy", "copies"), invocation))
+	}
+	return errors.Join(errs...)
 }

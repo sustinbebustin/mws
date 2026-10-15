@@ -470,11 +470,12 @@ func TestRunCloneRetryFinishesThePreviousRun(t *testing.T) {
 		if runs() != 2 {
 			t.Fatalf("retry ran setup %d times in total, want 2", runs())
 		}
-		// Nothing missing: --no-setup is a no-op, --setup reruns setup.
+		// Nothing missing: the retry clones nothing, so neither choice runs
+		// [[repos.setup]] again.
 		clone(setupSkip)
 		clone(setupForceRun)
-		if runs() != 3 {
-			t.Fatalf("setup ran %d times in total, want 3", runs())
+		if runs() != 2 {
+			t.Fatalf("setup ran %d times in total, want 2", runs())
 		}
 	})
 }
