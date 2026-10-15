@@ -1,9 +1,11 @@
 package commands
 
 import (
+	"encoding/json"
 	"net"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -153,6 +155,60 @@ func TestPortsReleaseOnTheDefaultsSaysSo(t *testing.T) {
 	res := mustPorts(t, f.meta, "release", "a")
 	if !strings.Contains(res.stderr, "already on the default ports") {
 		t.Fatalf("stderr does not say a is on the defaults:\n%s", res.stderr)
+	}
+}
+
+func TestPortsShowPrintsTheExportSet(t *testing.T) {
+	f := seedEnvWorkspace(t)
+	base := f.withFreePort(t)
+	cfg, err := config.Load(f.meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Vars = map[string]string{"SITE_URL": "http://localhost:${PORT}"}
+	if err := config.Save(f.meta, cfg); err != nil {
+		t.Fatal(err)
+	}
+	mustPorts(t, f.meta, "claim", "a", "--slot", "2")
+	port := strconv.Itoa(base + 20)
+	want := []string{
+		"MWS_SLOT=2",
+		"MWS_COPY=a",
+		"MWS_COPY_SLUG=a",
+		"MWS_META=" + f.meta,
+		"MWS_PORT_WEB=" + port,
+		"PORT=" + port,
+		"SITE_URL=http://localhost:" + port,
+	}
+
+	for _, args := range [][]string{{"show", "a"}, {"a"}} {
+		res := mustPorts(t, f.meta, args...)
+		if got := strings.Split(strings.TrimSuffix(res.stdout, "\n"), "\n"); !slices.Equal(got, want) {
+			t.Errorf("mws ports %v lines = %q, want %q", args, got, want)
+		}
+	}
+
+	res := mustPorts(t, f.copy("a"), "show", "--export")
+	for _, line := range strings.Split(strings.TrimSuffix(res.stdout, "\n"), "\n") {
+		if !strings.HasPrefix(line, "export ") {
+			t.Errorf("--export line %q lacks the export prefix", line)
+		}
+	}
+	if !strings.Contains(res.stdout, "export PORT="+port+"\n") {
+		t.Errorf("--export output lacks PORT:\n%s", res.stdout)
+	}
+
+	res = mustPorts(t, f.meta, "show", "b", "--json")
+	var out struct {
+		Copy string            `json:"copy"`
+		Slot int               `json:"slot"`
+		Vars map[string]string `json:"vars"`
+	}
+	if err := json.Unmarshal([]byte(res.stdout), &out); err != nil {
+		t.Fatalf("stdout is not one JSON object: %v\n%s", err, res.stdout)
+	}
+	if out.Copy != "b" || out.Slot != 0 || out.Vars["PORT"] != strconv.Itoa(base) || out.Vars["MWS_SLOT"] != "0" {
+		t.Errorf("show b --json = %+v, want b on slot 0 with PORT %d", out, base)
 	}
 }
 

@@ -79,6 +79,17 @@ func (e Exports) Environ() []string {
 	return env
 }
 
+// Dotenv returns the export set as NAME=value lines, in order, each value
+// quoted so that direnv's dotenv, just and a POSIX shell all read it back
+// verbatim: the lines of the Port lease.
+func (e Exports) Dotenv() []string {
+	lines := make([]string, len(e.Vars))
+	for i, v := range e.Vars {
+		lines[i] = v.Name + "=" + dotenvQuote(v.Value)
+	}
+	return lines
+}
+
 // Lookup returns the value of the exported variable name.
 func (e Exports) Lookup(name string) (string, bool) {
 	for _, v := range e.Vars {

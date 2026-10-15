@@ -35,15 +35,90 @@ Exit codes: 0 ok, 1 failure, 2 usage, 3 refused (a slot another copy holds,
 or conflicting leases), 4 no working copy by that name.`
 
 func newPortsCmd() *cobra.Command {
-	var jsonOut bool
+	var jsonOut, export bool
 	cmd := &cobra.Command{
-		Use:   "ports",
+		Use:   "ports [copy]",
 		Short: "Claim, release, show and check the Port slot of a working copy",
-		Long:  portsLong,
+		Long:  portsLong + "\n\nWithout a subcommand, ports runs show.",
+		Example: `  mws ports
+  eval "$(mws ports show --export)"
+  mws ports claim feature-x --no-setup
+  mws ports ls --json`,
+		Args: usageCheckedArgs(cobra.MaximumNArgs(1), &jsonOut),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runPortsShow(newOutput(cmd, jsonOut), copyArg(args), export)
+		},
 	}
 	cmd.PersistentFlags().BoolVar(&jsonOut, "json", false, "print results as JSON")
-	cmd.AddCommand(newPortsClaimCmd(&jsonOut), newPortsReleaseCmd(&jsonOut))
+	addExportFlag(cmd, &export)
+	cmd.AddCommand(newPortsShowCmd(&jsonOut), newPortsClaimCmd(&jsonOut), newPortsReleaseCmd(&jsonOut))
 	return cmd
+}
+
+func addExportFlag(cmd *cobra.Command, export *bool) {
+	cmd.Flags().BoolVar(export, "export", false, `prefix each line with "export " for eval in a shell`)
+}
+
+func newPortsShowCmd(jsonOut *bool) *cobra.Command {
+	var export bool
+	cmd := &cobra.Command{
+		Use:   "show [copy]",
+		Short: "Print a working copy's slot and exported variables",
+		Long: `show prints the working copy's export set, the variables its Port lease
+exports, as one VAR=value line each: MWS_SLOT (0 on the default ports),
+MWS_COPY, MWS_COPY_SLUG, MWS_META, then every port as MWS_PORT_<NAME> and its
+alias, then the [vars] entries. A copy on the default ports has no lease and
+shows the slot-0 values.
+
+--export prefixes each line with "export ", so a shell without direnv loads
+them with eval "$(mws ports show --export)". --json prints
+{"copy", "path", "slot", "vars": {NAME: value}}.`,
+		Example: `  mws ports show
+  eval "$(mws ports show --export)"
+  mws ports show feature-x --json`,
+		Args: usageCheckedArgs(cobra.MaximumNArgs(1), jsonOut),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runPortsShow(newOutput(cmd, *jsonOut), copyArg(args), export)
+		},
+	}
+	addExportFlag(cmd, &export)
+	return cmd
+}
+
+func runPortsShow(o output, name string, export bool) error {
+	ws, cfg, err := o.locate()
+	if err != nil {
+		return err
+	}
+	copyPath, err := portsCopy(ws, name, "mws ports show <copy>")
+	if err != nil {
+		return o.fail(err)
+	}
+	exports, err := copyExports(ws.MetaRoot, cfg, copyPath)
+	if err != nil {
+		return o.fail(clierr.Failuref("%w", err))
+	}
+	vars := make(map[string]string, len(exports.Vars))
+	for _, v := range exports.Vars {
+		vars[v.Name] = v.Value
+	}
+	return o.result(struct {
+		Copy string            `json:"copy"`
+		Path string            `json:"path"`
+		Slot int               `json:"slot"`
+		Vars map[string]string `json:"vars"`
+	}{filepath.Base(copyPath), copyPath, exports.Slot, vars}, func(w io.Writer) error {
+		prefix := ""
+		if export {
+			prefix = "export "
+		}
+		for _, line := range exports.Dotenv() {
+			if _, err := fmt.Fprintln(w, prefix+line); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func newPortsClaimCmd(jsonOut *bool) *cobra.Command {
