@@ -2,7 +2,6 @@ package commands
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -116,42 +115,16 @@ func gitT(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// wtResult is one in-process invocation of `mws wt ...`.
-type wtResult struct {
-	stdout, stderr string
-	code           int
-}
-
-// lastLine is the final non-empty stdout line: the path contract of `wt new`.
-func (r wtResult) lastLine() string {
-	lines := strings.Split(strings.TrimSpace(r.stdout), "\n")
-	return lines[len(lines)-1]
-}
-
-// runWt executes `mws wt <args>` from cwd through the real root command and
-// maps the returned error to the process exit code main would use.
-func runWt(t *testing.T, cwd string, args ...string) wtResult {
+// runWt executes `mws wt <args>` from cwd through runMWS.
+func runWt(t *testing.T, cwd string, args ...string) mwsResult {
 	t.Helper()
 	return runWtIn(t, cwd, "", args...)
 }
 
 // runWtIn is runWt with stdin fed from the given string.
-func runWtIn(t *testing.T, cwd, stdin string, args ...string) wtResult {
+func runWtIn(t *testing.T, cwd, stdin string, args ...string) mwsResult {
 	t.Helper()
-	var out, errb bytes.Buffer
-	var err error
-	withCwd(t, cwd, func() {
-		root := NewRootCmd()
-		root.SetArgs(append([]string{"wt"}, args...))
-		root.SetIn(strings.NewReader(stdin))
-		root.SetOut(&out)
-		root.SetErr(&errb)
-		err = root.ExecuteContext(context.Background())
-	})
-	if err != nil && !Silent(err) {
-		errb.WriteString(err.Error())
-	}
-	return wtResult{stdout: out.String(), stderr: errb.String(), code: ExitCode(err)}
+	return runMWSIn(t, cwd, stdin, append([]string{"wt"}, args...)...)
 }
 
 // writeFileAll writes body to p, creating p's parent directories.
@@ -256,7 +229,7 @@ func TestWtNewCreatesLayout(t *testing.T) {
 }
 
 // mustNew runs `wt new` and fails the test unless it exits 0.
-func mustNew(t *testing.T, cwd string, args ...string) wtResult {
+func mustNew(t *testing.T, cwd string, args ...string) mwsResult {
 	t.Helper()
 	res := runWt(t, cwd, append([]string{"new"}, args...)...)
 	if res.code != 0 {
@@ -373,7 +346,7 @@ type newJSONOut struct {
 	} `json:"error"`
 }
 
-func decodeNew(t *testing.T, res wtResult) newJSONOut {
+func decodeNew(t *testing.T, res mwsResult) newJSONOut {
 	t.Helper()
 	var out newJSONOut
 	if err := json.Unmarshal([]byte(res.stdout), &out); err != nil {

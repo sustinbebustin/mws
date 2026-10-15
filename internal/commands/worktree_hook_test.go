@@ -26,7 +26,7 @@ func hookJSON(t *testing.T, fields map[string]string) string {
 // runHook runs `mws wt hook <event>` with the payload on stdin from a
 // directory outside the workspace, so only CLAUDE_PROJECT_DIR and the
 // payload can locate the copy. projectDir "" leaves CLAUDE_PROJECT_DIR unset.
-func runHook(t *testing.T, f wtFixture, projectDir, event string, payload map[string]string) wtResult {
+func runHook(t *testing.T, f wtFixture, projectDir, event string, payload map[string]string) mwsResult {
 	t.Helper()
 	t.Setenv(claudeProjectDirEnv, projectDir)
 	return runWtIn(t, f.root, hookJSON(t, payload), "hook", event)

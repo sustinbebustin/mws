@@ -17,10 +17,10 @@ import (
 	"github.com/sustinbebustin/mws/internal/trash"
 )
 
-// noTerminal makes canPrompt report no terminal for the rest of the test, as
-// for an agent or a script.
 func ptr[T any](v T) *T { return &v }
 
+// noTerminal makes canPrompt report no terminal for the rest of the test, as
+// for an agent or a script.
 func noTerminal(t *testing.T) {
 	t.Helper()
 	prev := canPrompt

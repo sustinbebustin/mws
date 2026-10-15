@@ -133,7 +133,11 @@ func tagUsageArgs(c *cobra.Command) {
 // error, at the root (cobra reports it as a plain error) and under a command
 // group such as `mws wt` (cobra prints the group's help and exits 0).
 func Execute(ctx context.Context, args []string) error {
-	root := NewRootCmd()
+	return execute(ctx, NewRootCmd(), args)
+}
+
+// execute is Execute on a caller-built root, so tests can bind its streams.
+func execute(ctx context.Context, root *cobra.Command, args []string) error {
 	root.SetArgs(args)
 	// Find does not know the help command cobra adds lazily, nor the hidden
 	// shell-completion commands; let those through to cobra.
