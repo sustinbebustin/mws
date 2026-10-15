@@ -149,15 +149,21 @@ tools (IDEs, custom scripts) can use the same MWS_CD_FILE contract directly.`,
 				return err
 			}
 			flag := ""
-			if install {
+			switch {
+			case install:
 				flag = " --install"
+			case status:
+				flag = " --status"
 			}
 			spec, err := resolveShell(args, flag)
 			if err != nil {
 				return err
 			}
-			if install {
+			switch {
+			case install:
 				return installShellInit(cmd, spec)
+			case status:
+				return shellInitStatus(cmd, spec)
 			}
 			fmt.Fprint(cmd.OutOrStdout(), spec.wrapper)
 			return nil
@@ -227,6 +233,36 @@ func installShellInit(cmd *cobra.Command, spec shellSpec) error {
 	r.OK(fmt.Sprintf("Added to %s: %s", rc, spec.line))
 	r.Info("open a new shell (or run the line above) to load the mws wrapper")
 	return nil
+}
+
+// shellWrapperEnv is exported by the wrapper when it is defined, so --status
+// can tell a loaded wrapper from a line that only sits in the rc file.
+const shellWrapperEnv = "MWS_SHELL_WRAPPER"
+
+// shellInitStatus prints whether the wrapper is active, installed but not
+// loaded, or not installed, exiting 1 with the next step for the latter two.
+func shellInitStatus(cmd *cobra.Command, spec shellSpec) error {
+	if os.Getenv(shellWrapperEnv) != "" {
+		_, err := fmt.Fprintln(cmd.OutOrStdout(), "active")
+		return err
+	}
+	rc, err := rcPath(spec)
+	if err != nil {
+		return err
+	}
+	body, err := os.ReadFile(rc)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("read %s to check for the mws shell-init line: %w", rc, err)
+	}
+	r := reporterFor(cmd.ErrOrStderr())
+	if bytes.Contains(body, []byte(shellInitMarker)) {
+		fmt.Fprintln(cmd.OutOrStdout(), "installed but not loaded in this shell")
+		r.Info(fmt.Sprintf("%s loads the mws wrapper; open a new shell, or run: %s", rc, spec.line))
+	} else {
+		fmt.Fprintln(cmd.OutOrStdout(), "not installed")
+		r.Info(fmt.Sprintf("run `mws shell-init %s --install` to add the wrapper to %s", spec.name, rc))
+	}
+	return &exitStatusError{code: 1}
 }
 
 func rcPath(spec shellSpec) (string, error) {

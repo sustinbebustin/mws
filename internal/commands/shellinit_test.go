@@ -164,6 +164,44 @@ func TestShellInitInstallAddsTheMarkedLineOnce(t *testing.T) {
 	}
 }
 
+func TestShellInitStatusReportsEachState(t *testing.T) {
+	cases := []struct {
+		name              string
+		installed, loaded bool
+		state             string
+		code              int
+		nextStep          string
+	}{
+		{"active", true, true, "active", 0, ""},
+		{"installed, not loaded", true, false, "installed but not loaded in this shell", 1, "open a new shell"},
+		{"not installed", false, false, "not installed", 1, "mws shell-init zsh --install"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			home := shellHome(t, "/bin/zsh", "")
+			if tc.installed {
+				if res := runMWS(t, home, "shell-init", "--install"); res.code != 0 {
+					t.Fatalf("install: exit %d\nstderr: %s", res.code, res.stderr)
+				}
+			}
+			if tc.loaded {
+				t.Setenv("MWS_SHELL_WRAPPER", "1")
+			}
+
+			res := runMWS(t, home, "shell-init", "--status")
+			if res.code != tc.code {
+				t.Fatalf("exit %d, want %d\nstdout: %s\nstderr: %s", res.code, tc.code, res.stdout, res.stderr)
+			}
+			if got := strings.TrimSpace(res.stdout); got != tc.state {
+				t.Errorf("state %q, want %q", got, tc.state)
+			}
+			if !strings.Contains(res.stderr, tc.nextStep) {
+				t.Errorf("stderr should name the next step %q, got:\n%s", tc.nextStep, res.stderr)
+			}
+		})
+	}
+}
+
 func TestShellInitWithoutAUsableShellExitsTwo(t *testing.T) {
 	for _, env := range []string{"", "/usr/bin/tcsh"} {
 		t.Run("SHELL="+env, func(t *testing.T) {
