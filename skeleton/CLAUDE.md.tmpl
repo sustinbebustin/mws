@@ -41,7 +41,8 @@ mws clone <name>               # new peer working copy: clones repos, copies env
 mws rm <copy>                  # move a copy to .trash/ (mws restore <copy> undoes it)
 mws promote <path>             # move a copy-local file into the harness, symlink it into every copy
 mws relink                     # re-create harness symlinks in every copy
-mws sync-env [copy]            # reset a copy's env files to staged defaults
-mws stage-env [copy]           # capture a copy's env files into staging
+mws env sync [copy]            # reset a copy's env files to staged defaults
+mws env stage [copy]           # capture a copy's env files into staging
+mws env diff [copy]            # compare a copy's env files with staging
 mws wt new|ls|rm|path <name>   # worktrees of the current copy
 ```

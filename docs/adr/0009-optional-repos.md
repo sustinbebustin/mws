@@ -1,5 +1,7 @@
 # Optional repos
 
+> Amended 2026-10-15: the `mws env` commands (formerly `sync-env`/`stage-env`) now cover the `[[optional_repos.envs]]` of every optional repo present in the copy, so the "iterate `[[repos]]` only" consequence below no longer holds.
+
 Add a top-level `[[optional_repos]]` array to the **mws config**, holding **Native repo** entries (same shape as `[[repos]]`) that `mws clone` does *not* clone into every **Working copy**. They are pulled into a specific copy on demand:
 
 - During `mws clone`, when any `[[optional_repos]]` exist, a multiselect prompt offers them, defaulting to none. `mws clone --with <folder>` (repeatable) selects specific ones non-interactively and skips the prompt.

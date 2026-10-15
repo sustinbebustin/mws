@@ -1,5 +1,7 @@
 # Env staging via copy with config-driven mapping
 
+> Amended 2026-10-15: `mws sync-env` and `mws stage-env` are now `mws env sync` and `mws env stage` (no aliases), joined by `mws env diff`. All three also cover the optional repos present in a copy, and `clone`, `include`, `restore` and `env sync` share one render path ([ADR-0015](./0015-per-copy-port-slots.md)). The body keeps the old names for history.
+
 The **Meta workspace** holds an **Env staging** dir at `.envs/`, organized per **Native repo** (`.envs/<repo>/<flat-name>`). Each `[[repos.envs]]` entry in the **mws config** maps a staged source file to a target path inside a working copy's native repo:
 
 ```toml

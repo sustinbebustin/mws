@@ -84,7 +84,7 @@ working_copies_dir  = "<segment>" # optional; single path segment under the meta
 
 ### `[[repos.envs]]`
 
-Maps a staged env file in `.envs/<folder>/` to a target inside the cloned repo. Materialised on `mws clone` (copy, not symlink) and re-pushed by `mws sync-env <copy>`. Captured into staging by `mws stage-env <copy>`.
+Maps a staged env file in `.envs/<folder>/` to a target inside the cloned repo. Materialised on `mws clone`, `mws include` and `mws restore` (copy, not symlink) and re-pushed by `mws env sync <copy>`. Captured into staging by `mws env stage <copy>`; `mws env diff <copy>` compares the two. The same holds for `[[optional_repos.envs]]` of every optional repo present in the copy.
 
 | Key      | Type   | Required | Notes |
 |----------|--------|----------|-------|
@@ -183,7 +183,7 @@ error   {error:{code, message}}                  # code: usage | refused | not_f
 
 `base` in `new` is a full commit id (the branch tip for a reused branch) and is omitted for a reused worktree. A setup failure under `--json` prints the full result object plus `error` (`setup_failed`) and exits 1.
 
-Related behavior of the other commands: `mws ls` appends `(+N worktrees)` to a copy; `mws rm <copy>` refuses while one of its worktrees has a live process and lists its worktrees in the confirmation; `mws restore` repairs the worktrees' git links; `mws relink` refreshes harness links in worktree roots; `mws trash prune|empty` prune stale meta worktree registrations; `mws sync-env` updates only the copy, never its worktrees.
+Related behavior of the other commands: `mws ls` appends `(+N worktrees)` to a copy; `mws rm <copy>` refuses while one of its worktrees has a live process and lists its worktrees in the confirmation; `mws restore` repairs the worktrees' git links; `mws relink` refreshes harness links in worktree roots; `mws trash prune|empty` prune stale meta worktree registrations; `mws env sync` updates only the copy, never its worktrees, and `mws env stage` refuses inside a worktree.
 
 Design rationale: [ADR-0011](./adr/0011-worktrees-are-children-of-a-working-copy.md).
 

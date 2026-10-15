@@ -108,7 +108,7 @@ func carryEnvs(r Reporter, cfg *config.Config, copyPath, target string, plan []p
 		for _, env := range byFolder[p.folder].Envs {
 			src := filepath.Join(copyPath, p.folder, env.Target)
 			if _, err := os.Stat(src); err != nil {
-				r.Warn(fmt.Sprintf("%s: env target %s is missing in the working copy, so the worktree has none; run `mws sync-env` for the copy, then copy it in", p.folder, env.Target))
+				r.Warn(fmt.Sprintf("%s: env target %s is missing in the working copy, so the worktree has none; run `mws env sync` for the copy, then copy it in", p.folder, env.Target))
 				continue
 			}
 			if err := atomicfile.Copy(src, filepath.Join(target, p.folder, env.Target)); err != nil {

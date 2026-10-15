@@ -110,7 +110,7 @@ func NewRootCmd() *cobra.Command {
 	}
 	add(groupWorkspace, newInitCmd(), newAddRepoCmd(), newPromoteCmd(), newRelinkCmd())
 	add(groupCopies, newCloneCmd(), newIncludeCmd(), newListCmd(), newRmCmd(), newRestoreCmd(), newTrashCmd())
-	add(groupEnv, newStageEnvCmd(), newSyncEnvCmd())
+	add(groupEnv, newEnvCmd())
 	add(groupWorktrees, newWorktreeCmd())
 	add(groupShell, newShellInitCmd(), newVersionCmd())
 	tagUsageArgs(root)

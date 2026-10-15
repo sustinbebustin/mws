@@ -14,7 +14,6 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 
-	"github.com/sustinbebustin/mws/internal/atomicfile"
 	"github.com/sustinbebustin/mws/internal/clierr"
 	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/git"
@@ -125,7 +124,7 @@ already there are left as they are.`,
 			if err != nil {
 				return err
 			}
-			return runClone(cmd.Context(), newConsoleReporter(), cmd.OutOrStdout(), name, choice, optional)
+			return runClone(cmd.Context(), reporterFor(cmd.ErrOrStderr()), cmd.OutOrStdout(), name, choice, optional)
 		},
 	}
 	cmd.Flags().Bool("setup", false, "run [[repos.setup]] commands without prompting")
@@ -225,10 +224,9 @@ func runClone(ctx context.Context, r Reporter, out io.Writer, name string, choic
 		if err := cloneNative(ctx, r, repo, target); err != nil {
 			r.Fail(fmt.Sprintf("%s: %v", repo.Folder, err))
 			failed = append(failed, repo.Folder)
-			continue
 		}
-		copyEnvsFor(r, ws.MetaRoot, repo, target)
 	}
+	renderEnv(r, ws.MetaRoot, cfg, target, false)
 
 	if len(failed) > 0 {
 		return fmt.Errorf("clone completed with errors: %d repo(s) failed: %s; the rest are in place, so rerunning the same command clones only these",
@@ -529,26 +527,4 @@ func runSetup(ctx context.Context, r Reporter, target string, items []setupItem,
 		r.Done(fmt.Sprintf("%s: %s", it.Folder, it.Cmd), time.Since(start))
 	}
 	return failed
-}
-
-// copyEnvsFor materialises every env mapping for repo into the new working copy.
-// Missing staged sources warn but do not fail the clone.
-func copyEnvsFor(r Reporter, metaRoot string, repo config.Repo, workingCopy string) {
-	if len(repo.Envs) == 0 {
-		return
-	}
-	stagingRoot := filepath.Join(envStagingDir(metaRoot), repo.Folder)
-	for _, env := range repo.Envs {
-		src := filepath.Join(stagingRoot, env.Source)
-		dst := filepath.Join(workingCopy, repo.Folder, env.Target)
-		if _, err := os.Stat(src); err != nil {
-			r.Warn(fmt.Sprintf("%s: staged env %s not found, skipping (%s -> %s)", repo.Folder, src, env.Source, env.Target))
-			continue
-		}
-		if err := atomicfile.Copy(src, dst); err != nil {
-			r.Fail(fmt.Sprintf("%s: copy env %s -> %s: %v", repo.Folder, env.Source, env.Target, err))
-			continue
-		}
-		r.OK(fmt.Sprintf("%s: env %s -> %s", repo.Folder, env.Source, env.Target))
-	}
 }

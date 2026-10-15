@@ -79,14 +79,15 @@ mws add-repo git@github.com:org/docs.git --optional   # register only
 mws include docs --setup                              # clone an optional repo into this copy
 mws promote .mcp.json                                 # copy-local file -> shared harness entry
 mws relink --dry-run                                  # then `mws relink`
-mws sync-env feature-x                                # .envs/ -> copy (overwrites the copy's env files)
-mws stage-env feature-x                               # copy -> .envs/ (overwrites staging)
+mws env diff feature-x                                # which env files differ from staging (exit 1 if any)
+mws env sync feature-x                                # .envs/ -> copy (overwrites the copy's env files)
+mws env stage feature-x                               # copy -> .envs/ (overwrites staging)
 ```
 
 - After adding a harness entry under `.mws/` by hand, run `mws relink` to link it into every copy.
 - Editors that save atomically replace a symlink with a regular file. `relink` restores identical files on its own; a diverged one needs `--prefer copy` (the copy's version wins), `harness` (the harness wins) or `skip`, which is the user's call.
-- Env files are copied, not linked, so copies can differ (ports, keys). Treat both env commands as overwrites, and read the env file contents only when the task needs them.
-- `sync-env` refreshes the copy, never its worktrees.
+- Env files are copied, not linked, so copies can differ (ports, keys). Treat `env sync` and `env stage` as overwrites (`--dry-run` previews), and read the env file contents only when the task needs them.
+- `env sync` refreshes the copy, never its worktrees; `env stage` refuses inside a worktree.
 
 ## New meta workspace
 
