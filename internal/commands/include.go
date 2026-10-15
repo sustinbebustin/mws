@@ -15,7 +15,7 @@ import (
 
 func newIncludeCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "include <folder> [working-copy]",
+		Use:   "include <folder> [copy]",
 		Short: "Clone a registered optional repo into a working copy",
 		Long: `include clones a repo registered under [[optional_repos]] in .mws.toml into a
 working copy (the current one by default, or a named copy). It checks out the

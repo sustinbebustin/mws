@@ -24,7 +24,7 @@ func newRestoreCmd() *cobra.Command {
 	var as string
 	yes := false
 	cmd := &cobra.Command{
-		Use:   "restore [name]",
+		Use:   "restore [copy]",
 		Short: "Bring a trashed working copy back",
 		Long: `restore moves a working copy out of <meta>/.trash/ and back under the
 meta workspace, then repairs its harness symlinks and the git links of its
@@ -157,7 +157,7 @@ func promptEntry(entries []trash.Entry, policy config.TrashPolicy, title, missin
 			names[i] = e.Name
 		}
 		return trash.Entry{}, noPrompt(fmt.Sprintf("%s (trashed: %s)", missing, strings.Join(names, ", ")),
-			"mws restore <name>", "mws restore <name> --yes   (the most recent entry of that name)")
+			"mws restore <copy>", "mws restore <copy> --yes   (the most recent entry of that name)")
 	}
 	now := time.Now().UTC()
 	opts := make([]huh.Option[string], 0, len(entries))

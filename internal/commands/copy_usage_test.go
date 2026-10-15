@@ -35,6 +35,25 @@ func TestCopyCommandsFromMetaRootWithoutCopyAreUsageErrors(t *testing.T) {
 	}
 }
 
+func TestCopyCommandsNameTheCopyArgumentInUsage(t *testing.T) {
+	dir := t.TempDir()
+	for cmd, use := range map[string]string{
+		"rm":        "mws rm <copy>",
+		"restore":   "mws restore [copy]",
+		"include":   "mws include <folder> [copy]",
+		"sync-env":  "mws sync-env [copy]",
+		"stage-env": "mws stage-env [copy]",
+	} {
+		res := runMWS(t, dir, cmd, "--help")
+		if res.code != 0 {
+			t.Fatalf("mws %s --help: exit %d\nstderr: %s", cmd, res.code, res.stderr)
+		}
+		if !strings.Contains(res.stdout, "Usage:\n  "+use+" ") {
+			t.Errorf("mws %s --help usage line is not %q:\n%s", cmd, use, res.stdout)
+		}
+	}
+}
+
 func TestPromoteFromMetaRootIsUsageError(t *testing.T) {
 	f := seedWtWorkspace(t)
 	assertUsage(t, runMWS(t, f.meta, "promote", "notes.md"), "cd <copy> && mws promote notes.md")

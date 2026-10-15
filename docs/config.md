@@ -94,7 +94,7 @@ Design rationale: [ADR-0006](./adr/0006-post-clone-setup-commands.md).
 An **Optional repo** registered for on-demand inclusion. It is *not* cloned by `mws clone` into every working copy; instead it is pulled into a specific copy when asked for:
 
 - During `mws clone`, when any `[[optional_repos]]` exist, a multiselect prompt offers them (defaulting to none). `mws clone --with <folder>` (repeatable) selects specific ones and `--no-optional` selects none, both without prompting; without a terminal one of them is required.
-- `mws include <folder> [working-copy]` clones one into an existing copy (the current copy by default).
+- `mws include <folder> [copy]` clones one into an existing copy (the current copy by default).
 
 Each entry uses the **same keys** as `[[repos]]` (`folder`, `url`, plus optional `[[optional_repos.envs]]` and `[[optional_repos.setup]]` tables). `folder` must be unique across both `[[repos]]` and `[[optional_repos]]` -- it maps to a single clone-target directory. Register entries with `mws add-repo --optional <url> [folder]`, which appends here without cloning into existing copies.
 
@@ -102,7 +102,7 @@ Design rationale: [ADR-0009](./adr/0009-optional-repos.md).
 
 ### `[trash]`
 
-`mws rm` does not delete a **Working copy**. It moves it into `<meta>/.trash/`, where `mws restore <name>` can bring it back and an automatic sweep purges it once it passes the retention window. Omit the table entirely for the defaults below.
+`mws rm` does not delete a **Working copy**. It moves it into `<meta>/.trash/`, where `mws restore <copy>` can bring it back and an automatic sweep purges it once it passes the retention window. Omit the table entirely for the defaults below.
 
 | Key              | Type | Required | Notes |
 |------------------|------|----------|-------|
