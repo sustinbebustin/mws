@@ -162,8 +162,9 @@ func ExitCode(err error) int {
 	return 1
 }
 
-// exitStatusError passes a child command's exit status through. The child
-// already reported its own failure, so it carries no message of its own.
+// exitStatusError carries an exit status whose cause was already reported: a
+// child command's own failure, or a status probe's answer. It has no message
+// of its own.
 type exitStatusError struct{ code int }
 
 func (e *exitStatusError) Error() string { return fmt.Sprintf("command exited with status %d", e.code) }

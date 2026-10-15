@@ -111,6 +111,7 @@ func runRestore(ctx context.Context, r Reporter, name, as string, yes bool) erro
 	if n := len(repaired); n > 0 {
 		r.OK(fmt.Sprintf("Repaired %d %s", n, plural(n, "worktree", "worktrees")))
 	}
+	writeCdFile(r, dest)
 	return nil
 }
 

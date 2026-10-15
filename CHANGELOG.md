@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `mws shell-init --install` adds the line that loads the shell wrapper to your rc file (`~/.zshrc` or `$ZDOTDIR/.zshrc`, `~/.bashrc`, `~/.config/fish/config.fish`), once; `mws shell-init --status` says whether the wrapper is active in this shell (exit 0) or what to run (exit 1). The shell argument defaults to the one `$SHELL` names.
+
 ### Changed
 - `mws promote` refuses (exit `3`) an mws marker (`.mws-*`) and any `[[renders]]` target, and leaves both out of its candidate list.
 - `mws promote` links the promoted entry into every copy's worktrees, so they no longer wait for `mws relink`. A copy or worktree it fails to link now makes it exit `1`, naming `mws relink` to finish.
@@ -14,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `mws relink --prefer` takes `copy|harness|skip` instead of `peer|meta|skip`, and its output says copy and harness.
 - Every `--dry-run` (`rm`, `relink`, `trash prune`, `trash empty`, `wt rm`, `wt prune`) prints only `would <verb> <object>` lines on stdout; notes go to stderr.
 - `mws trash prune` and `mws trash empty` honour `--json` and print `{"dry_run", "purged", "unreadable"}`.
+- The shell wrapper cds into the copy after `mws restore` as well as `mws clone`; `restore` writes `MWS_CD_FILE`.
 
 ### Fixed
 - `mws add-repo` appends a `[[repos]]` or `[[optional_repos]]` block to `.mws.toml` instead of rewriting it, so comments, layout and unknown keys survive. When the appended file would not parse or validate, the file is left unchanged and the command exits `1` naming the cause.
