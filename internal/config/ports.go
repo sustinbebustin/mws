@@ -160,10 +160,3 @@ func isIdentifier(s string) bool {
 	}
 	return true
 }
-
-// Render maps a `.render` source under the harness dir to a target file at
-// the working copy root.
-type Render struct {
-	Source string `toml:"source"`
-	Target string `toml:"target"`
-}

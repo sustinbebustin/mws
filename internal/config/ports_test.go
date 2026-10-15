@@ -118,6 +118,19 @@ func TestValidatePortTables(t *testing.T) {
 			c.Ports = nil
 			c.Vars = map[string]string{"P": "${MWS_PORT_WEB}"}
 		}, "vars.P"},
+
+		{"render", func(c *Config) { c.Renders = []Render{{Source: ".mcp.json.render", Target: ".mcp.json"}} }, ""},
+		{"render source in a harness subdirectory", func(c *Config) { c.Renders = []Render{{Source: "mcp/server.json.render", Target: ".mcp.json"}} }, ""},
+		{"render source without the .render suffix", func(c *Config) { c.Renders = []Render{{Source: ".mcp.json", Target: ".mcp.json"}} }, "renders[0].source"},
+		{"render source escaping the harness dir", func(c *Config) { c.Renders = []Render{{Source: "../x.render", Target: "x"}} }, "renders[0].source"},
+		{"render source absolute", func(c *Config) { c.Renders = []Render{{Source: "/etc/x.render", Target: "x"}} }, "renders[0].source"},
+		{"render target nested", func(c *Config) { c.Renders = []Render{{Source: "x.render", Target: "a/x"}} }, "renders[0].target"},
+		{"render target dot-dot", func(c *Config) { c.Renders = []Render{{Source: "x.render", Target: ".."}} }, "renders[0].target"},
+		{"render target empty", func(c *Config) { c.Renders = []Render{{Source: "x.render", Target: ""}} }, "renders[0].target"},
+		{"render target an mws marker", func(c *Config) { c.Renders = []Render{{Source: "x.render", Target: ".mws-ports.env"}} }, "renders[0].target"},
+		{"two renders onto one target", func(c *Config) {
+			c.Renders = []Render{{Source: "a.render", Target: "x"}, {Source: "b.render", Target: "x"}}
+		}, "renders[1].target"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

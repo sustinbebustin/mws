@@ -230,7 +230,10 @@ func (c *Config) Validate() error {
 			return err
 		}
 	}
-	return validateVars(c.Vars, exported)
+	if err := validateVars(c.Vars, exported); err != nil {
+		return err
+	}
+	return validateRenders(c.Renders)
 }
 
 // Save writes the config to <metaRoot>/.mws.toml.
