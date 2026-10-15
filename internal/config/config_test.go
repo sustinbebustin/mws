@@ -47,6 +47,24 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
+func TestAppendRepoRoundTripsStringsNeedingEscapes(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(Path(dir), []byte("project_name = \"demo\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	url := "C:\\repos\\\"odd\"\tname\x7f"
+	if err := AppendRepo(dir, ListDefault, "odd", url); err != nil {
+		t.Fatalf("AppendRepo: %v", err)
+	}
+	got, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if want := []Repo{{Folder: "odd", URL: url}}; !reflect.DeepEqual(got.Repos, want) {
+		t.Fatalf("repos: got %+v want %+v", got.Repos, want)
+	}
+}
+
 func TestRoundTripWithEnvs(t *testing.T) {
 	dir := t.TempDir()
 	want := &Config{
