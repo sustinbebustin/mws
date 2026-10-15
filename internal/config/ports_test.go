@@ -92,6 +92,8 @@ func TestValidatePortTables(t *testing.T) {
 		{"congruent bases capped below the first collision", func(c *Config) { c.Ports.Port[1].Base = 3020; c.Ports.Slots = intp(1) }, ""},
 		{"congruent bases capped at the first collision", func(c *Config) { c.Ports.Port[1].Base = 3020; c.Ports.Slots = intp(2) }, "ports.slots"},
 		{"congruent bases one stride apart", func(c *Config) { c.Ports.Port[1].Base = 3010; c.Ports.Slots = intp(1) }, "ports.port[1].base"},
+		// 3000 and 64000 meet at slot 6100, past the 65535 bound (slot 153).
+		{"congruent bases colliding beyond the 65535 bound", func(c *Config) { c.Ports.Port[1].Base = 64000 }, ""},
 		{"equal bases", func(c *Config) { c.Ports.Port[1].Base = 3000; c.Ports.Slots = intp(1) }, "ports.port[1].base"},
 		{"congruent under a custom stride", func(c *Config) { c.Ports.Stride = intp(100); c.Ports.Port[1].Base = 3100 }, "ports.port[1].base"},
 		{"not congruent under a custom stride", func(c *Config) { c.Ports.Stride = intp(100); c.Ports.Port[1].Base = 3010 }, ""},
@@ -150,6 +152,150 @@ func TestValidatePortTables(t *testing.T) {
 				t.Fatalf("error should name %s: %v", tc.wantKey, err)
 			}
 		})
+	}
+}
+
+// supabaseAppConfig is the app configuration from ADR-0015.
+const supabaseAppConfig = `project_name = "app"
+
+[ports]
+  stride = 10
+
+  [[ports.port]]
+    name = "internal"
+    base = 3000
+    var  = "APP_INTERNAL_PORT"
+  [[ports.port]]
+    name = "public"
+    base = 3001
+    var  = "APP_PUBLIC_PORT"
+  [[ports.port]]
+    name = "hs"
+    base = 3002
+    var  = "APP_HS_PORT"
+  [[ports.port]]
+    name = "backend"
+    base = 8088
+    var  = "APP_BACKEND_PORT"
+  [[ports.port]]
+    name = "supabase_api"
+    base = 54321
+    var  = "APP_SUPABASE_API_PORT"
+  [[ports.port]]
+    name = "supabase_db"
+    base = 54322
+    var  = "APP_SUPABASE_DB_PORT"
+  [[ports.port]]
+    name = "supabase_db_shadow"
+    base = 54320
+    var  = "APP_SUPABASE_DB_SHADOW_PORT"
+  [[ports.port]]
+    name = "supabase_studio"
+    base = 54323
+    var  = "APP_SUPABASE_STUDIO_PORT"
+
+[vars]
+  APP_SUPABASE_PROJECT_ID                 = "app-${MWS_COPY_SLUG}"
+  APP_SUPABASE_API_URL                    = "http://localhost:${APP_SUPABASE_API_PORT}"
+  APP_AUTH_SITE_URL                       = "http://127.0.0.1:${APP_INTERNAL_PORT}"
+  APP_AUTH_REDIRECT_SITE                  = "https://127.0.0.1:${APP_INTERNAL_PORT}"
+  APP_AUTH_REDIRECT_CALLBACK_IP           = "http://127.0.0.1:${APP_INTERNAL_PORT}/auth/callback"
+  APP_AUTH_REDIRECT_CALLBACK_LOCALHOST    = "http://localhost:${APP_INTERNAL_PORT}/auth/callback"
+  APP_AUTH_REDIRECT_HS_CALLBACK_IP        = "http://127.0.0.1:${APP_HS_PORT}/auth/callback"
+  APP_AUTH_REDIRECT_HS_CALLBACK_LOCALHOST = "http://localhost:${APP_HS_PORT}/auth/callback"
+  APP_SUPABASE_AZURE_REDIRECT_URI         = "http://localhost:${APP_SUPABASE_API_PORT}/auth/v1/callback"
+  APP_AUTH_COOKIE_NAME                    = "app-auth-token-${APP_INTERNAL_PORT}"
+
+[[renders]]
+  source = ".mcp.json.render"
+  target = ".mcp.json"
+
+[[setup]]
+  cmd = "direnv allow"
+`
+
+// shopConfig is the second, unrelated workspace from ADR-0015.
+const shopConfig = `project_name = "shop"
+
+[[repos]]
+  folder = "web"
+  url    = "git@github.com:example/shop-web.git"
+
+  [[repos.envs]]
+    source = ".env"
+    target = ".env"
+
+[ports]
+  [[ports.port]]
+    name = "web"
+    base = 5173
+  [[ports.port]]
+    name = "db"
+    base = 5432
+
+[vars]
+  COMPOSE_PROJECT_NAME = "shop-${MWS_COPY_SLUG}"
+  DATABASE_URL         = "postgres://postgres:postgres@localhost:${MWS_PORT_DB}/shop"
+`
+
+func loadConfig(t *testing.T, body string) *Config {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(Path(dir), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	return c
+}
+
+func TestPortPolicyEightPortApp(t *testing.T) {
+	p, ok := loadConfig(t, supabaseAppConfig).PortPolicy()
+	if !ok {
+		t.Fatal("PortPolicy reported no [ports] for app")
+	}
+	// No pair is congruent modulo 10, so the 65535 bound decides: the highest
+	// base, 54323, stays in range up to slot 1121 (65533).
+	if p.Limit != 1121 {
+		t.Fatalf("Limit = %d, want 1121", p.Limit)
+	}
+	if p.Stride != 10 {
+		t.Fatalf("Stride = %d, want 10", p.Stride)
+	}
+	if len(p.Ports) != 8 || p.Ports[0].Name != "internal" || p.Ports[7].Name != "supabase_studio" {
+		t.Fatalf("Ports not in declaration order: %+v", p.Ports)
+	}
+}
+
+func TestPortPolicyShop(t *testing.T) {
+	p, ok := loadConfig(t, shopConfig).PortPolicy()
+	if !ok {
+		t.Fatal("PortPolicy reported no [ports] for shop")
+	}
+	// Default stride 10; 5432 + 6010*10 = 65532, one more slot is 65542.
+	if p.Stride != 10 || p.Limit != 6010 {
+		t.Fatalf("policy = stride %d limit %d, want stride 10 limit 6010", p.Stride, p.Limit)
+	}
+}
+
+func TestPortPolicySlotsCap(t *testing.T) {
+	c := validPorts()
+	c.Ports.Slots = intp(50)
+	if p, _ := c.PortPolicy(); p.Limit != 50 {
+		t.Fatalf("Limit = %d, want the ports.slots cap 50", p.Limit)
+	}
+	// A cap above the 65535 bound cannot raise it.
+	c.Ports.Slots = intp(100000)
+	if p, _ := c.PortPolicy(); p.Limit != 6010 {
+		t.Fatalf("Limit = %d, want the 65535 bound 6010", p.Limit)
+	}
+}
+
+func TestPortPolicyAbsent(t *testing.T) {
+	if _, ok := (&Config{}).PortPolicy(); ok {
+		t.Fatal("PortPolicy reported ports for a config without [ports]")
 	}
 }
 

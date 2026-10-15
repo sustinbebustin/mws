@@ -101,10 +101,10 @@ func (p *Ports) validate(owner map[string]string) error {
 
 // validateCollisions enforces exact slot arithmetic (ADR-0015): ports a < b
 // with bases congruent modulo the stride collide when one copy holds slot
-// d = (b-a)/stride and another sits on slot 0, so the highest slot must stay
-// below d. Only an explicit ports.slots can promise that.
+// d = (b-a)/stride and another sits on slot 0, so the slot limit must stay
+// below d. The limit is the 65535 bound or a lower ports.slots cap.
 func (p *Ports) validateCollisions() error {
-	stride := p.stride()
+	stride, limit := p.stride(), p.limit()
 	for i := range p.Port {
 		for j := i + 1; j < len(p.Port); j++ {
 			lo, hi := i, j
@@ -116,24 +116,45 @@ func (p *Ports) validateCollisions() error {
 				continue
 			}
 			d := gap / stride
-			if p.Slots != nil && *p.Slots < d {
+			if limit < d {
 				continue
 			}
 			pair := fmt.Sprintf("ports.port[%d].base (%d, %q) and ports.port[%d].base (%d, %q)",
 				i, p.Port[i].Base, p.Port[i].Name, j, p.Port[j].Base, p.Port[j].Name)
-			switch {
-			case d == 0:
+			switch d {
+			case 0:
 				return fmt.Errorf("%s are equal; every port needs its own base", pair)
-			case d == 1:
+			case 1:
 				return fmt.Errorf("%s are one stride (%d) apart, so slot 1 of %q is slot 0 of %q; change a base so they differ modulo %d", pair, stride, p.Port[lo].Name, p.Port[hi].Name, stride)
-			case p.Slots != nil:
-				return fmt.Errorf("%s are congruent modulo stride %d, so slot %d of %q is slot 0 of %q, and ports.slots is %d; lower ports.slots to at most %d or change a base so they differ modulo %d", pair, stride, d, p.Port[lo].Name, p.Port[hi].Name, *p.Slots, d-1, stride)
 			default:
-				return fmt.Errorf("%s are congruent modulo stride %d, so slot %d of %q is slot 0 of %q; set ports.slots to at most %d or change a base so they differ modulo %d", pair, stride, d, p.Port[lo].Name, p.Port[hi].Name, d-1, stride)
+				return fmt.Errorf("%s are congruent modulo stride %d, so slot %d of %q is slot 0 of %q, but slots up to %d are claimable; set ports.slots to at most %d or change a base so they differ modulo %d", pair, stride, d, p.Port[lo].Name, p.Port[hi].Name, limit, d-1, stride)
 			}
 		}
 	}
 	return nil
+}
+
+// PortPolicy is the resolved `[ports]` table, with defaults and both slot
+// bounds applied so no caller recomputes them.
+type PortPolicy struct {
+	// Stride is how far each slot moves every port.
+	Stride int
+	// Ports lists the named ports in declaration order.
+	Ports []Port
+	// Limit is the highest claimable slot; slots 1..Limit are valid and
+	// slot 0 is the default ports. Validate guarantees no two ports collide
+	// at or below it.
+	Limit int
+}
+
+// PortPolicy resolves the effective port policy. ok is false when the config
+// has no `[ports]` table, so the workspace has no port slots. The config
+// must have passed Validate, as every loaded config has.
+func (c *Config) PortPolicy() (policy PortPolicy, ok bool) {
+	if c.Ports == nil {
+		return PortPolicy{}, false
+	}
+	return PortPolicy{Stride: c.Ports.stride(), Ports: c.Ports.Port, Limit: c.Ports.limit()}, true
 }
 
 // stride is the resolved stride, DefaultPortStride when absent.
@@ -142,6 +163,20 @@ func (p *Ports) stride() int {
 		return DefaultPortStride
 	}
 	return *p.Stride
+}
+
+// limit is the highest claimable slot: the last slot whose ports all stay at
+// or below MaxPort, lowered to ports.slots when that is set.
+func (p *Ports) limit() int {
+	highest := 0
+	for _, port := range p.Port {
+		highest = max(highest, port.Base)
+	}
+	limit := (MaxPort - highest) / p.stride()
+	if p.Slots != nil {
+		limit = min(limit, *p.Slots)
+	}
+	return limit
 }
 
 // isIdentifier reports whether s is a shell-style variable name:
