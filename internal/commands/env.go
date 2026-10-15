@@ -126,7 +126,7 @@ func runEnvSync(o output, name string, all, dryRun bool) error {
 // reports each file as would_copy. Progress, unsubstituted placeholders and
 // per-file failures go to r; the result says what happened to each file.
 func renderEnv(r Reporter, metaRoot string, cfg *config.Config, copyPath string, dryRun bool) envCopyResult {
-	files := envFilesOf(r, metaRoot, cfg, copyPath)
+	files := renderedFilesOf(r, metaRoot, cfg, copyPath)
 	res := envCopyResult{Copy: filepath.Base(copyPath), Path: copyPath, Files: make([]envFileResult, 0, len(files))}
 	exports, err := copyExports(metaRoot, cfg, copyPath)
 	if err != nil {
@@ -295,7 +295,7 @@ const (
 func (s envState) label() string { return strings.ReplaceAll(string(s), "_", " ") }
 
 type envDiffFile struct {
-	Repo   string   `json:"repo"`
+	Repo   string   `json:"repo,omitempty"`
 	Source string   `json:"source"`
 	Target string   `json:"target"`
 	State  envState `json:"state"`
@@ -327,7 +327,7 @@ func runEnvDiff(o output, name string, all bool) error {
 		if err != nil {
 			return o.fail(clierr.Failuref("%s: %w; nothing was compared", filepath.Base(c), err))
 		}
-		for _, f := range envFilesOf(r, ws.MetaRoot, cfg, c) {
+		for _, f := range renderedFilesOf(r, ws.MetaRoot, cfg, c) {
 			state, err := compareEnvFile(f, exports)
 			if err != nil {
 				return o.fail(clierr.Failuref("compare %s with %s: %w; nothing was changed", f.target, f.source, err))
@@ -380,7 +380,9 @@ func compareEnvFile(f envFile, e ports.Exports) (envState, error) {
 }
 
 // envFile is one rendered file of a working copy: its source (a staged env
-// file under <meta>/.envs/) and its target in the copy, both absolute.
+// file under <meta>/.envs/, or a `.render` file under the harness dir) and
+// its target in the copy, both absolute. repo is empty for a `[[renders]]`
+// target, which sits at the copy root.
 type envFile struct {
 	repo, source, target string
 }
@@ -416,6 +418,21 @@ func envFilesOf(r Reporter, metaRoot string, cfg *config.Config, copyPath string
 	return files
 }
 
+// renderedFilesOf lists every file the render path writes into the working
+// copy at copyPath: its env files, then each `[[renders]]` target at the
+// copy root with its `.render` source under the harness dir.
+func renderedFilesOf(r Reporter, metaRoot string, cfg *config.Config, copyPath string) []envFile {
+	files := envFilesOf(r, metaRoot, cfg, copyPath)
+	harness := filepath.Join(metaRoot, project.HarnessDirName)
+	for _, rd := range cfg.Renders {
+		files = append(files, envFile{
+			source: filepath.Join(harness, rd.Source),
+			target: filepath.Join(copyPath, rd.Target),
+		})
+	}
+	return files
+}
+
 // envMove is one file copy of an env subcommand.
 type envMove struct {
 	repo, from, to string
@@ -431,7 +448,7 @@ const (
 
 // envFileResult is what happened to one file of an env sync or stage.
 type envFileResult struct {
-	Repo   string `json:"repo"`
+	Repo   string `json:"repo,omitempty"`
 	From   string `json:"from"`
 	To     string `json:"to"`
 	Status string `json:"status"`

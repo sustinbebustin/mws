@@ -1,7 +1,9 @@
 package commands
 
 import (
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -55,6 +57,35 @@ func TestCloneRendersAtSlotZeroAndALeaseMovesOnlyThePlaceholders(t *testing.T) {
 	}
 	if got, want := readFile(t, target), "PORT=3020\nURL=http://localhost:3020/x\nSLUG=d\n"; got != want {
 		t.Errorf("after a slot-2 lease app.env = %q, want %q", got, want)
+	}
+}
+
+func TestCloneRendersHarnessRenderSourceToARegularFileAtTheCopyRoot(t *testing.T) {
+	f := seedWtWorkspace(t)
+	f.cfg.Ports = &config.Ports{Port: []config.Port{{Name: "web", Base: 3000}}}
+	f.cfg.Renders = []config.Render{{Source: ".mcp.json.render", Target: ".mcp.json"}}
+	f.saveConfig(t)
+	writeFileAll(t, filepath.Join(f.meta, project.HarnessDirName, ".mcp.json.render"), `{"url":"http://localhost:${MWS_PORT_WEB}"}`)
+
+	res := runMWS(t, f.meta, "clone", "d", "--no-optional", "--no-setup")
+	if res.code != 0 {
+		t.Fatalf("clone: exit %d\nstderr: %s", res.code, res.stderr)
+	}
+	copyDir := filepath.Join(f.meta, "d")
+	target := filepath.Join(copyDir, ".mcp.json")
+	if info, err := os.Lstat(target); err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("d/.mcp.json is not a regular file: %v %v", info, err)
+	}
+	if got, want := readFile(t, target), `{"url":"http://localhost:3000"}`; got != want {
+		t.Errorf("d/.mcp.json = %q, want %q", got, want)
+	}
+	if info, err := os.Lstat(filepath.Join(copyDir, ".mcp.json.render")); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("d/.mcp.json.render is not a harness symlink: %v %v", info, err)
+	}
+
+	got := wouldLines(t, runMWS(t, f.meta, "env", "sync", "d", "--dry-run"))
+	if want := "would copy .mws/.mcp.json.render -> d/.mcp.json"; !slices.Contains(got, want) {
+		t.Errorf("dry run lines = %q, want %q among them", got, want)
 	}
 }
 
