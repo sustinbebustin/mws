@@ -2,7 +2,7 @@
 
 The mws config lives at the **Meta workspace** root in a single file, `.mws.toml`. It is the source of truth for the project name, the list of **Native repos**, per-repo **Env staging** mappings, and per-repo **Setup commands**. Discovered by walking up from cwd, so any subcommand works from inside a working copy or a native repo.
 
-For the domain vocabulary, see [CONTEXT.md](../CONTEXT.md). For the design decisions behind each section, see the ADRs in [adr/](./adr/).
+For the domain vocabulary, see [GLOSSARY.md](../GLOSSARY.md). For the design decisions behind each section, see the ADRs in [adr/](./adr/).
 
 ## Schema
 
@@ -225,7 +225,7 @@ The file is tracked by the meta workspace's git. Commit changes alongside the ha
 
 ## Related
 
-- [CONTEXT.md](../CONTEXT.md) - domain language (Meta workspace, Working copy, Native repo, Env staging, Setup commands)
+- [GLOSSARY.md](../GLOSSARY.md) - domain language (Meta workspace, Working copy, Native repo, Env staging, Setup commands)
 - [ADR-0003](./adr/0003-independent-native-repos.md) - why native repos are independent clones, not submodules
 - [ADR-0004](./adr/0004-meta-at-root-architecture.md) - why the meta workspace sits at the project root
 - [ADR-0005](./adr/0005-env-staging-via-copy.md) - env staging design
