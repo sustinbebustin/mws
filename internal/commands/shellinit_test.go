@@ -3,9 +3,12 @@ package commands
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sustinbebustin/mws/internal/config"
 )
 
 func TestShellInitEmitsWrapperPerShell(t *testing.T) {
@@ -20,8 +23,9 @@ func TestShellInitEmitsWrapperPerShell(t *testing.T) {
 			mustContain: []string{
 				"MWS_CD_FILE",
 				"command mws",
-				`"$1" = "clone"`,
+				`case "$1" in clone|restore)`,
 				`cd "$_mws_target"`,
+				"export MWS_SHELL_WRAPPER=1",
 			},
 			mustNotContain:  []string{"function mws", "set -l"},
 			funcDeclaration: "mws() {",
@@ -31,8 +35,9 @@ func TestShellInitEmitsWrapperPerShell(t *testing.T) {
 			mustContain: []string{
 				"MWS_CD_FILE",
 				"command mws",
-				`"$1" = "clone"`,
+				`case "$1" in clone|restore)`,
 				`cd "$_mws_target"`,
+				"export MWS_SHELL_WRAPPER=1",
 			},
 			mustNotContain:  []string{"function mws", "set -l"},
 			funcDeclaration: "mws() {",
@@ -42,11 +47,12 @@ func TestShellInitEmitsWrapperPerShell(t *testing.T) {
 			mustContain: []string{
 				"MWS_CD_FILE",
 				"command mws",
-				`"$argv[1]" = "clone"`,
+				`contains -- "$argv[1]" clone restore`,
 				`cd "$_mws_target"`,
 				"set -l",
+				"set -gx MWS_SHELL_WRAPPER 1",
 			},
-			mustNotContain:  []string{"mws() {", `"$1" = "clone"`},
+			mustNotContain:  []string{"mws() {", `case "$1"`},
 			funcDeclaration: "function mws",
 		},
 	}
@@ -159,6 +165,73 @@ func TestShellInitInstallAddsTheMarkedLineOnce(t *testing.T) {
 			}
 			if !bytes.Equal(first, second) {
 				t.Fatalf("second install changed the rc:\nbefore:\n%s\nafter:\n%s", first, second)
+			}
+		})
+	}
+}
+
+func TestRestoreWritesTheCdFile(t *testing.T) {
+	meta, wc := setupRmTree(t, &config.Config{ProjectName: "demo"}, "feature")
+	if res := runMWS(t, meta, "rm", "feature", "--yes"); res.code != 0 {
+		t.Fatalf("rm: exit %d\nstderr: %s", res.code, res.stderr)
+	}
+	cdFile := filepath.Join(t.TempDir(), "mws-cd")
+	t.Setenv("MWS_CD_FILE", cdFile)
+
+	res := runMWS(t, meta, "restore", "feature", "--yes")
+	if res.code != 0 {
+		t.Fatalf("restore: exit %d\nstderr: %s", res.code, res.stderr)
+	}
+	got, err := os.ReadFile(cdFile)
+	if err != nil {
+		t.Fatalf("MWS_CD_FILE not written: %v", err)
+	}
+	if string(got) != wc {
+		t.Fatalf("MWS_CD_FILE holds %q, want %q", got, wc)
+	}
+}
+
+// TestShellWrapperCdsAfterRestore evals the printed wrapper in a real shell
+// and runs restore through it, with this test binary standing in for mws on
+// PATH. clone shares the same branch of the wrapper.
+func TestShellWrapperCdsAfterRestore(t *testing.T) {
+	for _, shell := range []string{"bash", "zsh"} {
+		t.Run(shell, func(t *testing.T) {
+			shellPath, err := exec.LookPath(shell)
+			if err != nil {
+				t.Skipf("%s not installed", shell)
+			}
+			meta, wc := setupRmTree(t, &config.Config{ProjectName: "demo"}, "feature")
+			if res := runMWS(t, meta, "rm", "feature", "--yes"); res.code != 0 {
+				t.Fatalf("rm: exit %d\nstderr: %s", res.code, res.stderr)
+			}
+			bin := t.TempDir()
+			self, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(self, filepath.Join(bin, "mws")); err != nil {
+				t.Fatal(err)
+			}
+			shellHome(t, shellPath, "")
+
+			script := `eval "$(mws shell-init ` + shell + `)" || exit 9
+mws restore feature --yes || exit 8
+printf 'cwd=%s\nwrapper=%s\n' "$PWD" "$MWS_SHELL_WRAPPER"`
+			sh := exec.Command(shellPath, "-c", script)
+			sh.Dir = meta
+			sh.Env = append(os.Environ(), cliEnv+"=1", "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			var stdout, stderr bytes.Buffer
+			sh.Stdout, sh.Stderr = &stdout, &stderr
+			if err := sh.Run(); err != nil {
+				t.Fatalf("%s: %v\nstdout: %s\nstderr: %s", shell, err, stdout.String(), stderr.String())
+			}
+			out := stdout.String()
+			if want := "cwd=" + wc + "\n"; !strings.Contains(out, want) {
+				t.Errorf("shell cwd after restore should be %s, got:\n%s", wc, out)
+			}
+			if strings.Contains(out, "wrapper=\n") {
+				t.Errorf("the wrapper did not export MWS_SHELL_WRAPPER:\n%s", out)
 			}
 		})
 	}

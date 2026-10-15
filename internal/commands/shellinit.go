@@ -12,17 +12,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Shell wrappers below detect `mws clone` and route it through a tempfile-based
-// handoff: the binary writes the new working copy's path to $MWS_CD_FILE, the
-// wrapper reads it and cds the parent shell. Every other subcommand is a pure
-// passthrough via `command mws`. The match is on $1 == "clone" -- mws has no
-// global flags today, so this is sufficient.
+// Shell wrappers below detect `mws clone` and `mws restore` and route them
+// through a tempfile-based handoff: the binary writes the working copy's path
+// to $MWS_CD_FILE, the wrapper reads it and cds the parent shell. Every other
+// subcommand is a pure passthrough via `command mws`. The match is on $1 --
+// mws has no global flags today, so this is sufficient. Each wrapper exports
+// MWS_SHELL_WRAPPER once defined, which `shell-init --status` reads.
 
-const shellInitPOSIX = `# mws shell integration -- paste into ~/.zshrc or ~/.bashrc, or eval at shell start:
+const shellInitPOSIX = `# mws shell integration -- add it with ` + "`mws shell-init --install`" + `, or eval at shell start:
 #   eval "$(mws shell-init zsh)"
 #   eval "$(mws shell-init bash)"
 mws() {
-  if [ "$1" = "clone" ]; then
+  case "$1" in clone|restore)
     local _mws_cd_file _mws_rc _mws_target
     _mws_cd_file=$(mktemp -t mws-cd.XXXXXX) || { command mws "$@"; return $?; }
     MWS_CD_FILE="$_mws_cd_file" command mws "$@"
@@ -33,15 +34,17 @@ mws() {
     fi
     rm -f "$_mws_cd_file"
     return $_mws_rc
-  fi
+    ;;
+  esac
   command mws "$@"
 }
+export MWS_SHELL_WRAPPER=1
 `
 
-const shellInitFish = `# mws shell integration -- add to ~/.config/fish/config.fish:
+const shellInitFish = `# mws shell integration -- add it with ` + "`mws shell-init --install`" + `, or at shell start:
 #   mws shell-init fish | source
 function mws
-  if test (count $argv) -gt 0; and test "$argv[1]" = "clone"
+  if test (count $argv) -gt 0; and contains -- "$argv[1]" clone restore
     set -l _mws_cd_file (mktemp -t mws-cd.XXXXXX)
     if test -z "$_mws_cd_file"
       command mws $argv
@@ -60,6 +63,7 @@ function mws
   end
   command mws $argv
 end
+set -gx MWS_SHELL_WRAPPER 1
 `
 
 // shellInitMarker opens the block --install appends to an rc file; finding it
@@ -117,31 +121,29 @@ func newShellInitCmd() *cobra.Command {
 	var install, status bool
 	cmd := &cobra.Command{
 		Use:   "shell-init [shell]",
-		Short: "Print a shell function for `eval` that auto-cds into the new working copy after `mws clone`",
+		Short: "Print, install or check the shell function that cds into a copy after `mws clone` or `mws restore`",
 		Long: `shell-init prints a shell function definition that wraps the mws binary.
-With the wrapper installed, ` + "`mws clone <name>`" + ` automatically cds the
-parent shell into the new working copy on success. Every other subcommand is a
-pure passthrough.
+With the wrapper loaded, ` + "`mws clone <name>`" + ` and ` + "`mws restore <name>`" + ` cd the
+parent shell into the working copy on success. Every other subcommand is a pure
+passthrough. The shell defaults to the one $SHELL names.
 
-Install (one-time):
+--install adds one line that loads the wrapper to the shell's rc file
+(~/.zshrc, or $ZDOTDIR/.zshrc; ~/.bashrc; ~/.config/fish/config.fish), between
+marker comments, so running it again changes nothing. Open a new shell after.
 
-  # zsh
-  eval "$(mws shell-init zsh)"        # add to ~/.zshrc
-
-  # bash
-  eval "$(mws shell-init bash)"       # add to ~/.bashrc
-
-  # fish
-  mws shell-init fish | source         # add to ~/.config/fish/config.fish
+--status prints "active" (exit 0), "installed but not loaded in this shell"
+(exit 1) or "not installed" (exit 1), with the next step on stderr.
 
 Without the wrapper, ` + "`mws clone`" + ` still prints the new working copy's path
 as its last stdout line -- a child process cannot change its parent shell's
 working directory, so cd there yourself.
 
 The wrapper invokes the binary with MWS_CD_FILE pointing at a tempfile; the
-binary writes the new working copy's absolute path there on success. External
+binary writes the working copy's absolute path there on success. External
 tools (IDEs, custom scripts) can use the same MWS_CD_FILE contract directly.`,
-		Example: `  eval "$(mws shell-init zsh)"
+		Example: `  mws shell-init --install
+  mws shell-init --status
+  eval "$(mws shell-init zsh)"
   mws shell-init fish | source`,
 		Args: usageArgs(cobra.MaximumNArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
