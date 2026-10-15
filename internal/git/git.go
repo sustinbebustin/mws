@@ -7,6 +7,7 @@ package git
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,6 +17,29 @@ import (
 // InitQuiet runs `git init -q` in dir, suppressing the normal banner.
 func InitQuiet(ctx context.Context, dir string) error {
 	return run(ctx, dir, "init", "-q")
+}
+
+// ErrNoIdentity reports that git has no author or committer identity, so it
+// cannot create a commit.
+var ErrNoIdentity = errors.New("git has no user identity configured")
+
+// CheckIdentity returns ErrNoIdentity (wrapped) when git cannot name an
+// author and committer for dir, the condition under which `git commit` fails.
+func CheckIdentity(ctx context.Context, dir string) error {
+	for _, v := range []string{"GIT_AUTHOR_IDENT", "GIT_COMMITTER_IDENT"} {
+		if _, err := capture(ctx, dir, "var", v); err != nil {
+			return fmt.Errorf("%w: %w", ErrNoIdentity, err)
+		}
+	}
+	return nil
+}
+
+// CommitAll stages every non-ignored path in dir and commits it with message.
+func CommitAll(ctx context.Context, dir, message string) error {
+	if err := run(ctx, dir, "add", "-A"); err != nil {
+		return err
+	}
+	return run(ctx, dir, "commit", "-q", "-m", message)
 }
 
 // Clone runs `git clone <src> <dst>`, streaming stdout/stderr through to the caller's.

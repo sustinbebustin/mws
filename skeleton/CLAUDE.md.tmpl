@@ -31,7 +31,7 @@ Worktrees of a copy live at `<copy>/.wt/<name>/` (`mws wt new <name>`); use the 
 ## Git
 
 - Code: commit inside the native repo, `git -C <repo> ...`.
-- Harness and config: the meta root (nearest ancestor holding `.mws.toml`) is the repo -- `git -C <meta> add .gitignore .mws.toml .mws README.md CLAUDE.md && git -C <meta> commit`.
+- Harness and config: the meta root (nearest ancestor holding `.mws.toml`) is the repo, and `mws init` already committed it. Commit later changes with `git -C <meta> add .gitignore .mws.toml .mws README.md CLAUDE.md && git -C <meta> commit`.
 
 ## mws commands
 
