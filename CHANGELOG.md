@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - `mws promote` refuses (exit `3`) an mws marker (`.mws-*`) and any `[[renders]]` target, and leaves both out of its candidate list.
 - `mws promote` links the promoted entry into every copy's worktrees, so they no longer wait for `mws relink`. A copy or worktree it fails to link now makes it exit `1`, naming `mws relink` to finish.
+- `ls` is the only list spelling: `mws ls`, `mws trash ls`, `mws wt ls`. `mws list`, `mws trash list` and `mws wt list` are unknown commands (exit `2`).
+- `mws relink --prefer` takes `copy|harness|skip` instead of `peer|meta|skip`, and its output says copy and harness.
+- Every `--dry-run` (`rm`, `relink`, `trash prune`, `trash empty`, `wt rm`, `wt prune`) prints only `would <verb> <object>` lines on stdout; notes go to stderr.
+- `mws trash prune` and `mws trash empty` honour `--json` and print `{"dry_run", "purged", "unreadable"}`.
 
 ### Fixed
 - `mws add-repo` appends a `[[repos]]` or `[[optional_repos]]` block to `.mws.toml` instead of rewriting it, so comments, layout and unknown keys survive. When the appended file would not parse or validate, the file is left unchanged and the command exits `1` naming the cause.

@@ -18,7 +18,7 @@ func TestRunRestoreRoundTripsHarnessSymlinks(t *testing.T) {
 	mustWriteFile(t, filepath.Join(wc, "local.txt"), "uncommitted work")
 
 	withCwd(t, meta, func() {
-		if err := runRm(t.Context(), nopReporter{}, "feature", rmFlags{yes: true}); err != nil {
+		if err := runRm(t.Context(), discardOut, "feature", rmFlags{yes: true}); err != nil {
 			t.Fatalf("runRm: %v", err)
 		}
 		if err := runRestore(t.Context(), nopReporter{}, "feature", "", true); err != nil {
@@ -64,7 +64,7 @@ func TestRunRestoreRefusesToOverwriteExistingCopy(t *testing.T) {
 	meta, wc := setupRmTree(t, &config.Config{ProjectName: "demo"}, "feature")
 
 	withCwd(t, meta, func() {
-		if err := runRm(t.Context(), nopReporter{}, "feature", rmFlags{yes: true}); err != nil {
+		if err := runRm(t.Context(), discardOut, "feature", rmFlags{yes: true}); err != nil {
 			t.Fatalf("runRm: %v", err)
 		}
 		// A new working copy claims the name while the old one is in the trash.
@@ -97,7 +97,7 @@ func TestRunRestoreAsAlternateName(t *testing.T) {
 	meta, wc := setupRmTree(t, &config.Config{ProjectName: "demo"}, "feature")
 
 	withCwd(t, meta, func() {
-		if err := runRm(t.Context(), nopReporter{}, "feature", rmFlags{yes: true}); err != nil {
+		if err := runRm(t.Context(), discardOut, "feature", rmFlags{yes: true}); err != nil {
 			t.Fatalf("runRm: %v", err)
 		}
 		if err := runRestore(t.Context(), nopReporter{}, "feature", "feature-recovered", true); err != nil {
@@ -131,15 +131,15 @@ func TestRunRestoreRejectsUnknownName(t *testing.T) {
 	meta, _ := setupRmTree(t, &config.Config{ProjectName: "demo"}, "feature")
 
 	withCwd(t, meta, func() {
-		if err := runRm(t.Context(), nopReporter{}, "feature", rmFlags{yes: true}); err != nil {
+		if err := runRm(t.Context(), discardOut, "feature", rmFlags{yes: true}); err != nil {
 			t.Fatalf("runRm: %v", err)
 		}
 		err := runRestore(t.Context(), nopReporter{}, "nope", "", true)
 		if err == nil {
 			t.Fatalf("runRestore should fail on a name that was never trashed")
 		}
-		if !strings.Contains(err.Error(), "mws trash list") {
-			t.Fatalf("error should point at `mws trash list`: %v", err)
+		if !strings.Contains(err.Error(), "mws trash ls") {
+			t.Fatalf("error should point at `mws trash ls`: %v", err)
 		}
 	})
 }

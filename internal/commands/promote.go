@@ -69,7 +69,7 @@ func runPromote(r Reporter, arg string) error {
 			filepath.Base(ws.WorkingCopy), ws.Worktree, ws.WorkingCopy, shown)
 	}
 	if ws.WorkingCopy == "" {
-		return usagef("promote must be run from inside a working copy, not from %s; run `cd <copy> && mws promote %s` (`mws list` shows the copies)",
+		return usagef("promote must be run from inside a working copy, not from %s; run `cd <copy> && mws promote %s` (`mws ls` shows the copies)",
 			cwd, shown)
 	}
 

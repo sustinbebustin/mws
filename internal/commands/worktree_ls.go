@@ -17,9 +17,8 @@ import (
 func newWorktreeLsCmd(jsonOut *bool) *cobra.Command {
 	var all bool
 	cmd := &cobra.Command{
-		Use:     "ls",
-		Aliases: []string{"list"},
-		Short:   "List worktrees with their branches, state and liveness",
+		Use:   "ls",
+		Short: "List worktrees with their branches, state and liveness",
 		Long: `ls lists the worktrees of this working copy (--all: of every copy). A managed
 worktree shows each native repo as folder:branch@sha, marked dirty when it has
 modified or untracked files and +N when N commits on its branch are reachable

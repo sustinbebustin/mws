@@ -51,7 +51,7 @@ func TestRestoreRepairsWorktrees(t *testing.T) {
 			writeFileAll(t, filepath.Join(f.wtPath("x"), "frontend", "wip.txt"), "unsaved")
 
 			withCwd(t, f.meta, func() {
-				if err := runRm(t.Context(), nopReporter{}, "c", rmFlags{yes: true}); err != nil {
+				if err := runRm(t.Context(), discardOut, "c", rmFlags{yes: true}); err != nil {
 					t.Fatalf("runRm: %v", err)
 				}
 				if err := runRestore(t.Context(), nopReporter{}, "c", tc.as, true); err != nil {
@@ -75,7 +75,7 @@ func TestRestoreSurvivesAMetaPruneWhileTrashed(t *testing.T) {
 	writeFileAll(t, filepath.Join(f.wtPath("x"), "frontend", "wip.txt"), "unsaved")
 
 	withCwd(t, f.meta, func() {
-		if err := runRm(t.Context(), nopReporter{}, "c", rmFlags{yes: true}); err != nil {
+		if err := runRm(t.Context(), discardOut, "c", rmFlags{yes: true}); err != nil {
 			t.Fatalf("runRm: %v", err)
 		}
 		gitT(t, f.meta, "worktree", "prune")
@@ -96,7 +96,7 @@ func TestRelinkRepairsHarnessSymlinksInWorktrees(t *testing.T) {
 	gitignore := readFile(t, filepath.Join(root, ".gitignore"))
 
 	withCwd(t, f.meta, func() {
-		if err := runRelink(nopReporter{}, relinkFlags{}); err != nil {
+		if err := runRelink(discardOut, relinkFlags{}); err != nil {
 			t.Fatalf("runRelink: %v", err)
 		}
 	})
@@ -116,16 +116,16 @@ func TestTrashPurgeDropsMetaWorktreeRegistrations(t *testing.T) {
 		name  string
 		purge func(t *testing.T) error
 	}{
-		{"prune", func(t *testing.T) error { return runTrashPrune(t.Context(), nopReporter{}, false) }},
+		{"prune", func(t *testing.T) error { return runTrashPrune(t.Context(), discardOut, false) }},
 		{"empty", func(t *testing.T) error {
-			return runTrashEmpty(t.Context(), nopReporter{}, confirmFlags{yes: true})
+			return runTrashEmpty(t.Context(), discardOut, confirmFlags{yes: true})
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := seedWtWorkspace(t)
 			mustNew(t, f.copy, "x", "--no-setup")
 			withCwd(t, f.meta, func() {
-				if err := runRm(t.Context(), nopReporter{}, "c", rmFlags{yes: true}); err != nil {
+				if err := runRm(t.Context(), discardOut, "c", rmFlags{yes: true}); err != nil {
 					t.Fatalf("runRm: %v", err)
 				}
 				entries, _, err := trash.List(f.meta)
@@ -178,7 +178,7 @@ func TestRmRefusesWhileAWorktreeIsLive(t *testing.T) {
 	agent := startIn(t, filepath.Join(f.wtPath("x"), "frontend"))
 
 	var err error
-	withCwd(t, f.meta, func() { err = runRm(t.Context(), nopReporter{}, "c", rmFlags{yes: true}) })
+	withCwd(t, f.meta, func() { err = runRm(t.Context(), discardOut, "c", rmFlags{yes: true}) })
 	if err == nil {
 		t.Fatal("rm removed a copy whose worktree has a live process")
 	}

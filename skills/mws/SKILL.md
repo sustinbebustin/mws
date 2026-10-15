@@ -24,7 +24,7 @@ my-project/                 meta workspace (git repo; tracks .mws/ and .mws.toml
 ## Rules
 
 - Pass every input as a flag. Your shell has no terminal, so mws never prompts: a missing choice fails with exit 2 before changing anything, and the message shows the flag to add. Destructive commands need `--yes`.
-- Results go to stdout, progress to stderr. `init`, `clone` and `wt new` print the new path as the last stdout line; `list`, `trash list` and every `wt` command take `--json`.
+- Results go to stdout, progress to stderr. `init`, `clone` and `wt new` print the new path as the last stdout line; `ls`, `trash ls|prune|empty` and every `wt` command take `--json`. Every `--dry-run` prints only `would <verb> <object>` lines on stdout (under `--json`, `{"dry_run": true, ...}`).
 - A retry is safe: re-running `clone`, `add-repo`, `include`, `promote`, `relink` or `wt new` finishes the job or reports it done. When a command fails partway, read the message and re-run the same command.
 - Run git inside a native repo (`main/frontend/`) for code and at the meta root for harness and config. A working copy root is not a git repo.
 - A harness entry in a working copy is a symlink: editing `main/CLAUDE.md` edits the shared file for every copy, and it is committed from the meta root. A file you create at a copy root stays local to that copy until promoted.
@@ -43,13 +43,13 @@ my-project/                 meta workspace (git repo; tracks .mws/ and .mws.toml
 ## Working copies
 
 ```bash
-mws list --json                                       # copies; "current" marks cwd's
+mws ls --json                                         # copies; "current" marks cwd's
 mws clone feature-x --no-optional --setup             # new peer copy, default branches, setup run
 mws clone feature-x --with docs --no-setup            # include optional repo "docs", skip setup
 cd "$(mws clone feature-x --no-optional --setup | tail -n1)"
 mws rm feature-x --yes                                # to .trash/, restorable for 7 days
 mws restore feature-x --yes                           # back from the trash (--as <name> if taken)
-mws trash list --json
+mws trash ls --json
 ```
 
 - `clone` needs `--setup` or `--no-setup` when the config has setup commands, and `--no-optional` or `--with <folder>` when it has optional repos. Choose `--setup` unless the user says otherwise: a copy without setup usually does not build.
@@ -84,7 +84,7 @@ mws stage-env feature-x                               # copy -> .envs/ (overwrit
 ```
 
 - After adding a harness entry under `.mws/` by hand, run `mws relink` to link it into every copy.
-- Editors that save atomically replace a symlink with a regular file. `relink` restores identical files on its own; a diverged one needs `--prefer peer` (the copy's version wins), `meta` (the harness wins) or `skip`, which is the user's call.
+- Editors that save atomically replace a symlink with a regular file. `relink` restores identical files on its own; a diverged one needs `--prefer copy` (the copy's version wins), `harness` (the harness wins) or `skip`, which is the user's call.
 - Env files are copied, not linked, so copies can differ (ports, keys). Treat both env commands as overwrites, and read the env file contents only when the task needs them.
 - `sync-env` refreshes the copy, never its worktrees.
 

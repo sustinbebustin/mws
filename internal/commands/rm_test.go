@@ -45,7 +45,7 @@ func TestRunRmRefusesUnmanagedDir(t *testing.T) {
 	mustWriteFile(t, filepath.Join(stray, "file.txt"), "user data")
 
 	withCwd(t, meta, func() {
-		err := runRm(t.Context(), nopReporter{}, "stray", rmFlags{yes: true})
+		err := runRm(t.Context(), discardOut, "stray", rmFlags{yes: true})
 		if err == nil {
 			t.Fatalf("runRm should refuse a dir with no harness symlinks")
 		}
@@ -63,7 +63,7 @@ func TestRunRmTrashesWorkingCopyByDefault(t *testing.T) {
 	mustWriteFile(t, filepath.Join(wc, "local.txt"), "uncommitted work")
 
 	withCwd(t, meta, func() {
-		if err := runRm(t.Context(), nopReporter{}, "feature", rmFlags{yes: true}); err != nil {
+		if err := runRm(t.Context(), discardOut, "feature", rmFlags{yes: true}); err != nil {
 			t.Fatalf("runRm: %v", err)
 		}
 	})
@@ -98,7 +98,7 @@ func TestRunRmPurgeDeletesOutright(t *testing.T) {
 	meta, wc := setupRmTree(t, &config.Config{ProjectName: "demo"}, "feature")
 
 	withCwd(t, meta, func() {
-		if err := runRm(t.Context(), nopReporter{}, "feature", rmFlags{yes: true, purge: true}); err != nil {
+		if err := runRm(t.Context(), discardOut, "feature", rmFlags{yes: true, purge: true}); err != nil {
 			t.Fatalf("runRm: %v", err)
 		}
 	})
@@ -118,7 +118,7 @@ func TestRunRmHonoursTrashDisabled(t *testing.T) {
 	}, "feature")
 
 	withCwd(t, meta, func() {
-		if err := runRm(t.Context(), nopReporter{}, "feature", rmFlags{yes: true}); err != nil {
+		if err := runRm(t.Context(), discardOut, "feature", rmFlags{yes: true}); err != nil {
 			t.Fatalf("runRm: %v", err)
 		}
 	})
@@ -138,7 +138,7 @@ func TestRunRmTrashesWorkingCopyUnderCopiesDir(t *testing.T) {
 	}, "feature")
 
 	withCwd(t, meta, func() {
-		if err := runRm(t.Context(), nopReporter{}, "feature", rmFlags{yes: true}); err != nil {
+		if err := runRm(t.Context(), discardOut, "feature", rmFlags{yes: true}); err != nil {
 			t.Fatalf("runRm: %v", err)
 		}
 	})
