@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `mws promote` refuses (exit `3`) an mws marker (`.mws-*`) and any `[[renders]]` target, and leaves both out of its candidate list.
+- `mws promote` links the promoted entry into every copy's worktrees, so they no longer wait for `mws relink`. A copy or worktree it fails to link now makes it exit `1`, naming `mws relink` to finish.
+
 ### Removed
 - `mws migrate`, the sibling-meta to meta-at-root converter.
 

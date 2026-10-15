@@ -14,6 +14,7 @@ import (
 	"github.com/sustinbebustin/mws/internal/clierr"
 	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/project"
+	"github.com/sustinbebustin/mws/internal/worktree"
 )
 
 func newPromoteCmd() *cobra.Command {
@@ -23,7 +24,11 @@ func newPromoteCmd() *cobra.Command {
 		Long: `promote moves a file or directory that lives only in the current working
 copy into the meta's .mws/ harness dir, replaces the original with a symlink,
 and backfills the symlink into every other working copy so the item is now
-shared across all copies.
+shared across all copies. It then refreshes the links of every copy's
+worktrees, as relink does.
+
+promote refuses (exit 3) an mws marker (a .mws-* file) and any [[renders]]
+target: both are written per copy and must never become a shared file.
 
 With no path, it prompts with the entries that can be promoted; without a
 terminal, it lists them in the error instead.`,
@@ -152,30 +157,66 @@ func runPromote(r Reporter, arg string) error {
 	}
 	r.OK(fmt.Sprintf("Promoted %s into harness", rel))
 
-	peers, err := ws.EnumerateCopies()
+	if err := linkPromoted(r, ws, cfg.WorktreePolicy(), rel, dst); err != nil {
+		return clierr.Wrapf(err, "%s is promoted into the harness, but linking it failed; run `mws relink` to finish:\n%w", rel, err)
+	}
+	return nil
+}
+
+// linkPromoted backfills the symlink to the harness entry dst into every
+// other working copy, then refreshes the links of every copy's worktrees so
+// none waits for a relink. A failing copy or worktree is reported and the
+// rest are still linked.
+func linkPromoted(r Reporter, ws *project.Workspace, policy config.WorktreePolicy, rel, dst string) error {
+	copies, err := ws.EnumerateCopies()
 	if err != nil {
 		return err
 	}
-	for _, peer := range peers {
-		if peer == ws.WorkingCopy {
-			continue
-		}
-		linkPath := filepath.Join(peer, rel)
-		if st, err := os.Lstat(linkPath); err == nil && st.Mode()&os.ModeSymlink == 0 {
-			r.Warn(fmt.Sprintf("%s: %s exists and is not a symlink; skipping", filepath.Base(peer), rel))
-			continue
-		}
-		target, err := filepath.Rel(peer, dst)
-		if err != nil {
-			r.Fail(fmt.Sprintf("%s: %v", filepath.Base(peer), err))
-			continue
-		}
-		if err := project.AtomicSymlink(target, linkPath); err != nil {
-			r.Fail(fmt.Sprintf("%s: %v", filepath.Base(peer), err))
-			continue
-		}
-		r.OK(fmt.Sprintf("%s: linked %s", filepath.Base(peer), rel))
+	var errs []error
+	fail := func(where string, err error) {
+		r.Fail(fmt.Sprintf("%s: %v", where, err))
+		errs = append(errs, fmt.Errorf("%s: %w", where, err))
 	}
+	for _, peer := range copies {
+		name := filepath.Base(peer)
+		if peer != ws.WorkingCopy {
+			if err := backfillLink(r, peer, rel, dst); err != nil {
+				fail(name, err)
+			}
+		}
+		roots, err := worktree.Roots(peer, policy)
+		if err != nil {
+			fail(name, fmt.Errorf("find worktrees: %w", err))
+			continue
+		}
+		for _, root := range roots {
+			where := fmt.Sprintf("%s: worktree %s", name, filepath.Base(root))
+			if err := worktree.Relink(ws.MetaRoot, peer, root, policy); err != nil {
+				fail(where, err)
+				continue
+			}
+			r.OK(fmt.Sprintf("%s: linked %s", where, rel))
+		}
+	}
+	return clierr.Join(errs...)
+}
+
+// backfillLink links rel in the working copy at peer to the harness entry
+// dst, leaving a non-symlink already there alone.
+func backfillLink(r Reporter, peer, rel, dst string) error {
+	linkPath := filepath.Join(peer, rel)
+	if st, err := os.Lstat(linkPath); err == nil && st.Mode()&os.ModeSymlink == 0 {
+		r.Warn(fmt.Sprintf("%s: %s exists and is not a symlink; skipping", filepath.Base(peer), rel))
+		return nil
+	}
+	target, err := filepath.Rel(peer, dst)
+	if err != nil {
+		return err
+	}
+	if err := project.AtomicSymlink(target, linkPath); err != nil {
+		return err
+	}
+	r.OK(fmt.Sprintf("%s: linked %s", filepath.Base(peer), rel))
 	return nil
 }
 

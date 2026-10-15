@@ -107,6 +107,68 @@ func TestPromoteCandidatesOmitMarkersAndRenderTargets(t *testing.T) {
 	}
 }
 
+// The worktree mirrors a copy-root directory made before `wt new` as a link
+// to the copy's; one made after is absent. Either way promote leaves a direct
+// link into the harness.
+func TestPromoteLinksTheEntryIntoWorktrees(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		beforeWorktree bool
+	}{{"made before wt new", true}, {"made after wt new", false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := seedWtWorkspace(t)
+			scripts := filepath.Join(f.copy, "scripts", "dev.sh")
+			if tc.beforeWorktree {
+				writeFileAll(t, scripts, "echo dev")
+			}
+			mustNew(t, f.copy, "x", "--no-setup")
+			if !tc.beforeWorktree {
+				writeFileAll(t, scripts, "echo dev")
+			}
+
+			if res := runMWS(t, f.copy, "promote", "scripts"); res.code != 0 {
+				t.Fatalf("promote: exit %d\nstderr: %s", res.code, res.stderr)
+			}
+			link := filepath.Join(f.wtPath("x"), "scripts")
+			target, err := os.Readlink(link)
+			if err != nil {
+				t.Fatalf("worktree scripts is not a symlink: %v", err)
+			}
+			want := filepath.Join(f.meta, project.HarnessDirName, "scripts")
+			if got := filepath.Join(filepath.Dir(link), target); got != want {
+				t.Errorf("worktree scripts -> %s, want %s", got, want)
+			}
+		})
+	}
+}
+
+func TestPromoteRetryIsANoOp(t *testing.T) {
+	f := seedWtWorkspace(t)
+	writeFileAll(t, filepath.Join(f.copy, "notes.md"), "shared")
+	for i := range 2 {
+		if res := runMWS(t, f.copy, "promote", "notes.md"); res.code != 0 {
+			t.Fatalf("promote run %d: exit %d\nstderr: %s", i+1, res.code, res.stderr)
+		}
+	}
+	if got := readFile(t, filepath.Join(f.meta, project.HarnessDirName, "notes.md")); got != "shared" {
+		t.Errorf("harness notes.md = %q, want %q", got, "shared")
+	}
+}
+
+func TestPromoteNestedPathIsUsageError(t *testing.T) {
+	f := seedWtWorkspace(t)
+	writeFileAll(t, filepath.Join(f.copy, "scripts", "dev.sh"), "echo dev")
+	assertUsage(t, runMWS(t, f.copy, "promote", "scripts/dev.sh"), "top-level entries", "nested path")
+}
+
+func TestPromoteRefusesASymlinkElsewhere(t *testing.T) {
+	f := seedWtWorkspace(t)
+	if err := os.Symlink(f.root, filepath.Join(f.copy, "elsewhere")); err != nil {
+		t.Fatal(err)
+	}
+	assertRefused(t, runMWS(t, f.copy, "promote", "elsewhere"), "already a symlink, not into the harness")
+}
+
 func TestRunPromoteRejectsSymlink(t *testing.T) {
 	root := t.TempDir()
 	meta := filepath.Join(root, "demo")
