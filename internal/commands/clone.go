@@ -17,6 +17,7 @@ import (
 	"github.com/sustinbebustin/mws/internal/clierr"
 	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/git"
+	"github.com/sustinbebustin/mws/internal/ports"
 	"github.com/sustinbebustin/mws/internal/project"
 )
 
@@ -238,7 +239,11 @@ func runClone(ctx context.Context, r Reporter, out io.Writer, name string, choic
 		return err
 	}
 	if run {
-		setupFailed := runSetup(ctx, r, target, items, os.Stderr, os.Stderr)
+		exports, err := copyExports(ws.MetaRoot, cfg, target)
+		if err != nil {
+			return fmt.Errorf("clone completed but no setup command ran: %w", err)
+		}
+		setupFailed := runSetup(ctx, r, target, exports, items, os.Stderr, os.Stderr)
 		if len(setupFailed) > 0 {
 			return fmt.Errorf("clone completed but %d setup command(s) failed:\n  %s\nfix the cause, then rerun with --setup to run every setup command again",
 				len(setupFailed), strings.Join(setupFailed, "\n  "))
@@ -492,12 +497,13 @@ func collectSetup(repos []config.Repo) []setupItem {
 	return out
 }
 
-// runSetup executes items in order against target/<folder>. Commands inside a
-// single repo run sequentially and stop at the first non-zero exit; failures
-// in one repo do not block other repos. Returns "<folder>: <cmd>" strings for
-// each failure -- nil if everything passed. stdout/stderr are injected so
+// runSetup executes items in order against target/<folder>, with the working
+// copy's export set added to the environment. Commands inside a single repo
+// run sequentially and stop at the first non-zero exit; failures in one repo
+// do not block other repos. Returns "<folder>: <cmd>" strings for each
+// failure -- nil if everything passed. stdout/stderr are injected so
 // production can stream live to the terminal and tests can discard.
-func runSetup(ctx context.Context, r Reporter, target string, items []setupItem, stdout, stderr io.Writer) []string {
+func runSetup(ctx context.Context, r Reporter, target string, exports ports.Exports, items []setupItem, stdout, stderr io.Writer) []string {
 	var failed []string
 	var skipFolder, lastHeading string
 	for _, it := range items {
@@ -513,7 +519,7 @@ func runSetup(ctx context.Context, r Reporter, target string, items []setupItem,
 
 		cmd := exec.CommandContext(ctx, "sh", "-c", it.Cmd)
 		cmd.Dir = filepath.Join(target, it.Folder)
-		cmd.Env = os.Environ()
+		cmd.Env = append(os.Environ(), exports.Environ()...)
 		cmd.Stdout = stdout
 		cmd.Stderr = stderr
 		cmd.Stdin = nil

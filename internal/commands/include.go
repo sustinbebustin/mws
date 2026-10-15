@@ -89,7 +89,11 @@ func runInclude(ctx context.Context, r Reporter, folder, copyName string, choice
 		return err
 	}
 	if run {
-		if failed := runSetup(ctx, r, target, items, os.Stderr, os.Stderr); len(failed) > 0 {
+		exports, err := copyExports(ws.MetaRoot, cfg, target)
+		if err != nil {
+			return fmt.Errorf("included %s but no setup command ran: %w", repo.Folder, err)
+		}
+		if failed := runSetup(ctx, r, target, exports, items, os.Stderr, os.Stderr); len(failed) > 0 {
 			return fmt.Errorf("included %s but %d setup command(s) failed:\n  %s",
 				repo.Folder, len(failed), strings.Join(failed, "\n  "))
 		}

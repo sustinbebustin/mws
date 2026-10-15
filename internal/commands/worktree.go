@@ -134,7 +134,7 @@ func runWorktreeNew(ctx context.Context, o output, ws *project.Workspace, cfg *c
 
 	var setupErr error
 	if !res.Reused && !f.noSetup {
-		setupErr = runWorktreeSetup(ctx, r, cfg, res, o.stderr)
+		setupErr = runWorktreeSetup(ctx, r, ws.MetaRoot, cfg, res, o.stderr)
 	}
 
 	payload := wtNewJSON{Result: res}
@@ -152,9 +152,16 @@ func runWorktreeNew(ctx context.Context, o output, ws *project.Workspace, cfg *c
 }
 
 // runWorktreeSetup runs [[repos.setup]] in each inner repo (when the policy
-// allows) and then [[worktrees.setup]] in the root. Command output goes to w
-// so stdout stays reserved for the result.
-func runWorktreeSetup(ctx context.Context, r Reporter, cfg *config.Config, res worktree.Result, w io.Writer) error {
+// allows) and then [[worktrees.setup]] in the root, each with the working
+// copy's export set, since a worktree shares its copy's Port slot. Command
+// output goes to w so stdout stays reserved for the result.
+func runWorktreeSetup(ctx context.Context, r Reporter, metaRoot string, cfg *config.Config, res worktree.Result, w io.Writer) error {
+	exports, err := copyExports(metaRoot, cfg, res.Copy)
+	if err != nil {
+		return &setupFailedError{err: fmt.Errorf(
+			"worktree %s was created at %s, but no setup command ran: %w; the worktree is kept and usable",
+			res.Name, res.Path, err)}
+	}
 	policy := cfg.WorktreePolicy()
 	var items []setupItem
 	if policy.RepoSetup {
@@ -171,7 +178,7 @@ func runWorktreeSetup(ctx context.Context, r Reporter, cfg *config.Config, res w
 		items = collectSetup(repos)
 	}
 	items = append(items, collectSetup([]config.Repo{{Folder: ".", Setup: policy.Setup}})...)
-	failed := runSetup(ctx, r, res.Path, items, w, w)
+	failed := runSetup(ctx, r, res.Path, exports, items, w, w)
 	if len(failed) == 0 {
 		return nil
 	}

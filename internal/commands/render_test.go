@@ -119,6 +119,28 @@ func TestEnvStageSkipsAPlaceholderSourceAndForceStagesTheRenderedFile(t *testing
 	}
 }
 
+func TestSetupCommandsSeeTheCopysExportSet(t *testing.T) {
+	f := seedWtWorkspace(t)
+	f.cfg.Ports = &config.Ports{Port: []config.Port{{Name: "web", Base: 3000}}}
+	f.cfg.Repos[1].Setup = []config.SetupCommand{{Cmd: `printf '%s %s %s\n' "$MWS_SLOT" "$MWS_PORT_WEB" "$MWS_COPY" > setup.out`}}
+	f.saveConfig(t)
+	cfg, err := config.Load(f.meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ports.WriteLease(f.copy, ports.NewExports(cfg, f.meta, "c", 2)); err != nil {
+		t.Fatal(err)
+	}
+
+	// A retry with --setup on the existing copy runs every setup command.
+	if res := runMWS(t, f.meta, "clone", "c", "--no-optional", "--setup"); res.code != 0 {
+		t.Fatalf("clone: exit %d\nstderr: %s", res.code, res.stderr)
+	}
+	if got, want := readFile(t, filepath.Join(f.repo("frontend"), "setup.out")), "2 3020 c\n"; got != want {
+		t.Errorf("setup saw %q, want %q", got, want)
+	}
+}
+
 func TestEnvDiffComparesTheRenderedForm(t *testing.T) {
 	f := seedEnvWorkspace(t)
 	f.withPorts(t)

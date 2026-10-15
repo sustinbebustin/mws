@@ -69,6 +69,16 @@ func Slug(copyName string) string {
 	return string(lower)
 }
 
+// Environ returns the export set as NAME=value entries, in order, for a
+// child process environment.
+func (e Exports) Environ() []string {
+	env := make([]string, len(e.Vars))
+	for i, v := range e.Vars {
+		env[i] = v.Name + "=" + v.Value
+	}
+	return env
+}
+
 // Lookup returns the value of the exported variable name.
 func (e Exports) Lookup(name string) (string, bool) {
 	for _, v := range e.Vars {
