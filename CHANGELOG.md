@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `mws shell-init --install` adds the line that loads the shell wrapper to your rc file (`~/.zshrc` or `$ZDOTDIR/.zshrc`, `~/.bashrc`, `~/.config/fish/config.fish`), once; `mws shell-init --status` says whether the wrapper is active in this shell (exit 0) or what to run (exit 1). The shell argument defaults to the one `$SHELL` names.
+
+### Changed
+- The shell wrapper cds into the copy after `mws restore` as well as `mws clone`; `restore` writes `MWS_CD_FILE`.
+
 ### Removed
 - `mws migrate`, the sibling-meta to meta-at-root converter.
 

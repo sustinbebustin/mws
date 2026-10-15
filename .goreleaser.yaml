@@ -84,6 +84,9 @@ brews:
     license: "MIT"
     dependencies:
       - name: git
+    caveats: |
+      To cd into a working copy after `mws clone` or `mws restore`, run:
+        mws shell-init --install
     install: |
       bin.install "mws"
     test: |

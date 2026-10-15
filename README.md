@@ -40,15 +40,11 @@ The harness skeleton ships embedded in the binary -- no separate template repo, 
 
 ### Shell integration (optional)
 
-With a small shell function installed, `mws clone <name>` cds your shell into the new working copy on success. Without it, `mws clone` prints the new working copy's path as its last stdout line for you to `cd` into -- a child process can't change its parent shell's directory.
-
 ```bash
-eval "$(mws shell-init zsh)"     # add to ~/.zshrc
-eval "$(mws shell-init bash)"    # add to ~/.bashrc
-mws shell-init fish | source     # add to ~/.config/fish/config.fish
+mws shell-init --install    # then open a new shell
 ```
 
-The wrapper only intercepts `mws clone`; every other subcommand is a pure passthrough. See [docs/adr/0008-shell-integration-for-auto-cd.md](docs/adr/0008-shell-integration-for-auto-cd.md) for the design.
+This adds one line to your shell's rc file so `mws clone` and `mws restore` cd into the working copy on success. `mws shell-init --status` checks it is loaded. Without it, `mws clone` prints the path as its last stdout line for you to `cd` into. See [ADR-0008](docs/adr/0008-shell-integration-for-auto-cd.md).
 
 ### Agent skill (optional)
 
