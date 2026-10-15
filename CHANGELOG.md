@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `ls` is the only list spelling: `mws ls`, `mws trash ls`, `mws wt ls`. `mws list`, `mws trash list` and `mws wt list` are unknown commands (exit `2`).
+- `mws relink --prefer` takes `copy|harness|skip` instead of `peer|meta|skip`, and its output says copy and harness.
+- Every `--dry-run` (`rm`, `relink`, `trash prune`, `trash empty`, `wt rm`, `wt prune`) prints only `would <verb> <object>` lines on stdout; notes go to stderr.
+- `mws trash prune` and `mws trash empty` honour `--json` and print `{"dry_run", "purged", "unreadable"}`.
+
 ### Removed
 - `mws migrate`, the sibling-meta to meta-at-root converter.
 

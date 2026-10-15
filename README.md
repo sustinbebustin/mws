@@ -88,7 +88,7 @@ mws include worker feature-x                             # add to an existing co
 4. See what working copies exist.
 
 ```bash
-mws list
+mws ls
 ```
 
 ## Layout
@@ -135,18 +135,18 @@ For parallel agents inside one working copy, `mws wt new <name>` creates a **wor
 | `mws clone <name>` | Create a new working copy and print its path. Native repos are freshly cloned from each configured URL and checked out on the default branch. When optional repos exist, prompts to include them; `--with <folder>` (repeatable) or `--no-optional` decides without prompting. Re-running for an existing copy clones only the repos it lacks and prints its path. |
 | `mws include <folder> [copy]` | Clone a registered optional repo into a working copy (the current one by default). |
 | `mws promote <path>` | Move a top-level file or directory from the current working copy into `.mws/`, symlink it back, and backfill the symlink into every other working copy. |
-| `mws list` (`ls`) | List working copies in the current meta workspace; `--json`. |
+| `mws ls` | List working copies in the current meta workspace; `--json`. |
 | `mws rm <copy>` | Remove a working copy. Confirms first (`--yes` skips), then moves it to `.trash/` so it can be brought back; `--purge` deletes outright, `--dry-run` previews. |
 | `mws restore [copy]` | Bring a trashed working copy back and repair its harness symlinks. `--as <newname>` restores under a different name. |
-| `mws trash [list\|prune\|empty]` | Inspect the trash (`--json`), purge entries past their retention window, or empty it completely; `prune` and `empty` take `--dry-run`. |
-| `mws relink` | Refresh harness symlinks across every working copy. Diverged content is asked about, or settled by `--prefer peer\|meta\|skip`; `--dry-run` previews. |
+| `mws trash [ls\|prune\|empty]` | Inspect the trash, purge entries past their retention window, or empty it completely; `prune` and `empty` take `--dry-run`. `--json` on all three (`prune` and `empty` list the purged entries). |
+| `mws relink` | Refresh harness symlinks across every working copy. Diverged content is asked about, or settled by `--prefer copy\|harness\|skip`; `--dry-run` previews. |
 | `mws sync-env [copy]` | Copy staged env files from `.envs/` into a working copy (overwrites). |
 | `mws stage-env [copy]` | Inverse of `sync-env`: capture a working copy's env files into staging as the new default. |
 | `mws worktree` (`mws wt`) `new\|ls\|path\|exec\|rm\|prune` | Manage worktrees of the current working copy: `new <name>` creates one and prints its path, `ls [--all]` shows branches, dirty state and liveness, `path <name>` prints its path, `exec <name> -- <cmd>` runs in it, `rm <name>...` removes (refuses to lose work; `--force` discards uncommitted files, unreachable detached commits and changed root files; `--dry-run` previews), `prune` removes every clean, idle, merged one. `--json` everywhere. |
 
 ### Scripting and agents
 
-Every command runs without prompts when given its arguments and flags, and `mws <command> --help` shows examples. Without a terminal on stdin mws never prompts: a missing input fails with exit `2` and the invocation that supplies it, and a confirmation needs `--yes`. Results go to stdout (paths, lists, `--json`), progress to stderr, so `cd "$(mws clone feature-x --no-optional --setup | tail -n1)"` works. Exit codes: `0` ok, `1` failure, `2` usage, `3` refused by a safety check, `4` not found. Re-running a command that half-succeeded finishes it, and removing something already gone exits `4` with a message saying so. See [ADR-0012](./docs/adr/0012-headless-cli-contract.md).
+Every command runs without prompts when given its arguments and flags, and `mws <command> --help` shows examples. Without a terminal on stdin mws never prompts: a missing input fails with exit `2` and the invocation that supplies it, and a confirmation needs `--yes`. Results go to stdout (paths, lists, `--json`), progress to stderr, so `cd "$(mws clone feature-x --no-optional --setup | tail -n1)"` works. Every `--dry-run` prints one `would <verb> <object>` line per planned change on stdout and nothing else there; under `--json` the same list sits inside `{"dry_run": true, ...}`. Exit codes: `0` ok, `1` failure, `2` usage, `3` refused by a safety check, `4` not found. Re-running a command that half-succeeded finishes it, and removing something already gone exits `4` with a message saying so. See [ADR-0012](./docs/adr/0012-headless-cli-contract.md).
 
 Output is coloured only when the stream is a terminal, and colour is the only difference: piped output carries the same text, `--json` is untouched, and `NO_COLOR` is respected. See [ADR-0013](./docs/adr/0013-colour-on-a-terminal-only.md).
 

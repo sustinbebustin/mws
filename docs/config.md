@@ -61,7 +61,7 @@ working_copies_dir  = "<segment>" # optional; single path segment under the meta
 
 | Top-level key        | Type              | Required | Notes |
 |----------------------|-------------------|----------|-------|
-| `project_name`       | string            | yes      | Used by `mws init` skeleton templates and surfaced in `mws list`. |
+| `project_name`       | string            | yes      | Used by `mws init` skeleton templates and surfaced in `mws ls`. |
 | `description`        | string            | no       | Free-form. Empty by default. |
 | `working_copies_dir` | string            | no       | Single path-safe segment validated by the same rules as `project_name` (letters, digits, `-`, `_`, `.`; no leading `.` or `-`; no `/`). When set, `mws clone` and `mws init` place working copies at `<meta>/<working_copies_dir>/<name>/` instead of `<meta>/<name>/`. Empty (the default) keeps working copies at the meta root. |
 | `repos`              | array of tables   | no       | Each entry adds one **Native repo** to every **Working copy**. |
@@ -183,7 +183,7 @@ error   {error:{code, message}}                  # code: usage | refused | not_f
 
 `base` in `new` is a full commit id (the branch tip for a reused branch) and is omitted for a reused worktree. A setup failure under `--json` prints the full result object plus `error` (`setup_failed`) and exits 1.
 
-Related behavior of the other commands: `mws list` appends `(+N worktrees)` to a copy; `mws rm <copy>` refuses while one of its worktrees has a live process and lists its worktrees in the confirmation; `mws restore` repairs the worktrees' git links; `mws relink` refreshes harness links in worktree roots; `mws trash prune|empty` prune stale meta worktree registrations; `mws sync-env` updates only the copy, never its worktrees.
+Related behavior of the other commands: `mws ls` appends `(+N worktrees)` to a copy; `mws rm <copy>` refuses while one of its worktrees has a live process and lists its worktrees in the confirmation; `mws restore` repairs the worktrees' git links; `mws relink` refreshes harness links in worktree roots; `mws trash prune|empty` prune stale meta worktree registrations; `mws sync-env` updates only the copy, never its worktrees.
 
 Design rationale: [ADR-0011](./adr/0011-worktrees-are-children-of-a-working-copy.md).
 
