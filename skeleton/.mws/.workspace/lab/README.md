@@ -1,6 +1,6 @@
 # lab/
 
-Executable exploration. Scripts to probe an API, reproduce a bug, capture a flow, simulate inputs. Mostly throwaway, but worth keeping the *learnings* -- promote those to `knowledge/integrations/<vendor>/learnings.md` or a domain folder.
+Executable exploration. Scripts to probe an API, reproduce a bug, capture a flow, simulate inputs. Mostly throwaway, but worth keeping the *learnings* -- record them in the experiment's `README.md`.
 
 Each experiment is a **folder**, not a loose file:
 

@@ -68,7 +68,7 @@ _Avoid_: hooks (implies a broader lifecycle that does not exist), scripts (overl
 
 > **User:** "Can I run a refactor in `my-project/main/` while a bug fix is happening in `my-project/bug-fix/`?"
 > **Me:** "Yes -- they're peer working copies inside the same meta workspace. The native repos (`frontend`, `backend`) are independent clones in each copy, so the agents don't conflict on git ops."
-> **User:** "What about journal entries in `.workspace/journal/`?"
+> **User:** "What about experiments in `.workspace/lab/`?"
 > **Me:** "Those write through the symlink into the harness dir, so both copies see the same files. Last-write-wins on simultaneous edits, but in practice peers work on different scopes."
 > **User:** "And `cd my-project/main && git status`?"
 > **Me:** "Working copies aren't git repos at the top level. `cd my-project && git status` shows the meta's git state. The native repos still respond to `git status` from inside `my-project/main/frontend/`."

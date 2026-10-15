@@ -1,45 +1,22 @@
 # Workspace Index
 
-AI-assisted development workspace for **{{.ProjectName}}**. Organized by **lifecycle** first (durable / in-flight / experimental), then by subject.
+AI-assisted development workspace for **{{.ProjectName}}**.
 
 ## Top-level map
 
 | Folder | Lifecycle | What lives here |
 |---|---|---|
-| `knowledge/` | Durable. Curated. Read by agents. | Things that should still be true next sprint. |
-| `work/` | In-flight. Per-initiative. | Plans, research, notes for an active branch or initiative. Archive when shipped. |
-| `lab/` | Experimental. Often throwaway. | Executable scripts to probe APIs, capture flow, reproduce bugs. Promote learnings to `knowledge/`. |
-| `tickets/` | External system mirror. | Issue tracker cache (e.g., Jira/Linear). |
-| `decisions/` | Durable. Append-only. | Lightweight ADRs for one-way doors. |
-| `journal/` | Time-series. | Daily/session notes. Cheap context for the next session. |
+| `lab/` | Experimental. Often throwaway. | Executable scripts to probe APIs, capture flow, reproduce bugs. |
+| `adr/` | Durable. Append-only. | Lightweight ADRs for one-way doors. |
+| `agents/` | Durable. Config. | Where engineering skills find the issue tracker, triage labels, and domain docs. |
+| `GLOSSARY.md` | Durable. Canonical. | Domain vocabulary. Created lazily by `/domain-modeling`. |
+| `out-of-scope/` | Durable. | One file per rejected concept (`wontfix`). Created lazily by `/triage`. |
 
-## `knowledge/` -- the slow-changing layer
-
-| Subfolder | When to add to it |
-|---|---|
-| `domains/<flow>/` | A business flow we own. Each domain has the same shape: `overview.md`, `invariants.md`, `glossary.md`, `gotchas.md`, `key-files.md`. |
-| `integrations/<vendor>/` | A third-party system we call. Our notes live at the root; raw vendor docs/postman collections live under `vendor/`. |
-| `architecture/` | Cross-cutting: codemaps, infra, data model, auth model. Not tied to a single domain. |
-| `engineering/` | Generic patterns and external research. Not project-specific. |
-
-## `work/` -- the in-flight layer
-
-Each initiative is a folder. Use `_template/` as the scaffold:
-
-```
-work/<slug>/
-  README.md      status, PR/branch, owner, what + why
-  research/      initial discovery
-  plan/          specs, plans
-  notes/         running learnings, audits
-  artifacts/     screenshots, csv dumps, captured outputs
-```
-
-Move to `_archive/` when the initiative ships or is abandoned.
+In-flight work (tickets, draft glossary terms, draft ADRs) lives copy-local under `<copy-root>/.scratch/`, not here. See `agents/README.md`.
 
 ## `lab/` -- the experimental layer
 
-Each experiment is a folder, not a loose script. Mirrors `knowledge/integrations/` where it makes sense:
+Each experiment is a folder, not a loose script:
 
 ```
 lab/<vendor>/<experiment>/
@@ -56,5 +33,5 @@ lab/<vendor>/<experiment>/
 - Lowercase, kebab-case paths.
 - Every directory has a `README.md` (one paragraph: what's here, when to add to it).
 - Time-bound files use ISO date prefixes (`YYYY-MM-DD-...`).
-- Folders prefixed with `_` (`_template`, `_archive`, `_scratch`) are meta and sort to the bottom.
+- Folders prefixed with `_` (e.g. `_scratch`) are meta and sort to the bottom.
 - Frontmatter on docs where useful: `status`, `domain`, `owner`, `updated`, `related-pr`.

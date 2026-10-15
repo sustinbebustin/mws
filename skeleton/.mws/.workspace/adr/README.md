@@ -1,4 +1,4 @@
-# decisions/
+# adr/
 
 Lightweight ADRs (Architecture Decision Records) for one-way doors. Capture the *why* behind decisions that are hard to reverse, so future-you (and future agents) don't relitigate them.
 
