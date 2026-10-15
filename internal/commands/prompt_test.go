@@ -138,19 +138,19 @@ func TestRmWithoutTerminal(t *testing.T) {
 	f := seedWtWorkspace(t)
 	noTerminal(t)
 	withCwd(t, f.meta, func() {
-		if err := runRm(t.Context(), nopReporter{}, "c", rmFlags{}); ExitCode(err) != 2 {
+		if err := runRm(t.Context(), discardOut, "c", rmFlags{}); ExitCode(err) != 2 {
 			t.Fatalf("rm without --yes: %v (exit %d), want a usage error", err, ExitCode(err))
 		}
-		if err := runRm(t.Context(), nopReporter{}, "c", rmFlags{dryRun: true}); err != nil {
+		if err := runRm(t.Context(), discardOut, "c", rmFlags{dryRun: true}); err != nil {
 			t.Fatalf("rm --dry-run: %v", err)
 		}
 		if _, err := os.Stat(f.copy); err != nil {
 			t.Fatalf("rm --dry-run removed the copy: %v", err)
 		}
-		if err := runRm(t.Context(), nopReporter{}, "c", rmFlags{yes: true}); err != nil {
+		if err := runRm(t.Context(), discardOut, "c", rmFlags{yes: true}); err != nil {
 			t.Fatalf("rm --yes: %v", err)
 		}
-		err := runRm(t.Context(), nopReporter{}, "c", rmFlags{yes: true})
+		err := runRm(t.Context(), discardOut, "c", rmFlags{yes: true})
 		if ExitCode(err) != 4 || !strings.Contains(err.Error(), "previous rm already removed it") {
 			t.Fatalf("rm --yes of a copy already in the trash: %v (exit %d), want exit 4 naming the trash entry", err, ExitCode(err))
 		}
@@ -246,14 +246,14 @@ func TestAddRepoTwiceWithTheSameURLSucceeds(t *testing.T) {
 func TestTrashEmptyWithoutTerminalNeedsYes(t *testing.T) {
 	f := seedWtWorkspace(t)
 	withCwd(t, f.meta, func() {
-		if err := runRm(t.Context(), nopReporter{}, "c", rmFlags{yes: true}); err != nil {
+		if err := runRm(t.Context(), discardOut, "c", rmFlags{yes: true}); err != nil {
 			t.Fatal(err)
 		}
 		noTerminal(t)
-		if err := runTrashEmpty(t.Context(), nopReporter{}, confirmFlags{}); ExitCode(err) != 2 {
+		if err := runTrashEmpty(t.Context(), discardOut, confirmFlags{}); ExitCode(err) != 2 {
 			t.Fatalf("trash empty: %v (exit %d), want a usage error", err, ExitCode(err))
 		}
-		if err := runTrashEmpty(t.Context(), nopReporter{}, confirmFlags{dryRun: true}); err != nil {
+		if err := runTrashEmpty(t.Context(), discardOut, confirmFlags{dryRun: true}); err != nil {
 			t.Fatalf("trash empty --dry-run: %v", err)
 		}
 		if entries, _, _ := trash.List(f.meta); len(entries) != 1 {

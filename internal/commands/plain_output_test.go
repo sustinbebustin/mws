@@ -21,7 +21,7 @@ func TestPlainTrashListIsUnchanged(t *testing.T) {
 	meta, _ := setupRmTree(t, &config.Config{ProjectName: "demo"}, "feature-x")
 	var out, errb bytes.Buffer
 	withCwd(t, meta, func() {
-		if err := runRm(t.Context(), nopReporter{}, "feature-x", rmFlags{yes: true}); err != nil {
+		if err := runRm(t.Context(), discardOut, "feature-x", rmFlags{yes: true}); err != nil {
 			t.Fatalf("rm: %v", err)
 		}
 		if err := runTrashList(output{stdout: &out, stderr: &errb}); err != nil {
