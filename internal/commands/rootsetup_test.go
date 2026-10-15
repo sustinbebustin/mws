@@ -1,13 +1,17 @@
 package commands
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/BurntSushi/toml"
 	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/ports"
+	"github.com/sustinbebustin/mws/internal/project"
 )
 
 // withRootSetup gives the env fixture one root [[setup]] entry that records
@@ -122,6 +126,104 @@ func TestIncludeSetupRunsRepoSetupThenRootSetup(t *testing.T) {
 	}
 	if got, want := readFile(t, log), "repo\nroot\nroot\n"; got != want {
 		t.Errorf("after including a present repo, setup.log = %q, want %q", got, want)
+	}
+}
+
+// seedRenderedWorktree gives the worktree fixture a web port, a placeholder
+// env source and a [[renders]] target, renders copy c at slot 0, creates
+// worktree x from it, then moves c to slot 2 the way a claim would.
+func seedRenderedWorktree(t *testing.T) wtFixture {
+	t.Helper()
+	f := seedWtWorkspace(t)
+	f.cfg.Ports = &config.Ports{Port: []config.Port{{Name: "web", Base: 3000, Var: "PORT"}}}
+	f.cfg.Renders = []config.Render{{Source: ".mcp.json.render", Target: ".mcp.json"}}
+	f.saveConfig(t)
+	writeFileAll(t, filepath.Join(f.meta, project.EnvStagingDirName, "frontend", "app.env"), "PORT=${PORT}\n")
+	writeFileAll(t, filepath.Join(f.meta, project.HarnessDirName, ".mcp.json.render"), `{"port":${PORT}}`)
+	if res := runMWS(t, f.meta, "env", "sync", "c"); res.code != 0 {
+		t.Fatalf("sync at slot 0: exit %d\nstderr: %s", res.code, res.stderr)
+	}
+	mustNew(t, f.copy, "x", "--no-setup")
+	cfg, err := config.Load(f.meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ports.WriteLease(f.copy, ports.NewExports(cfg, f.meta, "c", 2)); err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+// markerHashes reads the carried-file hashes of the worktree at root.
+func markerHashes(t *testing.T, root string) map[string]string {
+	t.Helper()
+	var m struct {
+		Copied map[string]string `toml:"copied"`
+	}
+	if _, err := toml.DecodeFile(filepath.Join(root, project.WorktreeMarkerFileName), &m); err != nil {
+		t.Fatal(err)
+	}
+	return m.Copied
+}
+
+func sha256Hex(t *testing.T, p string) string {
+	t.Helper()
+	sum := sha256.Sum256([]byte(readFile(t, p)))
+	return hex.EncodeToString(sum[:])
+}
+
+func TestEnvSyncReRendersPristineWorktreeFilesAndTheirHashes(t *testing.T) {
+	f := seedRenderedWorktree(t)
+	wt := f.wtPath("x")
+
+	if res := runMWS(t, f.meta, "env", "sync", "c"); res.code != 0 {
+		t.Fatalf("sync: exit %d\nstderr: %s", res.code, res.stderr)
+	}
+	want := map[string]string{
+		"frontend/app.env": "PORT=3020\n",
+		".mcp.json":        `{"port":3020}`,
+		ports.LeaseFile:    readFile(t, ports.LeasePath(f.copy)),
+	}
+	hashes := markerHashes(t, wt)
+	for rel, body := range want {
+		p := filepath.Join(wt, filepath.FromSlash(rel))
+		if got := readFile(t, p); got != body {
+			t.Errorf("worktree %s = %q, want %q", rel, got, body)
+		}
+		if got, want := hashes[rel], sha256Hex(t, p); got != want {
+			t.Errorf("marker hash of %s = %q, want the new content's %q", rel, got, want)
+		}
+	}
+
+	if res := runWt(t, f.copy, "rm", "x"); res.code != 0 {
+		t.Fatalf("wt rm after a re-render: exit %d\nstderr: %s", res.code, res.stderr)
+	}
+}
+
+func TestEnvSyncLeavesAnEditedWorktreeFileAndWarns(t *testing.T) {
+	f := seedRenderedWorktree(t)
+	wt := f.wtPath("x")
+	edited := filepath.Join(wt, "frontend", "app.env")
+	writeFileAll(t, edited, "PORT=9999\n")
+
+	res := runMWS(t, f.meta, "env", "sync", "c")
+	if res.code != 0 {
+		t.Fatalf("sync: exit %d\nstderr: %s", res.code, res.stderr)
+	}
+	if got := readFile(t, edited); got != "PORT=9999\n" {
+		t.Errorf("edited worktree file was overwritten: %q", got)
+	}
+	warned := false
+	for _, line := range strings.Split(res.stderr, "\n") {
+		if strings.Contains(line, "[WARN]") && strings.Contains(line, "x") && strings.Contains(line, "frontend/app.env") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Errorf("no [WARN] naming worktree x and frontend/app.env:\n%s", res.stderr)
+	}
+	if got := readFile(t, filepath.Join(wt, ".mcp.json")); got != `{"port":3020}` {
+		t.Errorf("the other carried file was not re-rendered: %q", got)
 	}
 }
 

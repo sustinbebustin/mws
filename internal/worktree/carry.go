@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 
 	"github.com/sustinbebustin/mws/internal/atomicfile"
@@ -98,8 +99,9 @@ func mirrorRoot(r Reporter, metaRoot, copyPath, target, worktreesDir string, cop
 }
 
 // carryEnvs copies each configured env target from the copy's own repo, which
-// already holds this copy's values, into the matching inner worktree.
-func carryEnvs(r Reporter, cfg *config.Config, copyPath, target string, plan []plannedRepo) error {
+// already holds this copy's values, into the matching inner worktree,
+// recording each copy's hash in copied under its slash-separated path.
+func carryEnvs(r Reporter, cfg *config.Config, copyPath, target string, plan []plannedRepo, copied map[string]string) error {
 	byFolder := map[string]config.Repo{}
 	for _, repo := range append(append([]config.Repo{}, cfg.Repos...), cfg.OptionalRepos...) {
 		byFolder[repo.Folder] = repo
@@ -111,9 +113,15 @@ func carryEnvs(r Reporter, cfg *config.Config, copyPath, target string, plan []p
 				r.Warn(fmt.Sprintf("%s: env target %s is missing in the working copy, so the worktree has none; run `mws env sync` for the copy, then copy it in", p.folder, env.Target))
 				continue
 			}
-			if err := atomicfile.Copy(src, filepath.Join(target, p.folder, env.Target)); err != nil {
+			dst := filepath.Join(target, p.folder, env.Target)
+			if err := atomicfile.Copy(src, dst); err != nil {
 				return fmt.Errorf("%s: %w", p.folder, err)
 			}
+			h, err := fileSHA256(dst)
+			if err != nil {
+				return fmt.Errorf("%s: %w", p.folder, err)
+			}
+			copied[path.Join(p.folder, filepath.ToSlash(filepath.Clean(env.Target)))] = h
 			r.OK(fmt.Sprintf("%s: copied env %s", p.folder, env.Target))
 		}
 	}

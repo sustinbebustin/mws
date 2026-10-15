@@ -183,7 +183,7 @@ error   {error:{code, message}}                  # code: usage | refused | not_f
 
 `base` in `new` is a full commit id (the branch tip for a reused branch) and is omitted for a reused worktree. A setup failure under `--json` prints the full result object plus `error` (`setup_failed`) and exits 1.
 
-Related behavior of the other commands: `mws ls` appends `(+N worktrees)` to a copy; `mws rm <copy>` refuses while one of its worktrees has a live process and lists its worktrees in the confirmation; `mws restore` repairs the worktrees' git links; `mws relink` refreshes harness links in worktree roots; `mws trash prune|empty` prune stale meta worktree registrations; `mws env sync` updates only the copy, never its worktrees, and `mws env stage` refuses inside a worktree.
+Related behavior of the other commands: `mws ls` appends `(+N worktrees)` to a copy; `mws rm <copy>` refuses while one of its worktrees has a live process and lists its worktrees in the confirmation; `mws restore` repairs the worktrees' git links; `mws relink` refreshes harness links in worktree roots; `mws trash prune|empty` prune stale meta worktree registrations; every render of a copy (`clone`, `include`, `restore`, `mws env sync`) also refreshes each of its worktrees' carried files (the lease, the env targets, the `[[renders]]` targets) whose content still matches the hash in `.mws-worktree.toml`, updates that hash, and leaves one edited in the worktree alone with a `[WARN]` naming the worktree and the file; `mws env stage` refuses inside a worktree.
 
 Design rationale: [ADR-0011](./adr/0011-worktrees-are-children-of-a-working-copy.md).
 

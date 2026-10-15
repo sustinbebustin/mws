@@ -321,7 +321,7 @@ func (b *builder) build(ctx context.Context, r Reporter, opts NewOptions, plan [
 	if err != nil {
 		return nil, failuref("carry working-copy state into %s: %w", b.target, err)
 	}
-	if err := carryEnvs(r, opts.Config, copyPath, b.target, plan); err != nil {
+	if err := carryEnvs(r, opts.Config, copyPath, b.target, plan, copied); err != nil {
 		return nil, failuref("carry env files into %s: %w", b.target, err)
 	}
 

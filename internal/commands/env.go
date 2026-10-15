@@ -18,6 +18,7 @@ import (
 	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/ports"
 	"github.com/sustinbebustin/mws/internal/project"
+	"github.com/sustinbebustin/mws/internal/worktree"
 )
 
 const envLong = `env moves env files between env staging (<meta>/.envs/<repo>/<source>) and
@@ -212,8 +213,10 @@ func renderCopy(ctx context.Context, r Reporter, metaRoot string, cfg *config.Co
 
 // renderEnv is the render path: it renders every staged env file of the
 // working copy at copyPath at the copy's Port slot and writes it to its
-// target in the copy, overwriting it. clone, include, restore and `env sync`
-// all materialise env files through it. Under dryRun it changes nothing and
+// target in the copy, overwriting it, then refreshes the carried copies of
+// those files and of the lease in each of the copy's worktrees
+// (worktree.Rerender). clone, include, restore and `env sync` all
+// materialise env files through it. Under dryRun it changes nothing and
 // reports each file as would_copy. Progress, unsubstituted placeholders and
 // per-file failures go to r; the result says what happened to each file.
 func renderEnv(r Reporter, metaRoot string, cfg *config.Config, copyPath string, dryRun bool) envCopyResult {
@@ -229,6 +232,19 @@ func renderEnv(r Reporter, metaRoot string, cfg *config.Config, copyPath string,
 	}
 	for _, f := range files {
 		res.Files = append(res.Files, renderFile(r, metaRoot, f, exports, dryRun))
+	}
+	if dryRun {
+		return res
+	}
+	rels := []string{ports.LeaseFile}
+	for _, f := range files {
+		if rel, err := filepath.Rel(copyPath, f.target); err == nil && filepath.IsLocal(rel) {
+			rels = append(rels, filepath.ToSlash(rel))
+		}
+	}
+	if err := worktree.Rerender(r, copyPath, cfg.WorktreePolicy(), rels); err != nil {
+		res.Error = err.Error()
+		r.Fail(fmt.Sprintf("%s: refreshing its worktrees: %v; the copy's own files were rendered", res.Copy, err))
 	}
 	return res
 }
@@ -607,10 +623,12 @@ func relToMeta(metaRoot, p string) string {
 }
 
 // envCopyResult is one working copy's part of an env sync or stage result.
+// Error is set when refreshing the copy's worktrees failed.
 type envCopyResult struct {
 	Copy  string          `json:"copy"`
 	Path  string          `json:"path"`
 	Files []envFileResult `json:"files"`
+	Error string          `json:"error,omitempty"`
 }
 
 // envRunResult is the result of `mws env sync|stage`.
@@ -639,17 +657,25 @@ func (res envRunResult) print(o output, metaRoot string) error {
 
 // failure is the exit-1 error when any file failed to copy, or nil.
 func (res envRunResult) failure(invocation string) error {
-	failed := 0
+	failed, worktreesFailed := 0, 0
 	for _, c := range res.Copies {
 		for _, f := range c.Files {
 			if f.Status == envFailed {
 				failed++
 			}
 		}
+		if c.Error != "" {
+			worktreesFailed++
+		}
 	}
-	if failed == 0 {
-		return nil
+	var errs []error
+	if failed > 0 {
+		errs = append(errs, clierr.Failuref("%d env %s failed to copy (see the [FAIL] lines above); the other files were copied. Fix the cause and rerun `%s`",
+			failed, plural(failed, "file", "files"), invocation))
 	}
-	return clierr.Failuref("%d env %s failed to copy (see the [FAIL] lines above); the other files were copied. Fix the cause and rerun `%s`",
-		failed, plural(failed, "file", "files"), invocation)
+	if worktreesFailed > 0 {
+		errs = append(errs, clierr.Failuref("the worktrees of %d working %s were not fully refreshed (see the [FAIL] lines above); the copies' own files were written. Fix the cause and rerun `%s`",
+			worktreesFailed, plural(worktreesFailed, "copy", "copies"), invocation))
+	}
+	return errors.Join(errs...)
 }
