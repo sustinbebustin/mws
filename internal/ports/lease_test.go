@@ -8,6 +8,13 @@ import (
 	"testing"
 )
 
+func mkdir(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestReadSlotWithoutLeaseIsDefault(t *testing.T) {
 	slot, err := ReadSlot(t.TempDir())
 	if err != nil || slot != 0 {
