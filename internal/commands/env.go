@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -55,9 +56,15 @@ the copy is back on the staged defaults. --all syncs every working copy. A
 missing source is skipped with a warning; any file that fails to copy makes
 the command exit 1 after the rest are done.
 
-Worktrees are not refreshed: a worktree gets copies of the working copy's env
-targets when it is created and keeps them. Run from inside a worktree, sync
-updates its working copy, not the worktree.
+Each worktree of the copy gets its carried files (the lease, the env targets,
+the [[renders]] targets) refreshed too, but only those whose content still
+matches what mws carried there; one edited in the worktree is left alone with
+a warning. Run from inside a worktree, sync acts on its working copy.
+
+After each copy is rendered, the root [[setup]] commands run at the copy root
+with the copy's export set in the environment. --setup runs them without
+prompting and --no-setup skips them; without a terminal one of the two is
+required when [[setup]] is configured. --dry-run runs no setup.
 
 --dry-run prints one "would copy <source> -> <target>" line per file and
 changes nothing. --json prints
@@ -66,15 +73,28 @@ with status copied, would_copy, skipped or failed; repo is absent for a
 [[renders]] target.`,
 		Example: `  mws env sync
   mws env sync feature-x --dry-run
-  mws env sync --all --json`,
+  mws env sync --all --json --no-setup`,
 		Args: usageCheckedArgs(cobra.MaximumNArgs(1), jsonOut),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runEnvSync(newOutput(cmd, *jsonOut), copyArg(args), all, dryRun)
+			o := newOutput(cmd, *jsonOut)
+			choice, err := setupChoiceFlags(cmd)
+			if err != nil {
+				return o.fail(err)
+			}
+			return runEnvSync(cmd.Context(), o, copyArg(args), all, dryRun, choice)
 		},
 	}
 	cmd.Flags().BoolVar(&all, "all", false, "sync every working copy")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "name the files that would be copied; change nothing")
+	addSetupFlags(cmd)
 	return cmd
+}
+
+// addSetupFlags adds the --setup / --no-setup pair of a render command, which
+// setupChoiceFlags reads.
+func addSetupFlags(cmd *cobra.Command) {
+	cmd.Flags().Bool("setup", false, "run the root [[setup]] commands without prompting")
+	cmd.Flags().Bool("no-setup", false, "skip the root [[setup]] commands without prompting")
 }
 
 // copyArg is the optional [copy] positional argument, or "" when absent.
@@ -105,7 +125,7 @@ func envTargets(ws *project.Workspace, name string, all bool, invocation string)
 	return []string{target}, nil
 }
 
-func runEnvSync(o output, name string, all, dryRun bool) error {
+func runEnvSync(ctx context.Context, o output, name string, all, dryRun bool, choice setupChoice) error {
 	ws, cfg, err := o.locate()
 	if err != nil {
 		return err
@@ -114,15 +134,80 @@ func runEnvSync(o output, name string, all, dryRun bool) error {
 	if err != nil {
 		return o.fail(err)
 	}
+	invocation := "mws env sync"
+	switch {
+	case all:
+		invocation += " --all"
+	case name != "":
+		invocation += " " + name
+	}
+	runRoot := false
+	if !dryRun {
+		if runRoot, err = resolveRootSetup(cfg, choice, invocation); err != nil {
+			return o.fail(err)
+		}
+	}
 	r := o.reporter()
 	res := envRunResult{DryRun: dryRun, Copies: make([]envCopyResult, 0, len(copies))}
+	var setupErrs []error
 	for _, c := range copies {
-		res.Copies = append(res.Copies, renderEnv(r, ws.MetaRoot, cfg, c, dryRun))
+		cr, err := renderCopy(ctx, r, ws.MetaRoot, cfg, c, dryRun, runRoot, o.stderr)
+		res.Copies = append(res.Copies, cr)
+		if err != nil {
+			setupErrs = append(setupErrs, err)
+		}
 	}
 	if err := res.print(o, ws.MetaRoot); err != nil {
 		return err
 	}
-	return res.failure("mws env sync")
+	if err := errors.Join(append([]error{res.failure(invocation)}, setupErrs...)...); err != nil {
+		return clierr.Failuref("%w", err)
+	}
+	return nil
+}
+
+// rootSetupItems are the root [[setup]] commands, run at the copy root.
+func rootSetupItems(cfg *config.Config) []setupItem {
+	return collectSetup([]config.Repo{{Folder: ".", Setup: cfg.Setup}})
+}
+
+// resolveRootSetup decides, before anything changes, whether the root
+// [[setup]] commands run after a render: from --setup / --no-setup, else by
+// prompting. Without a terminal and without a flag it is a usage error naming
+// invocation with each flag, whenever [[setup]] is configured.
+func resolveRootSetup(cfg *config.Config, choice setupChoice, invocation string) (bool, error) {
+	items := rootSetupItems(cfg)
+	if err := requireSetupChoice(choice, items, invocation); err != nil {
+		return false, err
+	}
+	return confirmSetup(choice, items)
+}
+
+// renderCopy renders the working copy at copyPath through renderEnv and then,
+// when runRoot is set and not under dryRun, runs the root [[setup]] commands
+// at the copy root with the copy's export set, streaming their output to
+// setupOut. It is the whole of a render for the commands that clone nothing
+// (`env sync`, `ports claim`, `ports release`); clone and include run the
+// repos' setup between the two halves and call them separately. The error
+// names the setup commands that failed; the render result stands either way.
+func renderCopy(ctx context.Context, r Reporter, metaRoot string, cfg *config.Config, copyPath string, dryRun, runRoot bool, setupOut io.Writer) (envCopyResult, error) {
+	res := renderEnv(r, metaRoot, cfg, copyPath, dryRun)
+	if dryRun || !runRoot {
+		return res, nil
+	}
+	items := rootSetupItems(cfg)
+	if len(items) == 0 {
+		return res, nil
+	}
+	exports, err := copyExports(metaRoot, cfg, copyPath)
+	if err != nil {
+		return res, fmt.Errorf("%s: no root setup command ran: %w", res.Copy, err)
+	}
+	if failed := runSetup(ctx, r, copyPath, exports, items, setupOut, setupOut); len(failed) > 0 {
+		return res, fmt.Errorf("%s: %d root setup %s failed: %s; the env files were rendered. Fix the cause and rerun with --setup",
+			res.Copy, len(failed), plural(len(failed), "command", "commands"), strings.Join(failed, "; "))
+	}
+	return res, nil
 }
 
 // renderEnv is the render path: it renders every staged env file of the
