@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/sustinbebustin/mws/internal/config"
+	"github.com/sustinbebustin/mws/internal/ports"
 )
 
 func TestConfirmSetupFlagsBypassPrompt(t *testing.T) {
@@ -249,7 +250,7 @@ func TestRunSetupExecutionPolicy(t *testing.T) {
 		{Folder: "c", Cmd: "touch c-after-fail"},
 	}
 
-	failed := runSetup(context.Background(), nopReporter{}, target, items, io.Discard, io.Discard)
+	failed := runSetup(context.Background(), nopReporter{}, target, ports.Exports{}, items, io.Discard, io.Discard)
 
 	wantFailed := []string{"a: false", "c: false"}
 	if len(failed) != len(wantFailed) {

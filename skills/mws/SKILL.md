@@ -81,12 +81,12 @@ mws promote .mcp.json                                 # copy-local file -> share
 mws relink --dry-run                                  # then `mws relink`
 mws env diff feature-x                                # which env files differ from staging (exit 1 if any)
 mws env sync feature-x                                # .envs/ -> copy (overwrites the copy's env files)
-mws env stage feature-x                               # copy -> .envs/ (overwrites staging)
+mws env stage feature-x                               # copy -> .envs/ (overwrites staging; skips ${VAR} templates unless --force)
 ```
 
 - After adding a harness entry under `.mws/` by hand, run `mws relink` to link it into every copy.
 - Editors that save atomically replace a symlink with a regular file. `relink` restores identical files on its own; a diverged one needs `--prefer copy` (the copy's version wins), `harness` (the harness wins) or `skip`, which is the user's call.
-- Env files are copied, not linked, so copies can differ (ports, keys). Treat `env sync` and `env stage` as overwrites (`--dry-run` previews), and read the env file contents only when the task needs them.
+- Env files are rendered, not linked: `${VAR}` placeholders get the copy's port values, so copies can differ (ports, keys). Treat `env sync` and `env stage` as overwrites (`--dry-run` previews), and read the env file contents only when the task needs them.
 - `env sync` refreshes the copy, never its worktrees; `env stage` refuses inside a worktree.
 
 ## New meta workspace
