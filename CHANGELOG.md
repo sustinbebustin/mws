@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- `mws migrate`, the sibling-meta to meta-at-root converter.
+
 ## [0.7.0] - 2026-10-14
 
 ### Added
