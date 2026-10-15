@@ -221,6 +221,11 @@ func (c *Config) Validate() error {
 			return err
 		}
 	}
+	if c.Ports != nil {
+		if err := c.Ports.validate(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

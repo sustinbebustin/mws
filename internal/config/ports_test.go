@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -38,6 +39,81 @@ func TestRoundTripPortTables(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("round-trip mismatch\n got: %+v\nwant: %+v", got, want)
+	}
+}
+
+// validPorts returns a [ports] config that passes Validate; each case below
+// breaks or adjusts one thing.
+func validPorts() *Config {
+	return &Config{
+		ProjectName: "demo",
+		Ports: &Ports{Port: []Port{
+			{Name: "web", Base: 3000, Var: "WEB_PORT"},
+			{Name: "db", Base: 5432},
+		}},
+	}
+}
+
+func TestValidatePortTables(t *testing.T) {
+	cases := []struct {
+		name string
+		edit func(c *Config)
+		// wantKey is the key the error must name; empty means Validate passes.
+		wantKey string
+	}{
+		{"valid", func(c *Config) {}, ""},
+
+		{"port name not an identifier", func(c *Config) { c.Ports.Port[0].Name = "web-app" }, "ports.port[0].name"},
+		{"port name identifier with underscore", func(c *Config) { c.Ports.Port[0].Name = "web_app" }, ""},
+		{"empty port name", func(c *Config) { c.Ports.Port[1].Name = "" }, "ports.port[1].name"},
+		{"alias not an identifier", func(c *Config) { c.Ports.Port[0].Var = "1WEB" }, "ports.port[0].var"},
+
+		{"duplicate port name", func(c *Config) { c.Ports.Port[1].Name = "web" }, "ports.port[1].name"},
+		{"port names differing only in case export one variable", func(c *Config) { c.Ports.Port[1].Name = "WEB" }, "ports.port[1].name"},
+		{"duplicate alias", func(c *Config) { c.Ports.Port[1].Var = "WEB_PORT" }, "ports.port[1].var"},
+		{"alias equal to another port's variable", func(c *Config) { c.Ports.Port[1].Var = "MWS_PORT_WEB" }, "ports.port[1].var"},
+		{"alias equal to a builtin", func(c *Config) { c.Ports.Port[1].Var = "MWS_SLOT" }, "ports.port[1].var"},
+		{"alias equal to its own port variable", func(c *Config) { c.Ports.Port[1].Var = "MWS_PORT_DB" }, "ports.port[1].var"},
+		{"distinct alias", func(c *Config) { c.Ports.Port[1].Var = "DB_PORT" }, ""},
+
+		{"base 0", func(c *Config) { c.Ports.Port[1].Base = 0 }, "ports.port[1].base"},
+		{"base above 65535", func(c *Config) { c.Ports.Port[1].Base = 65536 }, "ports.port[1].base"},
+		{"base 65535", func(c *Config) { c.Ports.Port[1].Base = 65535 }, ""},
+		{"base 1", func(c *Config) { c.Ports.Port[1].Base = 1 }, ""},
+
+		{"stride 0", func(c *Config) { c.Ports.Stride = intp(0) }, "ports.stride"},
+		{"stride 1 with one port", func(c *Config) { c.Ports.Stride = intp(1); c.Ports.Port = c.Ports.Port[:1] }, ""},
+		{"slots 0", func(c *Config) { c.Ports.Slots = intp(0) }, "ports.slots"},
+		{"slots 1", func(c *Config) { c.Ports.Slots = intp(1) }, ""},
+		{"ports table without ports", func(c *Config) { c.Ports.Port = nil }, "ports.port"},
+
+		// 3000 and 3020 at stride 10: slot 2 of web is slot 0 of db.
+		{"congruent bases without a cap", func(c *Config) { c.Ports.Port[1].Base = 3020 }, "ports.port[1].base"},
+		{"congruent bases capped below the first collision", func(c *Config) { c.Ports.Port[1].Base = 3020; c.Ports.Slots = intp(1) }, ""},
+		{"congruent bases capped at the first collision", func(c *Config) { c.Ports.Port[1].Base = 3020; c.Ports.Slots = intp(2) }, "ports.slots"},
+		{"congruent bases one stride apart", func(c *Config) { c.Ports.Port[1].Base = 3010; c.Ports.Slots = intp(1) }, "ports.port[1].base"},
+		{"equal bases", func(c *Config) { c.Ports.Port[1].Base = 3000; c.Ports.Slots = intp(1) }, "ports.port[1].base"},
+		{"congruent under a custom stride", func(c *Config) { c.Ports.Stride = intp(100); c.Ports.Port[1].Base = 3100 }, "ports.port[1].base"},
+		{"not congruent under a custom stride", func(c *Config) { c.Ports.Stride = intp(100); c.Ports.Port[1].Base = 3010 }, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := validPorts()
+			tc.edit(c)
+			err := c.Validate()
+			if tc.wantKey == "" {
+				if err != nil {
+					t.Fatalf("Validate: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("Validate passed; want an error naming %s", tc.wantKey)
+			}
+			if !strings.Contains(err.Error(), tc.wantKey) {
+				t.Fatalf("error should name %s: %v", tc.wantKey, err)
+			}
+		})
 	}
 }
 
