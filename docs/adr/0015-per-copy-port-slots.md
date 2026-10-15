@@ -297,7 +297,7 @@ Each of those becomes a line of `.mws.toml` or a line in a staged source.
   `add-repo` appending to the config instead of re-encoding it, `init`
   committing the skeleton, `promote` linking into worktrees, `trash --json`
   on every subcommand, `--json` on `clone`, `rm` and `restore`,
-  `mws path <copy>`, and the removal of `migrate`.
+  `mws path <copy>`, and the removal of the sibling-meta converter.
 - **app migration** is config plus placeholders: the `[ports]` and
   `[vars]` tables below, placeholders in the nine staged files,
   `.mws/.mcp.json` renamed to `.mws/.mcp.json.render`, the two `.envrc` lines
