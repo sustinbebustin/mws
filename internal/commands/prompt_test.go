@@ -166,18 +166,18 @@ func TestRelinkDivergedFileWithoutTerminal(t *testing.T) {
 	mustWriteFile(t, filepath.Join(peer, ".mcp.json"), "peer")
 	noTerminal(t)
 	withCwd(t, meta, func() {
-		if err := runRelink(nopReporter{}, relinkFlags{}); ExitCode(err) != 2 || !strings.Contains(err.Error(), "--prefer") {
+		if err := runRelink(discardOut, relinkFlags{}); ExitCode(err) != 2 || !strings.Contains(err.Error(), "--prefer") {
 			t.Fatalf("relink: %v (exit %d), want a usage error naming --prefer", err, ExitCode(err))
 		}
-		if err := runRelink(nopReporter{}, relinkFlags{dryRun: true}); err != nil {
+		if err := runRelink(discardOut, relinkFlags{dryRun: true}); err != nil {
 			t.Fatalf("relink --dry-run: %v", err)
 		}
-		if err := runRelink(nopReporter{}, relinkFlags{prefer: resolveMeta}); err != nil {
-			t.Fatalf("relink --prefer meta: %v", err)
+		if err := runRelink(discardOut, relinkFlags{prefer: keepHarness}); err != nil {
+			t.Fatalf("relink --prefer harness: %v", err)
 		}
 	})
 	if st, err := os.Lstat(filepath.Join(peer, ".mcp.json")); err != nil || st.Mode()&os.ModeSymlink == 0 {
-		t.Fatalf("peer .mcp.json should be a harness symlink after --prefer meta: %v", err)
+		t.Fatalf("copy .mcp.json should be a harness symlink after --prefer harness: %v", err)
 	}
 }
 
@@ -201,11 +201,11 @@ func TestRelinkRefusesBeforeChangingAnything(t *testing.T) {
 		f    relinkFlags
 	}{
 		{"no terminal, no --prefer", relinkFlags{}},
-		{"--prefer peer with two versions", relinkFlags{prefer: resolvePeer}},
-		{"--dry-run --prefer peer", relinkFlags{prefer: resolvePeer, dryRun: true}},
+		{"--prefer copy with two versions", relinkFlags{prefer: takeCopy}},
+		{"--dry-run --prefer copy", relinkFlags{prefer: takeCopy, dryRun: true}},
 	} {
 		withCwd(t, meta, func() {
-			if err := runRelink(nopReporter{}, tc.f); ExitCode(err) != 2 {
+			if err := runRelink(discardOut, tc.f); ExitCode(err) != 2 {
 				t.Fatalf("%s: %v (exit %d), want a usage error", tc.name, err, ExitCode(err))
 			}
 		})

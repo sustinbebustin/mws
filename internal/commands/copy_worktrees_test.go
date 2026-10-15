@@ -96,7 +96,7 @@ func TestRelinkRepairsHarnessSymlinksInWorktrees(t *testing.T) {
 	gitignore := readFile(t, filepath.Join(root, ".gitignore"))
 
 	withCwd(t, f.meta, func() {
-		if err := runRelink(nopReporter{}, relinkFlags{}); err != nil {
+		if err := runRelink(discardOut, relinkFlags{}); err != nil {
 			t.Fatalf("runRelink: %v", err)
 		}
 	})
