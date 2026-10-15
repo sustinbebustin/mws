@@ -3,10 +3,13 @@ package commands
 import (
 	"net"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/sustinbebustin/mws/internal/config"
 	"github.com/sustinbebustin/mws/internal/ports"
+	"github.com/sustinbebustin/mws/internal/project"
 )
 
 // withFreePort gives the env fixture a [ports] table with one port, web
@@ -14,6 +17,21 @@ import (
 // the listener probe of a claim does not trip over the host's own services.
 // It returns the base.
 func (f envFixture) withFreePort(t *testing.T) int {
+	t.Helper()
+	cfg, err := config.Load(f.meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Ports = freePortTable(t)
+	if err := config.Save(f.meta, cfg); err != nil {
+		t.Fatal(err)
+	}
+	return cfg.Ports.Port[0].Base
+}
+
+// freePortTable is a [ports] table with one port, web aliased PORT, based at
+// a port the OS just handed out as free.
+func freePortTable(t *testing.T) *config.Ports {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -26,15 +44,7 @@ func (f envFixture) withFreePort(t *testing.T) int {
 	if err := l.Close(); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := config.Load(f.meta)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg.Ports = &config.Ports{Port: []config.Port{{Name: "web", Base: addr.Port, Var: "PORT"}}}
-	if err := config.Save(f.meta, cfg); err != nil {
-		t.Fatal(err)
-	}
-	return addr.Port
+	return &config.Ports{Port: []config.Port{{Name: "web", Base: addr.Port, Var: "PORT"}}}
 }
 
 // slotOf reads the Port slot the lease of the working copy at dir records.
@@ -82,5 +92,107 @@ func TestPortsClaimTakesTheLowestFreeSlotAndReleaseGivesItBack(t *testing.T) {
 	mustPorts(t, f.meta, "claim", "b")
 	if got := slotOf(t, f.copy("b")); got != 2 {
 		t.Fatalf("re-claim moved b to slot %d, want it kept on 2", got)
+	}
+}
+
+func TestPortsClaimRefusesAHeldSlotAndAConflict(t *testing.T) {
+	f := seedEnvWorkspace(t)
+	f.withFreePort(t)
+	mustMkdir(t, filepath.Join(f.copy("c"), "frontend"))
+	mustPorts(t, f.meta, "claim", "a", "--slot", "2")
+
+	res := runMWS(t, f.meta, "ports", "claim", "b", "--slot", "2")
+	if res.code != 3 || !strings.Contains(res.stderr, `"a"`) {
+		t.Fatalf("claim --slot of a held slot: exit %d, want 3 naming holder a\nstderr: %s", res.code, res.stderr)
+	}
+	if got := slotOf(t, f.copy("b")); got != 0 {
+		t.Fatalf("refused claim left b on slot %d, want 0", got)
+	}
+
+	// b duplicates a's lease, as `cp -r` would.
+	writeFileAll(t, ports.LeasePath(f.copy("b")), readFile(t, ports.LeasePath(f.copy("a"))))
+	res = runMWS(t, f.meta, "ports", "claim", "c")
+	if res.code != 3 || !strings.Contains(res.stderr, "a, b") {
+		t.Fatalf("claim with a conflict: exit %d, want 3 naming a and b\nstderr: %s", res.code, res.stderr)
+	}
+	if got := slotOf(t, f.copy("c")); got != 0 {
+		t.Fatalf("refused claim gave c slot %d", got)
+	}
+
+	// --slot settles the conflict.
+	mustPorts(t, f.meta, "claim", "b", "--slot", "1")
+	mustPorts(t, f.meta, "claim", "c")
+	if got := slotOf(t, f.copy("c")); got != 3 {
+		t.Fatalf("after settling, c claimed slot %d, want 3", got)
+	}
+
+	res = runMWS(t, f.meta, "ports", "claim", "nope")
+	if res.code != 4 {
+		t.Fatalf("claim of an unknown copy: exit %d, want 4\nstderr: %s", res.code, res.stderr)
+	}
+}
+
+func TestPortsClaimDryRunChangesNothing(t *testing.T) {
+	f := seedEnvWorkspace(t)
+	f.withFreePort(t)
+	writeFileAll(t, f.staged("frontend", "root.env"), "PORT=${PORT}\n")
+
+	got := wouldLines(t, runMWS(t, f.meta, "ports", "claim", "a", "--dry-run"))
+	want := []string{"would claim slot 1 for a", "would copy .envs/frontend/root.env -> a/frontend/.env"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("dry-run lines = %q, want %q", got, want)
+	}
+	if slotOf(t, f.copy("a")) != 0 || fileExists(filepath.Join(f.copy("a"), "frontend", ".env")) {
+		t.Fatal("dry run changed the copy")
+	}
+}
+
+func TestPortsReleaseOnTheDefaultsSaysSo(t *testing.T) {
+	f := seedEnvWorkspace(t)
+	f.withFreePort(t)
+	res := mustPorts(t, f.meta, "release", "a")
+	if !strings.Contains(res.stderr, "already on the default ports") {
+		t.Fatalf("stderr does not say a is on the defaults:\n%s", res.stderr)
+	}
+}
+
+func TestPortsReleaseAfterClaimRestoresTheBytesOfAFreshClone(t *testing.T) {
+	f := seedWtWorkspace(t)
+	f.cfg.Ports = freePortTable(t)
+	f.cfg.Vars = map[string]string{"SITE_URL": "http://localhost:${PORT}"}
+	f.cfg.Renders = []config.Render{{Source: ".mcp.json.render", Target: ".mcp.json"}}
+	f.cfg.Setup = []config.SetupCommand{{Cmd: `printf '%s\n' "$MWS_SLOT" >> setup.out`}}
+	f.saveConfig(t)
+	staged := "PORT=${PORT}\nURL=${SITE_URL}\nHOME=$HOME\n"
+	writeFileAll(t, filepath.Join(f.meta, project.EnvStagingDirName, "frontend", "app.env"), staged)
+	writeFileAll(t, filepath.Join(f.meta, project.HarnessDirName, ".mcp.json.render"), `{"port":${MWS_PORT_WEB}}`)
+
+	if res := runMWS(t, f.meta, "clone", "d", "--no-optional", "--no-setup"); res.code != 0 {
+		t.Fatalf("clone: exit %d\nstderr: %s", res.code, res.stderr)
+	}
+	copyDir := filepath.Join(f.meta, "d")
+	targets := []string{filepath.Join(copyDir, "frontend", "app.env"), filepath.Join(copyDir, ".mcp.json")}
+	fresh := make([]string, len(targets))
+	for i, p := range targets {
+		fresh[i] = readFile(t, p)
+	}
+
+	mustPorts(t, f.meta, "claim", "d", "--setup")
+	for i, p := range targets {
+		if readFile(t, p) == fresh[i] {
+			t.Errorf("claim left %s at the fresh clone's bytes %q", p, fresh[i])
+		}
+	}
+	mustPorts(t, f.meta, "release", "d", "--setup")
+	for i, p := range targets {
+		if got := readFile(t, p); got != fresh[i] {
+			t.Errorf("after claim and release %s = %q, want the fresh clone's %q", p, got, fresh[i])
+		}
+	}
+	if fileExists(ports.LeasePath(copyDir)) {
+		t.Error("release kept the lease")
+	}
+	if got := readFile(t, filepath.Join(copyDir, "setup.out")); got != "1\n0\n" {
+		t.Errorf("root setup saw slots %q, want 1 then 0", got)
 	}
 }
