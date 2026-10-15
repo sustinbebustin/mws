@@ -258,6 +258,50 @@ func TestPortsLsShowsSlotsConflictsAndTheNextFreeSlot(t *testing.T) {
 	}
 }
 
+func TestPortsClaimSkipsASlotWithAListenerAndCheckReportsIt(t *testing.T) {
+	f := seedEnvWorkspace(t)
+	base := f.withFreePort(t)
+	busy := base + 10
+	l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(busy)))
+	if err != nil {
+		t.Skipf("cannot hold slot 1's port %d for the test: %v", busy, err)
+	}
+	t.Cleanup(func() { _ = l.Close() })
+
+	res := mustPorts(t, f.meta, "claim", "a")
+	if got := slotOf(t, f.copy("a")); got != 2 {
+		t.Fatalf("a claimed slot %d, want 2 past the busy slot 1", got)
+	}
+	if !strings.Contains(res.stderr, "[WARN] slot 1 skipped: port "+strconv.Itoa(busy)) {
+		t.Errorf("stderr does not warn that slot 1 was skipped for port %d:\n%s", busy, res.stderr)
+	}
+
+	mustPorts(t, f.meta, "claim", "b", "--slot", "1")
+	if got := slotOf(t, f.copy("b")); got != 1 {
+		t.Fatalf("--slot 1 gave b slot %d, want 1 despite the listener", got)
+	}
+
+	res = mustPorts(t, f.copy("b"), "check")
+	if want := "web  " + strconv.Itoa(busy) + "  listening\n"; !strings.Contains(res.stdout, want) {
+		t.Errorf("check stdout lacks %q:\n%s", want, res.stdout)
+	}
+	res = mustPorts(t, f.meta, "check", "a", "--json")
+	var out struct {
+		Slot  int `json:"slot"`
+		Ports []struct {
+			Name      string `json:"name"`
+			Port      int    `json:"port"`
+			Listening bool   `json:"listening"`
+		} `json:"ports"`
+	}
+	if err := json.Unmarshal([]byte(res.stdout), &out); err != nil {
+		t.Fatalf("stdout is not one JSON object: %v\n%s", err, res.stdout)
+	}
+	if out.Slot != 2 || len(out.Ports) != 1 || out.Ports[0].Port != base+20 || out.Ports[0].Listening {
+		t.Errorf("check a --json = %+v, want web at %d free", out, base+20)
+	}
+}
+
 func TestPortsReleaseAfterClaimRestoresTheBytesOfAFreshClone(t *testing.T) {
 	f := seedWtWorkspace(t)
 	f.cfg.Ports = freePortTable(t)

@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -51,8 +52,87 @@ func newPortsCmd() *cobra.Command {
 	}
 	cmd.PersistentFlags().BoolVar(&jsonOut, "json", false, "print results as JSON")
 	addExportFlag(cmd, &export)
-	cmd.AddCommand(newPortsShowCmd(&jsonOut), newPortsLsCmd(&jsonOut), newPortsClaimCmd(&jsonOut), newPortsReleaseCmd(&jsonOut))
+	cmd.AddCommand(
+		newPortsShowCmd(&jsonOut),
+		newPortsLsCmd(&jsonOut),
+		newPortsClaimCmd(&jsonOut),
+		newPortsReleaseCmd(&jsonOut),
+		newPortsCheckCmd(&jsonOut),
+	)
 	return cmd
+}
+
+func newPortsCheckCmd(jsonOut *bool) *cobra.Command {
+	return &cobra.Command{
+		Use:   "check [copy]",
+		Short: "Report which of a working copy's ports have a listener",
+		Long: `check bind-probes every port of the working copy's slot on 127.0.0.1 and the
+wildcard address and prints one "<name>  <port>  listening|free" line each. A
+listener may be the copy's own stack or another process. It changes nothing
+and exits 0 either way; a port mws cannot probe (a privileged one, say) is a
+failure.
+
+--json prints {"copy", "path", "slot", "ports": [{"name", "port", "listening"}]}.`,
+		Example: `  mws ports check
+  mws ports check feature-x --json`,
+		Args: usageCheckedArgs(cobra.MaximumNArgs(1), jsonOut),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runPortsCheck(newOutput(cmd, *jsonOut), copyArg(args))
+		},
+	}
+}
+
+type portCheckJSON struct {
+	Name      string `json:"name"`
+	Port      int    `json:"port"`
+	Listening bool   `json:"listening"`
+}
+
+func runPortsCheck(o output, name string) error {
+	ws, cfg, err := o.locate()
+	if err != nil {
+		return err
+	}
+	policy, err := portPolicy(cfg, ws)
+	if err != nil {
+		return o.fail(err)
+	}
+	copyPath, err := portsCopy(ws, name, "mws ports check <copy>")
+	if err != nil {
+		return o.fail(err)
+	}
+	slot, err := ports.ReadSlot(copyPath)
+	if err != nil {
+		return o.fail(clierr.Failuref("%w", err))
+	}
+	slotPorts := ports.SlotPorts(policy, slot)
+	listening, err := ports.Listeners(slotPorts)
+	if err != nil {
+		return o.fail(clierr.Failuref("%w", err))
+	}
+	checks := make([]portCheckJSON, len(slotPorts))
+	width := 0
+	for i, p := range policy.Ports {
+		checks[i] = portCheckJSON{Name: p.Name, Port: slotPorts[i], Listening: slices.Contains(listening, slotPorts[i])}
+		width = max(width, len(p.Name))
+	}
+	return o.result(struct {
+		Copy  string          `json:"copy"`
+		Path  string          `json:"path"`
+		Slot  int             `json:"slot"`
+		Ports []portCheckJSON `json:"ports"`
+	}{filepath.Base(copyPath), copyPath, slot, checks}, func(w io.Writer) error {
+		for _, c := range checks {
+			state := "free"
+			if c.Listening {
+				state = "listening"
+			}
+			if _, err := fmt.Fprintf(w, "%-*s  %d  %s\n", width, c.Name, c.Port, state); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func newPortsLsCmd(jsonOut *bool) *cobra.Command {
