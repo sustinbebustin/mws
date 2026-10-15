@@ -256,8 +256,9 @@ func TestPortPolicyEightPortApp(t *testing.T) {
 	if !ok {
 		t.Fatal("PortPolicy reported no [ports] for app")
 	}
-	// No pair is congruent modulo 10, so the 65535 bound decides: the highest
-	// base, 54323, stays in range up to slot 1121 (65533).
+	// The 65535 bound decides: the highest base, 54323, stays in range up to
+	// slot 1121 (65533). Some pairs are congruent modulo 10 (3000 and 54320,
+	// for one), but their first collision, slot 5132, lies above that bound.
 	if p.Limit != 1121 {
 		t.Fatalf("Limit = %d, want 1121", p.Limit)
 	}

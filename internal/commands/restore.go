@@ -113,6 +113,7 @@ func runRestore(ctx context.Context, r Reporter, name, as string, yes bool) erro
 	}
 
 	renderEnv(r, ws.MetaRoot, cfg, dest, false)
+	writeCdFile(r, dest)
 	return nil
 }
 

@@ -74,3 +74,38 @@ func TestCopyFileLeavesNoTempOnSuccess(t *testing.T) {
 		}
 	}
 }
+
+func TestWriteReplacesContentAndPerms(t *testing.T) {
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "out", "dst")
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, []byte("old content, longer"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(dst, []byte("new"), 0o644); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "new" {
+		t.Fatalf("content = %q, want %q", got, "new")
+	}
+	st, err := os.Stat(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Mode().Perm() != 0o644 {
+		t.Fatalf("perm = %o, want 644", st.Mode().Perm())
+	}
+	entries, err := os.ReadDir(filepath.Dir(dst))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("dst dir holds %d entries, want only dst", len(entries))
+	}
+}

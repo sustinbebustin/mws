@@ -287,13 +287,19 @@ func requireSetupChoice(choice setupChoice, items []setupItem, invocation string
 // the user's mws shell function set MWS_CD_FILE, writes it there so the
 // parent shell can cd into it -- a child process can't chdir its parent.
 func handOffCopy(r Reporter, out io.Writer, target string) error {
+	writeCdFile(r, target)
+	_, err := fmt.Fprintln(out, target)
+	return err
+}
+
+// writeCdFile writes target to $MWS_CD_FILE when the user's mws shell function
+// set it (ADR-0008). Failing to write only costs the auto-cd, so it warns.
+func writeCdFile(r Reporter, target string) {
 	if cdFile := os.Getenv("MWS_CD_FILE"); cdFile != "" {
 		if err := os.WriteFile(cdFile, []byte(target), 0o600); err != nil {
 			r.Warn(fmt.Sprintf("could not write MWS_CD_FILE %s: %v", cdFile, err))
 		}
 	}
-	_, err := fmt.Fprintln(out, target)
-	return err
 }
 
 // clonePromptDescription renders the help text shown under the "New working
