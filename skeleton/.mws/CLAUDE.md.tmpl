@@ -2,30 +2,32 @@
 
 {{if .Description}}{{.Description}}
 
-{{end}}This is a **working copy** inside the meta workspace `{{.ProjectName}}/`, managed by [`mws`](https://github.com/sustinbebustin/mws). Harness entries (`.claude/`, `.workspace/`, `CLAUDE.md`, ...) are symlinks pointing into the parent meta's `.mws/` -- shared across every working copy. Native repos below are independent git checkouts owned by this working copy.
-
-## Structure
+{{end}}## Structure
 
 ```
-<this working copy>/                # not a git repo at the top level
+<working copy>/           # your current working directory
 {{- range .Repos}}
-- {{.Folder}}/                # native git repo (own .git/, own branch)
+├── {{.Folder}}/            # native git repo
 {{- end}}
-- .workspace/             # AI dev workspace (see .workspace/INDEX.md), symlinked from ../.mws/
-- .claude/                # AI harness config, symlinked from ../.mws/
-- CLAUDE.md               # this file, symlinked from ../.mws/
+└── .workspace/           # AI dev workspace (see .workspace/INDEX.md)
+    ├── GLOSSARY.md       # canonical domain glossary (created on first use)
+    ├── agents/           # skill config: issue tracker, triage labels, domain docs
+    ├── adr/              # ADRs
+    └── lab/              # exploration scripts + captured runs
 ```
 
-The meta workspace root sits at `../` and IS the git repo: `cd .. && git ...` commits harness changes there.
+## Agent skills
 
-## Workflow
+Config for `to-tickets`, `to-spec`, `triage`, `domain-modeling`, `wayfinder`. Shared across working copies; in-flight artifacts are copy-local. Details: `.workspace/agents/README.md`.
 
-- Commit harness/config changes from the meta root: `cd .. && git add .gitignore .mws.toml .mws README.md && git commit`.
-- Commit code changes inside the relevant native repo: `cd <repo> && git ...`.
-- Spin up parallel work via `mws clone <name>` -- creates a sibling working copy `../<name>/` sharing the same meta and harness.
-- Promote a file from this working copy into the harness (so other working copies see it) with `mws promote <path>` -- the file moves into `../.mws/` and is replaced here with a symlink.
-- Reset env files to staged defaults: `mws sync-env <this-copy>`. Capture your current env values into staging: `mws stage-env <this-copy>`.
+### Issue tracker
 
-## Conventions
+Local markdown under `<copy-root>/.scratch/<feature>/issues/`. Not the native repos' remotes -- don't write there. When work comes from a ticket, that ticket's `Status:` and acceptance checkboxes are part of the work: tick each criterion as it passes, set `Status: resolved` at the end. See `.workspace/agents/issue-tracker.md`.
 
-Project-specific conventions live under `.claude/rules/` and `.workspace/knowledge/`. Start there.
+### Triage labels
+
+Five canonical roles plus the terminal `resolved`, written as a `Status:` line in the issue file. See `.workspace/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context, two-tier. Canonical `.workspace/GLOSSARY.md` (read it before domain work or naming domain concepts) + `.workspace/adr/`; write provisional terms and unnumbered draft ADRs to `<copy-root>/.scratch/`, promote on ship. See `.workspace/agents/domain.md`.

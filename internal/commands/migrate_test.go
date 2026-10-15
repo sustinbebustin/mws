@@ -126,7 +126,7 @@ func TestMigrateFromOldMetaPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := string(gi)
-	for _, want := range []string{"/*", "!/.gitignore", "!/.mws.toml", "!/.mws/", "!/README.md"} {
+	for _, want := range []string{"/*", "!/.gitignore", "!/.mws.toml", "!/.mws/", "!/README.md", "!/CLAUDE.md"} {
 		if !contains(body, want) {
 			t.Fatalf("allowlist missing %q; got:\n%s", want, body)
 		}

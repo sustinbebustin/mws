@@ -428,7 +428,8 @@ func writeAllowlistGitignore(staging string) error {
 		"!/.gitignore\n" +
 		"!/.mws.toml\n" +
 		"!/.mws/\n" +
-		"!/README.md\n"
+		"!/README.md\n" +
+		"!/CLAUDE.md\n"
 	return os.WriteFile(filepath.Join(staging, ".gitignore"), []byte(body), 0o644)
 }
 

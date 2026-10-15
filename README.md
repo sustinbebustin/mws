@@ -96,6 +96,7 @@ mws list
 ```
 my-project/                       # this directory IS a git repo (meta root)
 ├── .gitignore                    # allowlist
+├── CLAUDE.md                     # mws workspace notes, loaded from every working copy by walk-up
 ├── .mws.toml                     # Project name, native repos, env mappings
 ├── .mws/                         # Harness; every entry symlinks into every working copy
 │   ├── CLAUDE.md

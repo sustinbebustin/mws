@@ -38,6 +38,16 @@ func TestRenderEmbeddedSkeleton(t *testing.T) {
 		t.Fatalf(".mws/CLAUDE.md missing repo folder; got:\n%s", string(claude))
 	}
 
+	// CLAUDE.md.tmpl -> CLAUDE.md at meta root, holding the mws workspace notes
+	// every working copy inherits by walk-up.
+	rootClaude, err := os.ReadFile(filepath.Join(dst, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	if !strings.Contains(string(rootClaude), "mws clone") {
+		t.Fatalf("CLAUDE.md missing mws workflow; got:\n%s", string(rootClaude))
+	}
+
 	// README.md.tmpl -> README.md at meta root.
 	readme, err := os.ReadFile(filepath.Join(dst, "README.md"))
 	if err != nil {
@@ -56,7 +66,7 @@ func TestRenderEmbeddedSkeleton(t *testing.T) {
 		t.Fatalf("read .gitignore: %v", err)
 	}
 	body := string(gi)
-	for _, want := range []string{"/*", "!/.gitignore", "!/.mws.toml", "!/.mws/", "!/README.md"} {
+	for _, want := range []string{"/*", "!/.gitignore", "!/.mws.toml", "!/.mws/", "!/README.md", "!/CLAUDE.md"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("meta-root .gitignore missing %q; got:\n%s", want, body)
 		}
@@ -106,8 +116,8 @@ func TestRenderEmbeddedSkeleton(t *testing.T) {
 		}
 	}
 
-	// CLAUDE.md should NOT appear at meta root -- it lives in .mws/ for fan-out.
-	if _, err := os.Stat(filepath.Join(dst, "CLAUDE.md")); err == nil {
-		t.Fatalf("CLAUDE.md should not exist at meta root; it belongs in .mws/")
+	// mws workspace notes live only in the meta-root CLAUDE.md; .mws/CLAUDE.md is project content.
+	if strings.Contains(string(claude), "mws clone") {
+		t.Fatalf(".mws/CLAUDE.md should not carry mws workflow notes; got:\n%s", string(claude))
 	}
 }

@@ -23,7 +23,8 @@ mws add-repo <git-url> [folder]
 
 ```
 {{.ProjectName}}/                  # this directory (git-versioned)
-  .gitignore               # allowlist: only tracks .gitignore, .mws.toml, .mws/, README.md
+  .gitignore               # allowlist: only tracks .gitignore, .mws.toml, .mws/, README.md, CLAUDE.md
+  CLAUDE.md                # mws workspace notes; Claude Code loads it from every working copy by walk-up
   .mws.toml                # mws config (project name, repos, env mappings)
   .mws/                    # harness; everything here symlinks into every working copy
   .envs/                   # env staging (per-repo files, copied into working copies on clone)
