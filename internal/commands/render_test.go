@@ -89,6 +89,36 @@ func TestCloneRendersHarnessRenderSourceToARegularFileAtTheCopyRoot(t *testing.T
 	}
 }
 
+func TestEnvStageSkipsAPlaceholderSourceAndForceStagesTheRenderedFile(t *testing.T) {
+	f := seedEnvWorkspace(t)
+	f.withPorts(t)
+	writeFileAll(t, f.staged("frontend", "root.env"), "PORT=${PORT}\n")
+	writeFileAll(t, filepath.Join(f.copy("a"), "frontend", ".env"), "PORT=3000\n")
+	writeFileAll(t, filepath.Join(f.copy("a"), "frontend", "apps", "internal", ".env"), "INTERNAL=live\n")
+
+	res := runMWS(t, f.meta, "env", "stage", "a")
+	if res.code != 0 {
+		t.Fatalf("exit %d, want 0\nstderr: %s", res.code, res.stderr)
+	}
+	if got := readFile(t, f.staged("frontend", "root.env")); got != "PORT=${PORT}\n" {
+		t.Errorf("placeholder source was overwritten: %q", got)
+	}
+	if got := readFile(t, f.staged("frontend", "apps-internal.env")); got != "INTERNAL=live\n" {
+		t.Errorf("the other file was not staged: %q", got)
+	}
+	if !strings.Contains(res.stderr, "[WARN] .envs/frontend/root.env") || !strings.Contains(res.stderr, "--force") {
+		t.Errorf("stderr does not warn naming the skipped source and --force:\n%s", res.stderr)
+	}
+
+	res = runMWS(t, f.meta, "env", "stage", "a", "--force")
+	if res.code != 0 {
+		t.Fatalf("--force: exit %d, want 0\nstderr: %s", res.code, res.stderr)
+	}
+	if got := readFile(t, f.staged("frontend", "root.env")); got != "PORT=3000\n" {
+		t.Errorf("--force staged %q, want the rendered bytes", got)
+	}
+}
+
 func TestEnvDiffComparesTheRenderedForm(t *testing.T) {
 	f := seedEnvWorkspace(t)
 	f.withPorts(t)

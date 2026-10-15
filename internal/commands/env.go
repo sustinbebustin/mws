@@ -200,7 +200,7 @@ func placeholderList(names []string) string {
 }
 
 func newEnvStageCmd(jsonOut *bool) *cobra.Command {
-	var dryRun bool
+	var force, dryRun bool
 	cmd := &cobra.Command{
 		Use:   "stage [copy]",
 		Short: "Capture a working copy's env files into staging (overwrites)",
@@ -210,6 +210,11 @@ clones and syncs reproduce. A missing file in the copy is skipped with a
 warning; any file that fails to copy makes the command exit 1 after the rest
 are done.
 
+A staged source holding ${VAR} placeholders is skipped with a warning, so a
+template is never baked to one copy's ports; the other files are still
+staged and the command exits 0. --force stages the copy's rendered file over
+it anyway. [[renders]] targets are never staged.
+
 stage refuses (exit 3) when run inside a worktree: it captures the working
 copy's files, not the worktree's.
 
@@ -217,17 +222,19 @@ copy's files, not the worktree's.
 changes nothing. --json prints the same object as sync, with from the copy's
 file and to the staged one.`,
 		Example: `  mws env stage
-  mws env stage feature-x --dry-run`,
+  mws env stage feature-x --dry-run
+  mws env stage --force`,
 		Args: usageCheckedArgs(cobra.MaximumNArgs(1), jsonOut),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runEnvStage(newOutput(cmd, *jsonOut), copyArg(args), dryRun)
+			return runEnvStage(newOutput(cmd, *jsonOut), copyArg(args), force, dryRun)
 		},
 	}
+	cmd.Flags().BoolVar(&force, "force", false, "stage over sources holding ${VAR} placeholders too")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "name the files that would be staged; change nothing")
 	return cmd
 }
 
-func runEnvStage(o output, name string, dryRun bool) error {
+func runEnvStage(o output, name string, force, dryRun bool) error {
 	ws, cfg, err := o.locate()
 	if err != nil {
 		return err
@@ -243,12 +250,16 @@ func runEnvStage(o output, name string, dryRun bool) error {
 	r := o.reporter()
 	res := envRunResult{DryRun: dryRun, Copies: make([]envCopyResult, 0, len(copies))}
 	for _, c := range copies {
-		files := envFilesOf(r, ws.MetaRoot, cfg, c)
-		moves := make([]envMove, len(files))
-		for i, f := range files {
-			moves[i] = envMove{repo: f.repo, from: f.target, to: f.source}
+		exports, err := copyExports(ws.MetaRoot, cfg, c)
+		if err != nil {
+			return o.fail(clierr.Failuref("%s: %w; nothing was staged", filepath.Base(c), err))
 		}
-		res.Copies = append(res.Copies, envCopyResult{Copy: filepath.Base(c), Path: c, Files: moveEnvFiles(r, ws.MetaRoot, moves, dryRun)})
+		files := envFilesOf(r, ws.MetaRoot, cfg, c)
+		cr := envCopyResult{Copy: filepath.Base(c), Path: c, Files: make([]envFileResult, 0, len(files))}
+		for _, f := range files {
+			cr.Files = append(cr.Files, stageEnvFile(r, ws.MetaRoot, f, exports, force, dryRun))
+		}
+		res.Copies = append(res.Copies, cr)
 	}
 	if err := res.print(o, ws.MetaRoot); err != nil {
 		return err
@@ -433,11 +444,6 @@ func renderedFilesOf(r Reporter, metaRoot string, cfg *config.Config, copyPath s
 	return files
 }
 
-// envMove is one file copy of an env subcommand.
-type envMove struct {
-	repo, from, to string
-}
-
 // Status values of one file in an env sync or stage result.
 const (
 	envCopied    = "copied"
@@ -455,32 +461,48 @@ type envFileResult struct {
 	Error  string `json:"error,omitempty"`
 }
 
-// moveEnvFiles copies each move's from onto its to, or under dryRun only
-// reports it. A missing from is skipped with a warning; a failed copy is
-// reported and the rest still run.
-func moveEnvFiles(r Reporter, metaRoot string, moves []envMove, dryRun bool) []envFileResult {
-	out := make([]envFileResult, 0, len(moves))
-	for _, m := range moves {
-		res := envFileResult{Repo: m.repo, From: m.from, To: m.to}
-		from, to := relToMeta(metaRoot, m.from), relToMeta(metaRoot, m.to)
-		switch _, err := os.Stat(m.from); {
-		case err != nil:
-			res.Status = envSkipped
-			r.Warn(fmt.Sprintf("%s missing, skipping", from))
-		case dryRun:
-			res.Status = envWouldCopy
-		default:
-			if err := atomicfile.Copy(m.from, m.to); err != nil {
-				res.Status, res.Error = envFailed, err.Error()
-				r.Fail(fmt.Sprintf("%s -> %s: %v", from, to, err))
-				break
-			}
-			res.Status = envCopied
-			r.OK(fmt.Sprintf("%s -> %s", from, to))
-		}
-		out = append(out, res)
+// stageEnvFile copies f's target in the copy over its staged source, or
+// under dryRun only reports it. A missing target is skipped with a warning.
+// Unless force, so is a source holding ${VAR} placeholders that e renders:
+// staging over it would bake this copy's slot into every copy.
+func stageEnvFile(r Reporter, metaRoot string, f envFile, e ports.Exports, force, dryRun bool) envFileResult {
+	res := envFileResult{Repo: f.repo, From: f.target, To: f.source}
+	from, to := relToMeta(metaRoot, f.target), relToMeta(metaRoot, f.source)
+	if _, err := os.Stat(f.target); err != nil {
+		res.Status = envSkipped
+		r.Warn(fmt.Sprintf("%s missing, skipping", from))
+		return res
 	}
-	return out
+	if !force && holdsPlaceholders(f.source, e) {
+		res.Status = envSkipped
+		r.Warn(fmt.Sprintf("%s holds ${VAR} placeholders, skipping so it stays a template; edit it by hand, or rerun with --force to stage %s's rendered values over it",
+			to, from))
+		return res
+	}
+	if dryRun {
+		res.Status = envWouldCopy
+		return res
+	}
+	if err := atomicfile.Copy(f.target, f.source); err != nil {
+		res.Status, res.Error = envFailed, err.Error()
+		r.Fail(fmt.Sprintf("%s -> %s: %v", from, to, err))
+		return res
+	}
+	res.Status = envCopied
+	r.OK(fmt.Sprintf("%s -> %s", from, to))
+	return res
+}
+
+// holdsPlaceholders reports whether the staged source at path contains a
+// ${VAR} placeholder: one e substitutes, or an unexported ${UPPER_CASE} name.
+// An unreadable or missing source holds none.
+func holdsPlaceholders(path string, e ports.Exports) bool {
+	src, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	out, unresolved := ports.Render(src, e)
+	return len(unresolved) > 0 || !bytes.Equal(out, src)
 }
 
 // relToMeta shows p relative to the meta root when it lies inside it.
