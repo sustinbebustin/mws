@@ -8,7 +8,7 @@ When changing public-facing behavior, check [README.md](./README.md) and [docs/c
 
 ## Config schema
 
-`.mws.toml` schema, rationale, and a worked example: [docs/config.md](./docs/config.md). Round-trip via `BurntSushi/toml`; unknown keys are dropped on write.
+`.mws.toml` schema, rationale, and a worked example: [docs/config.md](./docs/config.md). Parsed via `BurntSushi/toml`. Only `init` encodes the whole file (`config.Save`); edits to an existing file append (`config.AppendRepo`) so comments and unknown keys survive.
 
 ## Skeleton edits
 
