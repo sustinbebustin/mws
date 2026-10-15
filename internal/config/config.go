@@ -37,6 +37,18 @@ type Config struct {
 	// Worktrees tunes `mws worktree`. An absent table means defaults; read it
 	// through WorktreePolicy rather than dereferencing here.
 	Worktrees *Worktrees `toml:"worktrees,omitempty"`
+	// Ports declares the named ports a working copy shifts when it holds a
+	// port slot (ADR-0015). Absent means no port slots; read it through
+	// PortPolicy rather than dereferencing here.
+	Ports *Ports `toml:"ports,omitempty"`
+	// Vars are derived strings exported with every port lease. A value may
+	// reference port variables and builtins as ${NAME}, never another var.
+	Vars map[string]string `toml:"vars,omitempty"`
+	// Renders lists harness files rendered per working copy instead of
+	// symlinked.
+	Renders []Render `toml:"renders,omitempty"`
+	// Setup lists commands run at the working copy root after every render.
+	Setup []SetupCommand `toml:"setup,omitempty"`
 }
 
 // Default worktree settings, applied when the `[worktrees]` table or one of
@@ -209,7 +221,19 @@ func (c *Config) Validate() error {
 			return err
 		}
 	}
-	return nil
+	exported := map[string]string{}
+	for _, b := range Builtins {
+		exported[b] = "the builtin " + b
+	}
+	if c.Ports != nil {
+		if err := c.Ports.validate(exported); err != nil {
+			return err
+		}
+	}
+	if err := validateVars(c.Vars, exported); err != nil {
+		return err
+	}
+	return validateRenders(c.Renders)
 }
 
 // Save writes the config to <metaRoot>/.mws.toml.

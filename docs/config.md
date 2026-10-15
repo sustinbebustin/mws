@@ -38,6 +38,25 @@ working_copies_dir  = "<segment>" # optional; single path segment under the meta
 
   [[worktrees.setup]]             # optional; zero or more
     cmd = "<shell string>"        # passed to `sh -c`, cwd = the worktree root
+
+[ports]                           # optional; whole table may be omitted
+  stride = 10                     # slot k moves every port by k * stride
+  slots  = 50                     # optional cap on the highest claimable slot
+
+  [[ports.port]]                  # one or more when [ports] is present
+    name = "<identifier>"         # exported as MWS_PORT_<NAME>
+    base = 54321                  # port at slot 0 (the default ports); 1..65535
+    var  = "<identifier>"         # optional alias exported alongside
+
+[vars]                            # optional; derived strings
+  <NAME> = "<string with ${PORT_VAR} or ${MWS_BUILTIN}>"
+
+[[renders]]                       # optional; zero or more
+  source = "<path>.render"        # under <meta>/.mws/
+  target = "<file name>"          # at the working copy root
+
+[[setup]]                         # optional; zero or more
+  cmd = "<shell string>"          # passed to `sh -c`, cwd = the working copy root
 ```
 
 | Top-level key        | Type              | Required | Notes |
@@ -49,6 +68,10 @@ working_copies_dir  = "<segment>" # optional; single path segment under the meta
 | `optional_repos`     | array of tables   | no       | On-demand **Native repos** that are *not* cloned into every copy. Pulled into a specific copy via the `mws clone` prompt, `mws clone --with <folder>`, or `mws include <folder>`. Same shape as `[[repos]]`. |
 | `trash`              | table             | no       | Tunes the soft-delete behaviour of `mws rm`. See [`[trash]`](#trash). Omit the table for the defaults. |
 | `worktrees`          | table             | no       | Tunes `mws worktree`. See [`[worktrees]`](#worktrees). Omit the table for the defaults. |
+| `ports`              | table             | no       | Named ports each working copy shifts by its **Port slot**. See [`[ports]`](#ports). |
+| `vars`               | table             | no       | Derived strings exported with the ports. See [`[vars]`](#vars). |
+| `renders`            | array of tables   | no       | Harness files rendered per working copy. See [`[[renders]]`](#renders). |
+| `setup`              | array of tables   | no       | Commands run at the working copy root after every render. See [`[[setup]]`](#setup). |
 
 ### `[[repos]]`
 
@@ -164,6 +187,149 @@ Related behavior of the other commands: `mws list` appends `(+N worktrees)` to a
 
 Design rationale: [ADR-0011](./adr/0011-worktrees-are-children-of-a-working-copy.md).
 
+### `[ports]`
+
+Declares the named ports of the workspace. A **Working copy** starts on the default ports (slot 0), where each port is its `base`. Holding a **Port slot** `k >= 1`, it owns `base + k * stride` for every port, recorded in its **Port lease**, `<copy>/.mws-ports.env`. Omit the table and the workspace has no port slots: no lease, no lock, nothing changes.
+
+| Key      | Type            | Required | Notes |
+|----------|-----------------|----------|-------|
+| `stride` | int             | no       | Distance between one slot and the next. Defaults to `10`; must be at least `1`. |
+| `slots`  | int             | no       | Caps the highest claimable slot; at least `1`. Defaults to the largest slot whose ports all stay at or below 65535. |
+| `port`   | array of tables | yes      | One or more `[[ports.port]]` entries, below. |
+
+`[[ports.port]]`:
+
+| Key    | Type   | Required | Notes |
+|--------|--------|----------|-------|
+| `name` | string | yes      | An identifier (letters, digits, `_`, not starting with a digit). Exported as `MWS_PORT_<NAME>`, upper-cased, so names must be unique ignoring case. |
+| `base` | int    | yes      | The port on the default ports, in `1..65535`. |
+| `var`  | string | no       | An identifier exported alongside `MWS_PORT_<NAME>` with the same value, for names a project already uses. Must not repeat another port's variable, alias or a builtin. |
+
+Every lease also exports four builtins: `MWS_SLOT`, `MWS_COPY` (the copy's directory name), `MWS_COPY_SLUG` (lower-cased, every character outside `[a-z0-9-]` replaced by `-`) and `MWS_META` (absolute meta root).
+
+Slot arithmetic is exact. Two ports whose bases are congruent modulo the stride meet at some pair of slots: bases `a < b` with `b - a = d * stride` mean slot `d` of the first is slot 0 of the second. Validation rejects such a pair unless the slot limit (`slots`, or the 65535 bound) stays below `d`. The highest claimable slot is the smaller of `slots` and the last slot whose ports all stay at or below 65535.
+
+### `[vars]`
+
+Derived strings exported with the ports, one line each for URLs, project ids and cookie names. Keys are identifiers that no port, alias or builtin already exports. A value may reference port variables (`${MWS_PORT_<NAME>}` or the alias) and the builtins as `${NAME}`, and nothing else: not another `[vars]` entry, since TOML tables are unordered. Any other `$` sequence (`$HOME`, `${a:-b}`) is literal text.
+
+### `[[renders]]`
+
+A harness file that needs per-copy values stays in the **Harness dir** under a `.render` name and is rendered to its target at the working copy root, with `${VAR}` placeholders substituted for the copy's slot. The source is still symlinked into every copy like any harness entry; the target is a regular per-copy file.
+
+| Key      | Type   | Required | Notes |
+|----------|--------|----------|-------|
+| `source` | string | yes      | Path relative to `<meta>/.mws/`, ending in `.render`. |
+| `target` | string | yes      | A single file name at the working copy root. Must not start with `.mws-` (reserved for mws markers) or repeat another entry's target. |
+
+### `[[setup]]`
+
+Root-level setup commands: each `cmd` runs via `sh -c` with cwd = the working copy root and the lease's variables in its environment, after every render, behind the same `--setup` / `--no-setup` choice as `[[repos.setup]]`. `direnv allow` is the motivating entry, since direnv refuses a changed `.envrc` until it is allowed again. `[[repos.setup]]` runs only when a repo is cloned, never on a render.
+
+| Key   | Type   | Required | Notes |
+|-------|--------|----------|-------|
+| `cmd` | string | yes      | Shell string. |
+
+### Port examples
+
+app, eight ports and ten derived vars. The highest base, 54323, caps the slot limit at 1121. Three pairs (3000/54320, 3001/54321, 3002/54322) are congruent modulo 10, but they first meet at slot 5132, past that limit.
+
+```toml
+[ports]
+  stride = 10
+
+  [[ports.port]]
+    name = "internal"
+    base = 3000
+    var  = "APP_INTERNAL_PORT"
+  [[ports.port]]
+    name = "public"
+    base = 3001
+    var  = "APP_PUBLIC_PORT"
+  [[ports.port]]
+    name = "hs"
+    base = 3002
+    var  = "APP_HS_PORT"
+  [[ports.port]]
+    name = "backend"
+    base = 8088
+    var  = "APP_BACKEND_PORT"
+  [[ports.port]]
+    name = "supabase_api"
+    base = 54321
+    var  = "APP_SUPABASE_API_PORT"
+  [[ports.port]]
+    name = "supabase_db"
+    base = 54322
+    var  = "APP_SUPABASE_DB_PORT"
+  [[ports.port]]
+    name = "supabase_db_shadow"
+    base = 54320
+    var  = "APP_SUPABASE_DB_SHADOW_PORT"
+  [[ports.port]]
+    name = "supabase_studio"
+    base = 54323
+    var  = "APP_SUPABASE_STUDIO_PORT"
+
+[vars]
+  APP_SUPABASE_PROJECT_ID                 = "app-${MWS_COPY_SLUG}"
+  APP_SUPABASE_API_URL                    = "http://localhost:${APP_SUPABASE_API_PORT}"
+  APP_AUTH_SITE_URL                       = "http://127.0.0.1:${APP_INTERNAL_PORT}"
+  APP_AUTH_REDIRECT_SITE                  = "https://127.0.0.1:${APP_INTERNAL_PORT}"
+  APP_AUTH_REDIRECT_CALLBACK_IP           = "http://127.0.0.1:${APP_INTERNAL_PORT}/auth/callback"
+  APP_AUTH_REDIRECT_CALLBACK_LOCALHOST    = "http://localhost:${APP_INTERNAL_PORT}/auth/callback"
+  APP_AUTH_REDIRECT_HS_CALLBACK_IP        = "http://127.0.0.1:${APP_HS_PORT}/auth/callback"
+  APP_AUTH_REDIRECT_HS_CALLBACK_LOCALHOST = "http://localhost:${APP_HS_PORT}/auth/callback"
+  APP_SUPABASE_AZURE_REDIRECT_URI         = "http://localhost:${APP_SUPABASE_API_PORT}/auth/v1/callback"
+  APP_AUTH_COOKIE_NAME                    = "app-auth-token-${APP_INTERNAL_PORT}"
+
+[[renders]]
+  source = ".mcp.json.render"
+  target = ".mcp.json"
+
+[[setup]]
+  cmd = "direnv allow"
+```
+
+shop, a web app with Postgres in docker compose and no Go changes. The default stride is 10, and the 65535 bound caps the slot limit at 6010.
+
+```toml
+project_name = "shop"
+
+[[repos]]
+  folder = "web"
+  url    = "git@github.com:example/shop-web.git"
+
+  [[repos.envs]]
+    source = ".env"
+    target = ".env"
+
+[ports]
+  [[ports.port]]
+    name = "web"
+    base = 5173
+  [[ports.port]]
+    name = "db"
+    base = 5432
+
+[vars]
+  COMPOSE_PROJECT_NAME = "shop-${MWS_COPY_SLUG}"
+  DATABASE_URL         = "postgres://postgres:postgres@localhost:${MWS_PORT_DB}/shop"
+```
+
+with `.envs/web/.env`:
+
+```sh
+PORT=${MWS_PORT_WEB}
+DB_HOST_PORT=${MWS_PORT_DB}
+DATABASE_URL=${DATABASE_URL}
+COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}
+```
+
+At slot 1, `web/.env` says `PORT=5183` and `DB_HOST_PORT=5442`, and the compose project of a copy named `two` is `shop-two`.
+
+Design rationale: [ADR-0015](./adr/0015-per-copy-port-slots.md).
+
 ## Worked example
 
 ```toml
@@ -235,3 +401,4 @@ The file is tracked by the meta workspace's git. Commit changes alongside the ha
 - [ADR-0010](./adr/0010-soft-delete-working-copies.md) - why `mws rm` trashes instead of deleting
 - [ADR-0011](./adr/0011-worktrees-are-children-of-a-working-copy.md) - why worktrees live inside the working copy
 - [ADR-0012](./adr/0012-headless-cli-contract.md) - prompts, output streams, exit codes and retries for agents and scripts
+- [ADR-0015](./adr/0015-per-copy-port-slots.md) - per-copy port slots, rendering, `[vars]` and root `[[setup]]`
