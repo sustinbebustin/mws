@@ -138,8 +138,8 @@ func TestRunRestoreRejectsUnknownName(t *testing.T) {
 		if err == nil {
 			t.Fatalf("runRestore should fail on a name that was never trashed")
 		}
-		if !strings.Contains(err.Error(), "mws trash list") {
-			t.Fatalf("error should point at `mws trash list`: %v", err)
+		if !strings.Contains(err.Error(), "mws trash ls") {
+			t.Fatalf("error should point at `mws trash ls`: %v", err)
 		}
 	})
 }

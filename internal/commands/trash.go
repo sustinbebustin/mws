@@ -24,13 +24,13 @@ func newTrashCmd() *cobra.Command {
 		Short: "Inspect and manage trashed working copies",
 		Long: `trash manages the soft-delete area at <meta>/.trash/, where 'mws rm' puts
 working copies instead of deleting them. With no subcommand it lists the
-trash, the same as 'mws trash list'.
+trash, the same as 'mws trash ls'.
 
 Harness symlinks inside a trashed copy point at relative paths and therefore
 dangle while the copy sits in the trash. That is expected; 'mws restore'
 repairs them on the way out.`,
 		Example: `  mws trash
-  mws trash list --json
+  mws trash ls --json
   mws trash prune --dry-run
   mws trash empty --yes`,
 		Args: cobra.NoArgs,
@@ -45,15 +45,14 @@ repairs them on the way out.`,
 
 func newTrashListCmd(jsonOut *bool) *cobra.Command {
 	return &cobra.Command{
-		Use:     "list",
-		Aliases: []string{"ls"},
-		Short:   "List trashed working copies",
-		Long: `list prints one line per trashed working copy on stdout: its name, how long
+		Use:   "ls",
+		Short: "List trashed working copies",
+		Long: `ls prints one line per trashed working copy on stdout: its name, how long
 ago it was trashed and when it purges. It first sweeps entries past their
 retention window, as rm and restore do. --json prints
 {"trash", "entries": [{"id", "name", "path", "deleted_at", "purges_at"}], "unreadable"}.`,
-		Example: `  mws trash list
-  mws trash list --json`,
+		Example: `  mws trash ls
+  mws trash ls --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTrashList(newOutput(cmd, *jsonOut))
@@ -104,7 +103,7 @@ Emptying an empty trash succeeds.`,
 	return cmd
 }
 
-// trashEntryJSON is one entry of `mws trash list --json`. PurgesAt is absent
+// trashEntryJSON is one entry of `mws trash ls --json`. PurgesAt is absent
 // when the retention policy keeps entries forever.
 type trashEntryJSON struct {
 	ID        string     `json:"id"`

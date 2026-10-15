@@ -125,7 +125,7 @@ func selectEntry(metaRoot, name string, yes bool, policy config.TrashPolicy) (tr
 		}
 		switch {
 		case len(matches) == 0:
-			return trash.Entry{}, clierr.NotFoundf("no trashed working copy named %q in %s. Run `mws trash list` to see what is there", name, trash.Root(metaRoot))
+			return trash.Entry{}, clierr.NotFoundf("no trashed working copy named %q in %s. Run `mws trash ls` to see what is there", name, trash.Root(metaRoot))
 		case len(matches) == 1 || yes:
 			// Find returns newest first, so matches[0] is the most recent.
 			return matches[0], nil

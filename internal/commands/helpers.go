@@ -23,7 +23,7 @@ func envStagingDir(metaRoot string) string {
 func resolveCopy(ws *project.Workspace, name, invocation string) (string, error) {
 	target, err := ws.ResolveCopy(name)
 	if errors.Is(err, project.ErrNoCopyNamed) {
-		return "", usagef("%w (under %s); run `%s` (`mws list` shows the copies) or run from inside a working copy", err, ws.MetaRoot, invocation)
+		return "", usagef("%w (under %s); run `%s` (`mws ls` shows the copies) or run from inside a working copy", err, ws.MetaRoot, invocation)
 	}
 	return target, err
 }

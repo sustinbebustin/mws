@@ -187,7 +187,7 @@ func notACopy(metaRoot, name, target string) error {
 		return clierr.NotFoundf("%s is not a working copy of %s; a copy of that name was trashed %s ago (%s), so a previous rm already removed it. Restore it with `mws restore %s`",
 			target, metaRoot, humanDuration(time.Since(trashed[0].DeletedAt)), trashed[0].ID, name)
 	}
-	return clierr.NotFoundf("%s is not a working copy of %s; `mws list` shows the working copies", target, metaRoot)
+	return clierr.NotFoundf("%s is not a working copy of %s; `mws ls` shows the working copies", target, metaRoot)
 }
 
 // rmConfirmDescription explains what removing the copy called name does,

@@ -16,14 +16,13 @@ import (
 func newListCmd() *cobra.Command {
 	var jsonOut bool
 	cmd := &cobra.Command{
-		Use:     "list",
-		Aliases: []string{"ls"},
-		Short:   "List working copies in this meta workspace",
-		Long: `list prints one line per working copy on stdout, marking the one containing
+		Use:   "ls",
+		Short: "List working copies in this meta workspace",
+		Long: `ls prints one line per working copy on stdout, marking the one containing
 the current directory with "*" and counting its worktrees. --json prints
 {"meta", "copies": [{"name", "path", "current", "worktrees"}]}.`,
-		Example: `  mws list
-  mws list --json`,
+		Example: `  mws ls
+  mws ls --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runList(newOutput(cmd, jsonOut))
