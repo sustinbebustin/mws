@@ -50,7 +50,7 @@ func runStageEnv(r Reporter, name string) error {
 		return err
 	}
 
-	target, err := ws.ResolveCopy(name)
+	target, err := resolveCopy(ws, name, "mws stage-env <copy>")
 	if err != nil {
 		return err
 	}

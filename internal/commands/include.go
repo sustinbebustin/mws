@@ -70,7 +70,7 @@ func runInclude(ctx context.Context, r Reporter, folder, copyName string, choice
 			folder, listOptionalFolders(cfg), folder)
 	}
 
-	target, err := ws.ResolveCopy(copyName)
+	target, err := resolveCopy(ws, copyName, "mws include "+repo.Folder+" <copy>")
 	if err != nil {
 		return err
 	}

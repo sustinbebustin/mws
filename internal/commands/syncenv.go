@@ -54,7 +54,7 @@ func runSyncEnv(r Reporter, name string) error {
 		return err
 	}
 
-	target, err := ws.ResolveCopy(name)
+	target, err := resolveCopy(ws, name, "mws sync-env <copy>")
 	if err != nil {
 		return err
 	}
