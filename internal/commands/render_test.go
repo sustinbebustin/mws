@@ -132,7 +132,11 @@ func TestSetupCommandsSeeTheCopysExportSet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A retry with --setup on the existing copy runs every setup command.
+	// A retry that clones the missing frontend runs its setup at the lease's
+	// slot.
+	if err := os.RemoveAll(f.repo("frontend")); err != nil {
+		t.Fatal(err)
+	}
 	if res := runMWS(t, f.meta, "clone", "c", "--no-optional", "--setup"); res.code != 0 {
 		t.Fatalf("clone: exit %d\nstderr: %s", res.code, res.stderr)
 	}

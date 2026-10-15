@@ -69,6 +69,62 @@ func TestEnvSyncSetupRunsRootSetupAtTheCopyRootWithTheLease(t *testing.T) {
 	}
 }
 
+func TestCloneSetupRunsRepoSetupThenRootSetupOnceEach(t *testing.T) {
+	f := seedWtWorkspace(t)
+	f.cfg.Repos[1].Setup = []config.SetupCommand{{Cmd: "echo repo >> ../setup.log"}}
+	f.cfg.Setup = []config.SetupCommand{{Cmd: "echo root >> setup.log"}}
+	f.saveConfig(t)
+
+	res := runMWS(t, f.meta, "clone", "d", "--no-optional")
+	if res.code != 2 || !strings.Contains(res.stderr, "mws clone d --setup") || !strings.Contains(res.stderr, "mws clone d --no-setup") {
+		t.Fatalf("headless clone without a setup flag: exit %d, want 2 naming both flags\nstderr: %s", res.code, res.stderr)
+	}
+
+	if res := runMWS(t, f.meta, "clone", "d", "--no-optional", "--setup"); res.code != 0 {
+		t.Fatalf("clone: exit %d\nstderr: %s", res.code, res.stderr)
+	}
+	log := filepath.Join(f.meta, "d", "setup.log")
+	if got, want := readFile(t, log), "repo\nroot\n"; got != want {
+		t.Errorf("setup.log = %q, want %q", got, want)
+	}
+
+	// A retry that clones nothing renders nothing and runs no setup.
+	if res := runMWS(t, f.meta, "clone", "d", "--no-optional", "--setup"); res.code != 0 {
+		t.Fatalf("retry: exit %d\nstderr: %s", res.code, res.stderr)
+	}
+	if got, want := readFile(t, log), "repo\nroot\n"; got != want {
+		t.Errorf("after a retry that cloned nothing, setup.log = %q, want %q", got, want)
+	}
+}
+
+func TestIncludeSetupRunsRepoSetupThenRootSetup(t *testing.T) {
+	f := seedWtWorkspace(t)
+	f.cfg.OptionalRepos[0].Setup = []config.SetupCommand{{Cmd: "echo repo >> ../setup.log"}}
+	f.cfg.Setup = []config.SetupCommand{{Cmd: "echo root >> setup.log"}}
+	f.saveConfig(t)
+
+	res := runMWS(t, f.meta, "include", "extra", "c")
+	if res.code != 2 || !strings.Contains(res.stderr, "--setup") || !strings.Contains(res.stderr, "--no-setup") {
+		t.Fatalf("headless include without a setup flag: exit %d, want 2 naming both flags\nstderr: %s", res.code, res.stderr)
+	}
+	if res := runMWS(t, f.meta, "include", "extra", "c", "--setup"); res.code != 0 {
+		t.Fatalf("include: exit %d\nstderr: %s", res.code, res.stderr)
+	}
+	log := filepath.Join(f.copy, "setup.log")
+	if got, want := readFile(t, log), "repo\nroot\n"; got != want {
+		t.Errorf("setup.log = %q, want %q", got, want)
+	}
+
+	// Including a repo the copy already holds clones nothing: the render
+	// still runs root setup, never the repo's.
+	if res := runMWS(t, f.meta, "include", "extra", "c", "--setup"); res.code != 0 {
+		t.Fatalf("second include: exit %d\nstderr: %s", res.code, res.stderr)
+	}
+	if got, want := readFile(t, log), "repo\nroot\nroot\n"; got != want {
+		t.Errorf("after including a present repo, setup.log = %q, want %q", got, want)
+	}
+}
+
 func TestEnvSyncWithoutRootSetupNeedsNoFlag(t *testing.T) {
 	f := seedEnvWorkspace(t)
 	if res := runMWS(t, f.meta, "env", "sync", "a"); res.code != 0 {
