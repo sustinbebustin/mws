@@ -143,7 +143,6 @@ For parallel agents inside one working copy, `mws wt new <name>` creates a **wor
 | `mws sync-env [copy]` | Copy staged env files from `.envs/` into a working copy (overwrites). |
 | `mws stage-env [copy]` | Inverse of `sync-env`: capture a working copy's env files into staging as the new default. |
 | `mws worktree` (`mws wt`) `new\|ls\|path\|exec\|rm\|prune` | Manage worktrees of the current working copy: `new <name>` creates one and prints its path, `ls [--all]` shows branches, dirty state and liveness, `path <name>` prints its path, `exec <name> -- <cmd>` runs in it, `rm <name>...` removes (refuses to lose work; `--force` discards uncommitted files, unreachable detached commits and changed root files; `--dry-run` previews), `prune` removes every clean, idle, merged one. `--json` everywhere. |
-| `mws migrate <path>` | Convert an old sibling-meta layout to meta-at-root; `--dry-run` prints the plan. |
 
 ### Scripting and agents
 

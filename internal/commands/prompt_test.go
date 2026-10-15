@@ -41,6 +41,7 @@ func TestUsageErrorsExitTwo(t *testing.T) {
 		{"wt", "ls", "--bogus"},
 		{"wt", "hook", "create", "extra"},
 		{"trash", "bogus"},
+		{"migrate", "some-path"},
 	} {
 		err := Execute(context.Background(), args)
 		if got := ExitCode(err); got != 2 {
