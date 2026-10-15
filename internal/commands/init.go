@@ -66,7 +66,7 @@ description, no copies subdir, the current directory as parent, no repos) and
 repeatable.`,
 		Example: `  mws init demo
   mws init demo --repo git@github.com:org/api.git --repo web=https://github.com/org/web --yes
-  mws init demo --description "Pitch tooling" --copies-dir copies --parent ~/dev --yes`,
+  mws init demo --description "Demo tooling" --copies-dir copies --parent ~/dev --yes`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var arg string

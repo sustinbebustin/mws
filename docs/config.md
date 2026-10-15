@@ -167,19 +167,19 @@ Design rationale: [ADR-0011](./adr/0011-worktrees-are-children-of-a-working-copy
 ## Worked example
 
 ```toml
-project_name = "pitch-app"
+project_name = "app"
 description  = ""
 
 [[repos]]
   folder = "backend"
-  url    = "git@github.com:lgcypower/lgcy-proposals.git"
+  url    = "git@github.com:example/api.git"
 
   [[repos.setup]]
     cmd = "go build ./..."
 
 [[repos]]
   folder = "frontend"
-  url    = "git@github.com:lgcypower/pitch-proposal-room.git"
+  url    = "git@github.com:example/web.git"
 
   [[repos.envs]]
     source = "internal.env"
@@ -198,7 +198,7 @@ description  = ""
 
 [[optional_repos]]
   folder = "worker"
-  url    = "git@github.com:lgcypower/lgcy-worker.git"
+  url    = "git@github.com:example/worker.git"
 ```
 
 What `mws clone peer` does with this config:

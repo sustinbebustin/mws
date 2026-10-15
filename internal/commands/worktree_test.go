@@ -84,7 +84,7 @@ func seedWtWorkspace(t *testing.T) wtFixture {
 		cloneIntegration(t, r.URL, f.repo(r.Folder))
 	}
 	writeFileAll(t, filepath.Join(f.repo("frontend"), "app.env"), "SLOT=3\n")
-	writeFileAll(t, filepath.Join(f.copy, ".ports.env"), "PITCH_SLOT=3\n")
+	writeFileAll(t, filepath.Join(f.copy, ".ports.env"), "APP_SLOT=3\n")
 	writeFileAll(t, filepath.Join(f.copy, ".mcp.json"), `{"mcpServers":{}}`)
 	writeFileAll(t, filepath.Join(f.copy, ".scratch", "T-1.md"), "ticket")
 	return f
@@ -229,7 +229,7 @@ func TestWtNewCreatesLayout(t *testing.T) {
 	}
 
 	// Per-copy state: root files copied, non-repo dirs linked, env from the copy.
-	if got := readFile(t, filepath.Join(wt, ".ports.env")); got != "PITCH_SLOT=3\n" {
+	if got := readFile(t, filepath.Join(wt, ".ports.env")); got != "APP_SLOT=3\n" {
 		t.Fatalf(".ports.env = %q", got)
 	}
 	if st, err := os.Lstat(filepath.Join(wt, ".ports.env")); err != nil || !st.Mode().IsRegular() {
