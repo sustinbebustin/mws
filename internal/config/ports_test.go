@@ -95,6 +95,29 @@ func TestValidatePortTables(t *testing.T) {
 		{"equal bases", func(c *Config) { c.Ports.Port[1].Base = 3000; c.Ports.Slots = intp(1) }, "ports.port[1].base"},
 		{"congruent under a custom stride", func(c *Config) { c.Ports.Stride = intp(100); c.Ports.Port[1].Base = 3100 }, "ports.port[1].base"},
 		{"not congruent under a custom stride", func(c *Config) { c.Ports.Stride = intp(100); c.Ports.Port[1].Base = 3010 }, ""},
+
+		{"vars referencing both port spellings and every builtin", func(c *Config) {
+			c.Vars = map[string]string{
+				"URL":  "http://localhost:${MWS_PORT_WEB}/${WEB_PORT}",
+				"NAME": "${MWS_SLOT}-${MWS_COPY}-${MWS_COPY_SLUG}-${MWS_META}-${MWS_PORT_DB}",
+			}
+		}, ""},
+		{"vars passing other dollar sequences through", func(c *Config) { c.Vars = map[string]string{"X": "$HOME ${a:-b} $ ${"} }, ""},
+		{"var referencing an unknown name", func(c *Config) { c.Vars = map[string]string{"URL": "http://localhost:${API_PORT}"} }, "vars.URL"},
+		{"var referencing another var", func(c *Config) {
+			c.Vars = map[string]string{"A": "${MWS_PORT_WEB}", "B": "x${A}"}
+		}, "vars.B"},
+		{"var key not an identifier", func(c *Config) { c.Vars = map[string]string{"API-URL": "x"} }, "vars.API-URL"},
+		{"var key shadowing a builtin", func(c *Config) { c.Vars = map[string]string{"MWS_SLOT": "x"} }, "vars.MWS_SLOT"},
+		{"var key shadowing a port alias", func(c *Config) { c.Vars = map[string]string{"WEB_PORT": "x"} }, "vars.WEB_PORT"},
+		{"vars without ports referencing a builtin", func(c *Config) {
+			c.Ports = nil
+			c.Vars = map[string]string{"P": "shop-${MWS_COPY_SLUG}"}
+		}, ""},
+		{"vars without ports referencing a port", func(c *Config) {
+			c.Ports = nil
+			c.Vars = map[string]string{"P": "${MWS_PORT_WEB}"}
+		}, "vars.P"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

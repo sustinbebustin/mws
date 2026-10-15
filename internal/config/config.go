@@ -221,12 +221,16 @@ func (c *Config) Validate() error {
 			return err
 		}
 	}
+	exported := map[string]string{}
+	for _, b := range Builtins {
+		exported[b] = "the builtin " + b
+	}
 	if c.Ports != nil {
-		if err := c.Ports.validate(); err != nil {
+		if err := c.Ports.validate(exported); err != nil {
 			return err
 		}
 	}
-	return nil
+	return validateVars(c.Vars, exported)
 }
 
 // Save writes the config to <metaRoot>/.mws.toml.

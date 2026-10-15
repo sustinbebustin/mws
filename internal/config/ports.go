@@ -57,8 +57,10 @@ func (p Port) VarName() string {
 const identifierRule = "must be an identifier (letters, digits, '_', not starting with a digit)"
 
 // validate checks the `[ports]` table: identifiers, the exported variable
-// namespace, port range, stride, slots, and the collision rule.
-func (p *Ports) validate() error {
+// namespace, port range, stride, slots, and the collision rule. owner maps
+// each exported variable to the key that claims it; validate adds every
+// port variable and alias to it.
+func (p *Ports) validate(owner map[string]string) error {
 	if p.Stride != nil && *p.Stride < 1 {
 		return fmt.Errorf("ports.stride is %d; must be at least 1 (default %d)", *p.Stride, DefaultPortStride)
 	}
@@ -67,10 +69,6 @@ func (p *Ports) validate() error {
 	}
 	if len(p.Port) == 0 {
 		return fmt.Errorf("[ports] declares no ports; add at least one [[ports.port]] entry with a name and base, or remove the [ports] table")
-	}
-	owner := map[string]string{}
-	for _, b := range Builtins {
-		owner[b] = "the builtin " + b
 	}
 	for i, port := range p.Port {
 		key := fmt.Sprintf("ports.port[%d].name", i)
