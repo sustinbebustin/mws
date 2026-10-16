@@ -8,7 +8,7 @@ import (
 
 type rmJSON struct {
 	DryRun       bool   `json:"dry_run"`
-	Name         string `json:"name"`
+	Copy         string `json:"copy"`
 	Path         string `json:"path"`
 	Entry        string `json:"entry"`
 	Purged       bool   `json:"purged"`
@@ -16,13 +16,13 @@ type rmJSON struct {
 }
 
 type restoreJSON struct {
-	Name  string `json:"name"`
+	Copy  string `json:"copy"`
 	Path  string `json:"path"`
 	Entry string `json:"entry"`
 }
 
 type cloneJSON struct {
-	Name  string   `json:"name"`
+	Copy  string   `json:"copy"`
 	Path  string   `json:"path"`
 	Repos []string `json:"repos"`
 	Setup string   `json:"setup"`
@@ -37,7 +37,7 @@ func TestRmJSONNamesTheTrashEntryAndTheReleasedSlot(t *testing.T) {
 	var got rmJSON
 	decodeJSON(t, mustMWS(t, f.meta, "rm", "c", "--yes", "--json"), &got)
 
-	want := rmJSON{Name: "c", Path: f.copy, Entry: filepath.Base(filepath.Dir(trashedCopy(t, f.meta, "c"))), ReleasedSlot: 2}
+	want := rmJSON{Copy: "c", Path: f.copy, Entry: filepath.Base(filepath.Dir(trashedCopy(t, f.meta, "c"))), ReleasedSlot: 2}
 	if got != want {
 		t.Errorf("rm --json = %+v, want %+v", got, want)
 	}
@@ -60,7 +60,7 @@ func TestRmPurgeJSONSaysPurgedWithoutAnEntry(t *testing.T) {
 	var got rmJSON
 	decodeJSON(t, mustMWS(t, f.meta, "rm", "c", "--purge", "--yes", "--json"), &got)
 
-	if want := (rmJSON{Name: "c", Path: f.copy, Purged: true}); got != want {
+	if want := (rmJSON{Copy: "c", Path: f.copy, Purged: true}); got != want {
 		t.Errorf("rm --purge --json = %+v, want %+v", got, want)
 	}
 }
@@ -73,7 +73,7 @@ func TestRmDryRunJSONChangesNothing(t *testing.T) {
 	var got rmJSON
 	decodeJSON(t, mustMWS(t, f.meta, "rm", "c", "--dry-run", "--json"), &got)
 
-	if want := (rmJSON{DryRun: true, Name: "c", Path: f.copy, ReleasedSlot: 2}); got != want {
+	if want := (rmJSON{DryRun: true, Copy: "c", Path: f.copy, ReleasedSlot: 2}); got != want {
 		t.Errorf("rm --dry-run --json = %+v, want %+v", got, want)
 	}
 	if got := slotOf(t, f.copy); got != 2 {
@@ -112,13 +112,13 @@ func TestRestoreJSONNamesThePathAndTheEntry(t *testing.T) {
 	var got restoreJSON
 	decodeJSON(t, mustMWS(t, f.meta, "restore", "c", "--yes", "--json"), &got)
 
-	if want := (restoreJSON{Name: "c", Path: f.copy, Entry: entry}); got != want {
+	if want := (restoreJSON{Copy: "c", Path: f.copy, Entry: entry}); got != want {
 		t.Errorf("restore --json = %+v, want %+v", got, want)
 	}
 
 	mustMWS(t, f.meta, "rm", "c", "--yes")
 	decodeJSON(t, mustMWS(t, f.meta, "restore", "c", "--as", "d", "--yes", "--json"), &got)
-	if want := filepath.Join(f.meta, "d"); got.Path != want || got.Name != "d" {
+	if want := filepath.Join(f.meta, "d"); got.Path != want || got.Copy != "d" {
 		t.Errorf("restore --as d --json = %+v, want path %s", got, want)
 	}
 }
@@ -142,8 +142,8 @@ func TestCloneJSONReportsPathReposSetupAndPorts(t *testing.T) {
 	var got cloneJSON
 	decodeJSON(t, mustMWS(t, f.meta, "clone", "d", "--ports", "--no-optional", "--setup", "--json"), &got)
 
-	want := cloneJSON{Name: "d", Path: filepath.Join(f.meta, "d"), Repos: []string{"backend", "frontend"}, Setup: "ran", Ports: "slot 1"}
-	if got.Name != want.Name || got.Path != want.Path || got.Setup != want.Setup || got.Ports != want.Ports || !slices.Equal(got.Repos, want.Repos) {
+	want := cloneJSON{Copy: "d", Path: filepath.Join(f.meta, "d"), Repos: []string{"backend", "frontend"}, Setup: "ran", Ports: "slot 1"}
+	if got.Copy != want.Copy || got.Path != want.Path || got.Setup != want.Setup || got.Ports != want.Ports || !slices.Equal(got.Repos, want.Repos) {
 		t.Errorf("clone --json = %+v, want %+v", got, want)
 	}
 }

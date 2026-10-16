@@ -116,7 +116,7 @@ Re-running for an existing working copy finishes it: registered repos (and
 for those, and the path is printed. Repos already there are left as they
 are; a re-run that clones nothing changes nothing and runs no setup.
 
---json prints {"name", "path", "repos", "setup", "ports"} instead of the path:
+--json prints {"copy", "path", "repos", "setup", "ports"} instead of the path:
 the repos cloned this run, the setup outcome ("none" when no command was
 scheduled, "skipped" for --no-setup or a declined prompt, "ran") and the
 copy's ports ("default" or "slot N"). A failure prints
@@ -168,7 +168,7 @@ const (
 // already complete), what became of the setup commands, and the copy's ports
 // ("default" or "slot N").
 type cloneResult struct {
-	Name  string       `json:"name"`
+	Copy  string       `json:"copy"`
 	Path  string       `json:"path"`
 	Repos []string     `json:"repos"`
 	Setup setupOutcome `json:"setup"`
@@ -274,7 +274,7 @@ func cloneCopy(ctx context.Context, r Reporter, name string, choice setupChoice,
 	if existing && len(missing) == 0 {
 		r.Info(fmt.Sprintf("Working copy %s already exists and has every repo", target))
 		warnDefaultPorts(r, cfg, target)
-		return cloneResult{Name: name, Path: target, Repos: []string{}, Setup: setupNone, Ports: copyPorts(target)}, nil
+		return cloneResult{Copy: name, Path: target, Repos: []string{}, Setup: setupNone, Ports: copyPorts(target)}, nil
 	}
 	// [[repos.setup]] runs only for the repos this run clones; the root
 	// [[setup]] follows it, after the render.
@@ -345,7 +345,7 @@ func cloneCopy(ctx context.Context, r Reporter, name string, choice setupChoice,
 
 	r.OK(fmt.Sprintf("Working copy ready at %s", target))
 	warnDefaultPorts(r, cfg, target)
-	return cloneResult{Name: name, Path: target, Repos: folders(missing), Setup: setup, Ports: copyPorts(target)}, nil
+	return cloneResult{Copy: name, Path: target, Repos: folders(missing), Setup: setup, Ports: copyPorts(target)}, nil
 }
 
 // warnDefaultPorts warns that the working copy at target shares the default

@@ -159,7 +159,7 @@ func TestLsShowsEachCopysPorts(t *testing.T) {
 
 	var got struct {
 		Copies []struct {
-			Name  string `json:"name"`
+			Copy  string `json:"copy"`
 			Ports string `json:"ports"`
 		} `json:"copies"`
 	}
@@ -168,7 +168,7 @@ func TestLsShowsEachCopysPorts(t *testing.T) {
 	}
 	byCopy := map[string]string{}
 	for _, c := range got.Copies {
-		byCopy[c.Name] = c.Ports
+		byCopy[c.Copy] = c.Ports
 	}
 	if want := map[string]string{"a": "default", "b": "slot 3"}; !maps.Equal(byCopy, want) {
 		t.Errorf("ls --json ports = %v, want %v", byCopy, want)

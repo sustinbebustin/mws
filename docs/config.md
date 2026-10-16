@@ -232,14 +232,14 @@ Root-level setup commands: each `cmd` runs via `sh -c` with cwd = the working co
 
 ### Command output
 
-Beyond the `mws wt` shapes [above](#worktrees), these commands print one JSON object under `--json` (see [ADR-0012](./adr/0012-headless-cli-contract.md)). A failure prints `{"error": {"code", "message"}}`, with `code` one of `usage`, `refused`, `not_found`, `failure`. The copy key is `name` in `ls`, `path`, `clone`, `rm` and `restore`, and `copy` in `env` and `ports`.
+Beyond the `mws wt` shapes [above](#worktrees), these commands print one JSON object under `--json` (see [ADR-0012](./adr/0012-headless-cli-contract.md)). A failure prints `{"error": {"code", "message"}}`, with `code` one of `usage`, `refused`, `not_found`, `failure`. A live working copy's name is under the key `copy`; a trash entry's `name` is the name it was trashed under.
 
 ```text
-ls         {meta, copies:[{name, path, current, ports, worktrees}]}   # ports: "default" | "slot N" | "invalid lease"
-path       {name, path}
-clone      {name, path, repos:[folder], setup, ports}                  # setup: none | skipped | ran
-rm         {dry_run, name, path, entry?, purged, released_slot?}
-restore    {name, path, entry}
+ls         {meta, copies:[{copy, path, current, ports, worktrees}]}   # ports: "default" | "slot N" | "invalid lease"
+path       {copy, path}
+clone      {copy, path, repos:[folder], setup, ports}                  # setup: none | skipped | ran
+rm         {dry_run, copy, path, entry?, purged, released_slot?}
+restore    {copy, path, entry}
 trash *    {dry_run?, purged:[...], unreadable:[...]} / {trash, entries:[...], unreadable:[...]}
 env sync|stage  {dry_run, copies:[{copy, path, files:[{repo?, from, to, status, error?}]}]}   # status: copied | would_copy | skipped | failed
 env diff   {same, copies:[{copy, path, files:[{repo?, source, target, state}]}]}

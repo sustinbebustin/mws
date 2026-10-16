@@ -215,13 +215,20 @@ func TestListCountsWorktreesPerCopyWithoutListingThem(t *testing.T) {
 	if got, want := out.String(), "* c  default  (+2 worktrees)\n"; got != want {
 		t.Fatalf("list stdout = %q, want %q", got, want)
 	}
+	type lsCopy struct {
+		Copy      string `json:"copy"`
+		Path      string `json:"path"`
+		Current   bool   `json:"current"`
+		Ports     string `json:"ports"`
+		Worktrees int    `json:"worktrees"`
+	}
 	var got struct {
-		Copies []copyJSON `json:"copies"`
+		Copies []lsCopy `json:"copies"`
 	}
 	if err := json.Unmarshal(jsonOut.Bytes(), &got); err != nil {
 		t.Fatalf("list --json: %v\n%s", err, jsonOut.String())
 	}
-	want := []copyJSON{{Name: "c", Path: f.copy, Current: true, Ports: "default", Worktrees: 2}}
+	want := []lsCopy{{Copy: "c", Path: f.copy, Current: true, Ports: "default", Worktrees: 2}}
 	if !slices.Equal(got.Copies, want) {
 		t.Fatalf("list --json copies = %+v, want %+v", got.Copies, want)
 	}

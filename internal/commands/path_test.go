@@ -16,17 +16,17 @@ func TestPathPrintsTheCopysAbsolutePath(t *testing.T) {
 	}
 }
 
-func TestPathJSONPrintsNameAndPath(t *testing.T) {
+func TestPathJSONPrintsCopyAndPath(t *testing.T) {
 	f := seedWtWorkspace(t)
 
 	var got struct {
-		Name string `json:"name"`
+		Copy string `json:"copy"`
 		Path string `json:"path"`
 	}
 	decodeJSON(t, mustMWS(t, f.meta, "path", "c", "--json"), &got)
 
-	if got.Name != "c" || got.Path != f.copy {
-		t.Errorf("path --json = %+v, want name c, path %s", got, f.copy)
+	if got.Copy != "c" || got.Path != f.copy {
+		t.Errorf("path --json = %+v, want copy c, path %s", got, f.copy)
 	}
 }
 
