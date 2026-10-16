@@ -1,6 +1,6 @@
 # mws -- agent notes
 
-A Go CLI for managing **meta workspaces** around independent native git repos. Intentionally domain-free: no project-specific code paths, no branching on project names. The same rule applies to `skeleton/`, since it ships in a public binary.
+A Go CLI for managing **meta workspaces** around independent native git repos. Intentionally domain-free: no project-specific code paths, no branching on project names. The same rule applies to `skeleton/`, since it ships in a public binary. Examples, fixtures, docs and committed artifacts must never name private projects, organisations or local paths: use neutral placeholder names, and build committed binaries with `-trimpath`.
 
 Use `go build ./...` to verify compilation and `go test ./...` for tests. Run `make ci` before pushing to mirror the full CI matrix (build, test, lint, govulncheck).
 
