@@ -1,6 +1,6 @@
 # Optional repos
 
-> Amended 2026-10-15: the `mws env` commands (formerly `sync-env`/`stage-env`) now cover the `[[optional_repos.envs]]` of every optional repo present in the copy, so the "iterate `[[repos]]` only" consequence below no longer holds.
+> Amended 2026-10-15: the `mws env` commands now cover the `[[optional_repos.envs]]` of every optional repo present in the copy, so the "iterate `[[repos]]` only" consequence below no longer holds.
 
 Add a top-level `[[optional_repos]]` array to the **mws config**, holding **Native repo** entries (same shape as `[[repos]]`) that `mws clone` does *not* clone into every **Working copy**. They are pulled into a specific copy on demand:
 
@@ -29,7 +29,7 @@ The default repo set in `[[repos]]` is cloned into every working copy. But a giv
 - **Auto-register on `mws include <folder> <url>`.** Rejected -- it blends registration into the include flow and makes the catalog implicit. Keeping registration explicit (`add-repo --optional`) keeps `.mws.toml` the single source of truth; `include`/`--with` on an unknown folder hard-errors and points at the register command.
 - **A dedicated `add-optional-repo` command.** Rejected in favour of `add-repo --optional` -- it is the same data (a `Repo` entry) with the same URL/folder prompting and validation, and the flag keeps the top-level command list tight. The one behavioral difference (no broadcast clone) is documented in the command help.
 - **Per-copy prompts listing every optional repo on every clone, defaulting to all.** Rejected -- optional repos are occasional by definition. The multiselect defaults to none so the common case (don't include any) is a single Enter, and `--with` covers the scripted case.
-- **Tracking which optional repos a copy contains (e.g. in state).** Out of scope. A cloned optional repo is an ordinary native repo on disk; mws does not need a registry of per-copy membership. `mws sync-env`/`stage-env` still iterate `[[repos]]` only, so an optional repo's env is materialised at clone/include time but not re-synced later. Revisit only if real usage shows that is missed.
+- **Tracking which optional repos a copy contains (e.g. in state).** Out of scope. A cloned optional repo is an ordinary native repo on disk; mws does not need a registry of per-copy membership. The env commands iterated `[[repos]]` only, so an optional repo's env was materialised at clone/include time but not re-synced later (superseded by the amendment above).
 
 ## Consequences
 

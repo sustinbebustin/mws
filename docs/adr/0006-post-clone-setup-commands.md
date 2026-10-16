@@ -29,7 +29,7 @@ The same toolchain steps (`pnpm install`, `go build`, codegen, ...) are run by h
 - **Lifecycle hooks (pre-clone, post-clone, pre-env, post-env, ...).** Rejected -- a single post-clone trigger covers every concrete use case raised. Introducing a hook framework before a second trigger exists is speculative generality and grows the config surface for no current payoff.
 - **Per-command prompts or a multi-select UI.** Rejected -- users either trust their config and want everything to run, or want to skip entirely and run by hand. A single yes/no matches that bimodal intent and keeps the CLI terse.
 - **Capture output, show only on failure.** Rejected -- long-running commands (`pnpm install`, `go build`) would appear hung. Streaming child stdout/stderr to the terminal as they run keeps the user informed and aborts naturally on Ctrl-C.
-- **A `mws setup [copy]` re-run subcommand mirroring `mws sync-env`.** Out of scope. Re-runs are still possible by running the commands manually. Revisit only if real usage shows the re-run command is missed.
+- **A `mws setup [copy]` re-run subcommand mirroring `mws env sync`.** Out of scope. Re-runs are still possible by running the commands manually. Revisit only if real usage shows the re-run command is missed.
 
 ## Consequences
 

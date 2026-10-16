@@ -7,7 +7,7 @@ project_name        = "my-project"
 working_copies_dir  = "copies"   # optional, single path segment
 ```
 
-With this set, `mws clone peer` creates `<meta>/copies/peer/` instead of `<meta>/peer/`. Every other command (`mws list`, `mws rm`, `mws relink`, `mws addrepo`, `mws sync-env`, `mws stage-env`, `mws promote`) honors the same root.
+With this set, `mws clone peer` creates `<meta>/copies/peer/` instead of `<meta>/peer/`. Every other command (`mws ls`, `mws rm`, `mws relink`, `mws add-repo`, `mws env`, `mws promote`) honors the same root.
 
 ## Why
 
@@ -17,7 +17,7 @@ The change is purely organizational. Allowlist gitignore semantics, harness fan-
 
 ## Considered options
 
-- **Per-invocation flag (`mws clone --at copies/peer`).** Rejected. Peer layout is a workspace property, not a per-clone decision -- if `main/` is at `copies/main/`, every future peer must be too, or `mws list` and the rm guard get inconsistent. A persistent config field makes the choice once and applies it everywhere.
+- **Per-invocation flag (`mws clone --at copies/peer`).** Rejected. Peer layout is a workspace property, not a per-clone decision -- if `main/` is at `copies/main/`, every future peer must be too, or `mws ls` and the rm guard get inconsistent. A persistent config field makes the choice once and applies it everywhere.
 - **Arbitrary filesystem paths (`working_copies_dir = "../../shared/peers"`).** Rejected. The discovery model used by every command walks up from cwd to find the meta root and then scans the copies root for peers; allowing arbitrary paths would force every command to thread an explicit copies-root flag and would break the rm guard (`rm` refuses anything not under the meta). Keeping the value to a single path segment under the meta root keeps the model intact.
 - **Multiple path segments (`working_copies_dir = "team/peers"`).** Rejected as speculative. No use case asks for it, and it complicates the validator (path-safe segment, no `..`, no leading `/`) without a payoff. Easy to extend later if a real need emerges.
 - **Per-peer override (`mws clone --to <path>`).** Rejected. Same problem as the per-invocation flag, with the added downside that a single workspace would end up with a mix of layouts.

@@ -41,7 +41,7 @@ The template content embedded in the `mws` binary via `//go:embed`. Rendered int
 _Avoid_: template (overloaded with go templates and GitHub template repos), boilerplate.
 
 **mws config**:
-A single TOML file at the root of the **Meta workspace** (e.g. `.mws.toml`). Holds project name, description, the list of **Native repos** (folder + URL), and per-repo **Env staging** mappings. Discovered by walking up from cwd. Not symlinked into working copies.
+A single TOML file at the root of the **Meta workspace** (e.g. `.mws.toml`). Holds project name, description, the list of **Native repos** (folder + URL), per-repo **Env staging** mappings and **Setup commands**, and the tables behind **Port slots**: `[ports]`, `[vars]`, `[[renders]]` and root `[[setup]]`. Discovered by walking up from cwd. Not symlinked into working copies.
 _Avoid_: manifest, project file.
 
 **Env staging**:
@@ -53,7 +53,7 @@ Shell commands listed in the **mws config**, run via `sh -c` with the **Port lea
 _Avoid_: hooks (implies a broader lifecycle that does not exist), scripts (overloaded with package.json's name-keyed semantics).
 
 **Port slot**:
-A small integer `k >= 1` a **Working copy** may claim with `mws ports claim`, giving it port `base + k * stride` for every port named under `[ports]` in the **mws config**. A copy with no slot is on the **default ports** (slot 0, the `base` values), which is a legitimate state and the one every copy starts in. Slots are never shared by live copies; a **Worktree** shares its copy's slot.
+A small integer `k >= 1` a **Working copy** may claim with `mws ports claim` (or `mws clone --ports`), giving it port `base + k * stride` for every port named under `[ports]` in the **mws config**. A copy with no slot is on the **default ports** (slot 0, the `base` values), which is a legitimate state and the one every copy starts in. Slots are never shared by live copies; a **Worktree** shares its copy's slot.
 _Avoid_: port block, offset, registry entry.
 
 **Port lease**:

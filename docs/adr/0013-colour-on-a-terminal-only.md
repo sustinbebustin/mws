@@ -5,7 +5,7 @@ mws colours its output per stream and changes nothing else about it. On a termin
 The rules:
 
 - **Per stream, not per process.** stdout decides how a result looks, stderr how progress looks, stdin whether mws may prompt (ADR-0012). `cd "$(mws clone ...)"` keeps coloured progress on a terminal stderr while stdout stays plain.
-- **Rich is plain plus SGR codes.** No rendering adds, removes or rearranges text. A person and an agent describing `mws list` describe the same lines, and a paste into an issue reads like the terminal did.
+- **Rich is plain plus SGR codes.** No rendering adds, removes or rearranges text. A person and an agent describing `mws ls` describe the same lines, and a paste into an issue reads like the terminal did.
 - **The terminal's own palette.** Colours are ANSI 9 to 12 and faint, so they follow the user's theme and stay legible on light and dark backgrounds. `NO_COLOR` turns them off. mws never asks the terminal for its background colour: the query stalls or leaks escape sequences wherever nothing answers it.
 - **Tokens never change.** `[OK]`, `[WARN]` and `[FAIL]` are styled, not replaced, so output greps the same everywhere. The final error now carries `[FAIL]` in both modes, matching the progress lines.
 - **`--json` is untouched.** JSON never goes through `ui`.

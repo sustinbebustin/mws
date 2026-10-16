@@ -1,6 +1,6 @@
 # Env staging via copy with config-driven mapping
 
-> Amended 2026-10-15: `mws sync-env` and `mws stage-env` are now `mws env sync` and `mws env stage` (no aliases), joined by `mws env diff`. All three also cover the optional repos present in a copy, and `clone`, `include`, `restore` and `env sync` share one render path ([ADR-0015](./0015-per-copy-port-slots.md)). The body keeps the old names for history.
+> Amended 2026-10-15: the env commands are `mws env sync`, `mws env stage` and `mws env diff` (the first two were separate top-level commands; no aliases remain). All three also cover the optional repos present in a copy, and `clone`, `include`, `restore` and `env sync` share one render path that substitutes `${VAR}` placeholders at the copy's port slot ([ADR-0015](./0015-per-copy-port-slots.md)). Where the body says a copy is "copied", read "rendered".
 
 The **Meta workspace** holds an **Env staging** dir at `.envs/`, organized per **Native repo** (`.envs/<repo>/<flat-name>`). Each `[[repos.envs]]` entry in the **mws config** maps a staged source file to a target path inside a working copy's native repo:
 
@@ -14,7 +14,7 @@ The **Meta workspace** holds an **Env staging** dir at `.envs/`, organized per *
     target = "apps/internal/.env"
 ```
 
-On `mws clone`, staged files are **copied** (not symlinked) into the new working copy at their mapped targets. Each working copy's env files are independent of staging after creation -- subsequent edits in one copy do not affect siblings. `mws sync-env <copy>` re-pushes from staging to overwrite a copy's env files (resetting to staged defaults). `mws stage-env <copy>` does the inverse: captures a copy's env files into staging per the config mappings, making them the new default for future clones.
+On `mws clone`, staged files are **copied** (not symlinked) into the new working copy at their mapped targets. Each working copy's env files are independent of staging after creation -- subsequent edits in one copy do not affect siblings. `mws env sync <copy>` re-pushes from staging to overwrite a copy's env files (resetting to staged defaults). `mws env stage <copy>` does the inverse: captures a copy's env files into staging per the config mappings, making them the new default for future clones.
 
 Env staging lives outside `.mws/` (so the pure fan-out rule for the harness is preserved) and is automatically untracked by the meta's allowlist gitignore. Env values are local-only; the meta repo never carries secrets.
 
@@ -27,8 +27,8 @@ Env staging lives outside `.mws/` (so the pure fan-out rule for the harness is p
 
 ## Consequences
 
-- A fresh `mws init` produces an empty `.envs/` -- mws cannot manufacture env values. The user populates env files in the first working copy by hand (paste from secrets manager, copy from another machine, hand-fill from a `.env.example`), then runs `mws stage-env main` to capture them into staging. Subsequent `mws clone` calls reproduce them automatically.
-- Per-copy divergence is the default. Editing `.env` in one working copy never affects another. Reset via `mws sync-env <copy>` if you want to discard drift; promote drift to the new default via `mws stage-env <copy>`.
+- A fresh `mws init` produces an empty `.envs/` -- mws cannot manufacture env values. The user populates env files in the first working copy by hand (paste from secrets manager, copy from another machine, hand-fill from a `.env.example`), then runs `mws env stage main` to capture them into staging. Subsequent `mws clone` calls reproduce them automatically.
+- Per-copy divergence is the default. Editing `.env` in one working copy never affects another. Reset via `mws env sync <copy>` if you want to discard drift; promote drift to the new default via `mws env stage <copy>`.
 - `[[repos.envs]]` entries grow with each env file managed. The mapping is the source of truth for which env files mws touches -- files not listed in the config are not synced.
 - Tools that follow symlinks (next.js, vite, supabase CLI, etc.) are not exercised on env paths under this design, removing a small class of "tool resolved a symlink to canonical path and got confused" failure modes.
 - Env staging mirrors the harness convention of "per-repo subdir under a meta-root dotfile dir" (`.envs/<repo>/` vs `.mws/`), keeping the meta-root structure regular: one dotfile dir per cross-cutting concern.
