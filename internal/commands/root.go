@@ -20,7 +20,8 @@ symlinks.
 Every command runs without prompts when given its arguments and flags. Without
 a terminal on stdin, mws never prompts: a missing input is a usage error that
 shows the invocation supplying it, and a confirmation needs --yes. Results go
-to stdout, progress to stderr; list commands take --json.
+to stdout, progress to stderr; commands with a result (ls, path, clone, rm,
+restore, trash, env, ports, wt) take --json.
 
 Exit codes: 0 ok, 1 failure, 2 usage, 3 refused by a safety check, 4 not found.`
 

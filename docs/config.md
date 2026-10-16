@@ -61,7 +61,7 @@ working_copies_dir  = "<segment>" # optional; single path segment under the meta
 
 | Top-level key        | Type              | Required | Notes |
 |----------------------|-------------------|----------|-------|
-| `project_name`       | string            | yes      | Used by `mws init` skeleton templates and surfaced in `mws ls`. |
+| `project_name`       | string            | yes      | Used by `mws init` skeleton templates. |
 | `description`        | string            | no       | Free-form. Empty by default. |
 | `working_copies_dir` | string            | no       | Single path-safe segment validated by the same rules as `project_name` (letters, digits, `-`, `_`, `.`; no leading `.` or `-`; no `/`). When set, `mws clone` and `mws init` place working copies at `<meta>/<working_copies_dir>/<name>/` instead of `<meta>/<name>/`. Empty (the default) keeps working copies at the meta root. |
 | `repos`              | array of tables   | no       | Each entry adds one **Native repo** to every **Working copy**. |
@@ -78,7 +78,7 @@ working_copies_dir  = "<segment>" # optional; single path segment under the meta
 | Key      | Type                | Required | Notes |
 |----------|---------------------|----------|-------|
 | `folder` | string              | yes      | Unique within the config. Determines the clone target: `<working-copy>/<folder>/`. |
-| `url`    | string              | yes      | Used by `git clone` when no peer working copy is available. `mws clone` prefers `git clone --local` from an existing peer's clone of the same repo and falls back to this URL. |
+| `url`    | string              | yes      | Passed to `git clone` by `mws clone`, `mws add-repo` and `mws include`; every working copy gets a fresh clone from this URL, never from a peer. |
 | `envs`   | array of tables     | no       | See [`[[repos.envs]]`](#reposenvs). Omitted when empty. |
 | `setup`  | array of tables     | no       | See [`[[repos.setup]]`](#repossetup). Omitted when empty. |
 
@@ -89,7 +89,7 @@ Maps a staged env file in `.envs/<folder>/` to a target inside the cloned repo. 
 | Key      | Type   | Required | Notes |
 |----------|--------|----------|-------|
 | `source` | string | yes      | Flat filename. Looked up at `<meta>/.envs/<folder>/<source>`. |
-| `target` | string | yes      | Path inside the repo working tree (relative to `<working-copy>/<folder>/`). Parent dirs are created on copy. |
+| `target` | string | yes      | Path inside the repo working tree (relative to `<working-copy>/<folder>/`). Parent dirs are created on copy. The target must be gitignored in the native repo: it is a per-copy file holding that copy's values and secrets, and mws does not edit the repo's ignore rules. |
 
 Design rationale and trade-offs: [ADR-0005](./adr/0005-env-staging-via-copy.md).
 
@@ -229,6 +229,27 @@ Root-level setup commands: each `cmd` runs via `sh -c` with cwd = the working co
 | Key   | Type   | Required | Notes |
 |-------|--------|----------|-------|
 | `cmd` | string | yes      | Shell string. |
+
+### Command output
+
+Beyond the `mws wt` shapes [above](#worktrees), these commands print one JSON object under `--json` (see [ADR-0012](./adr/0012-headless-cli-contract.md)). A failure prints `{"error": {"code", "message"}}`, with `code` one of `usage`, `refused`, `not_found`, `failure`. The copy key is `name` in `ls`, `path`, `clone`, `rm` and `restore`, and `copy` in `env` and `ports`.
+
+```text
+ls         {meta, copies:[{name, path, current, ports, worktrees}]}   # ports: "default" | "slot N" | "invalid lease"
+path       {name, path}
+clone      {name, path, repos:[folder], setup, ports}                  # setup: none | skipped | ran
+rm         {dry_run, name, path, entry?, purged, released_slot?}
+restore    {name, path, entry}
+trash *    {dry_run?, purged:[...], unreadable:[...]} / {trash, entries:[...], unreadable:[...]}
+env sync|stage  {dry_run, copies:[{copy, path, files:[{repo?, from, to, status, error?}]}]}   # status: copied | would_copy | skipped | failed
+env diff   {same, copies:[{copy, path, files:[{repo?, source, target, state}]}]}
+ports show   {copy, path, slot, vars:{NAME: value}}
+ports claim|release  {dry_run, copy, path, slot, previous_slot, files:[...as env sync...], error?}
+ports check  {copy, path, slot, ports:[{name, port, listening}]}
+ports ls     {copies:[{copy, path, slot, conflict, error?}], conflicts:[{slot, copies}], next_free}   # next_free: null without [ports] or when full
+```
+
+Exit codes follow ADR-0012: `0` ok, `1` failure, `2` usage, `3` refused, `4` not found. In `mws ports`, `3` is a slot another copy holds or two leases naming one slot (`--slot` settles it), `2` is a missing `[ports]` table, and `4` is a copy that does not exist. `mws env diff` exits `1` unless every file is `same`. A malformed lease fails every render of that copy with `1`, and `env stage` and `env diff` refuse it.
 
 ### Port examples
 

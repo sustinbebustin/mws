@@ -109,6 +109,7 @@ my-project/                       # this directory IS a git repo (meta root)
 │   └── ...
 └── feature-x/                    # Additional working copy
     ├── frontend/                 # Independent clone (own .git/)
+    ├── .mws-ports.env            # Port lease, once `mws ports claim` gave it a slot (untracked)
     ├── .wt/                      # Worktrees of this copy (untracked)
     │   └── 04/                   # `mws wt new 04`: frontend/ + backend/ on wt/04, harness links
     └── ...
@@ -127,24 +128,42 @@ For parallel agents inside one working copy, `mws wt new <name>` creates a **wor
 | Command | What it does |
 |---|---|
 | `mws init [name]` | Create a new meta workspace with a first working copy at `<name>/main/` and print its path. Prompts for anything not given; `--description`, `--copies-dir`, `--parent`, `--repo <url>` / `--repo <folder>=<url>` (repeatable) and `--yes` make it non-interactive. |
-| `mws add-repo <url> [folder]` | Register a native repo in `.mws.toml` and clone it into every working copy. With `--optional`, register it under `[[optional_repos]]` without cloning anywhere. Re-running with the same URL fills in copies that lack it. |
-| `mws clone <name>` | Create a new working copy and print its path. Native repos are freshly cloned from each configured URL and checked out on the default branch. When optional repos exist, prompts to include them; `--with <folder>` (repeatable) or `--no-optional` decides without prompting. `--ports` claims the lowest free port slot before the env render and setup; without it, a workspace with `[ports]` warns that the copy shares the default ports. Re-running for an existing copy clones only the repos it lacks and prints its path. `--json` prints `{name, path, repos, setup, ports}` instead. |
+| `mws add-repo <url> [folder]` | Register a native repo and clone it into every working copy, appending it to `.mws.toml`. With `--optional`, register it under `[[optional_repos]]` without cloning anywhere. Re-running with the same URL fills in copies that lack it. |
+| `mws clone <name>` | Create a new working copy inside this meta workspace and print its path. Native repos are freshly cloned from each configured URL and checked out on the default branch. When optional repos exist, prompts to include them; `--with <folder>` (repeatable) or `--no-optional` decides without prompting. `--ports` claims the lowest free port slot before the env render and setup; without it, a workspace with `[ports]` warns that the copy shares the default ports. Re-running for an existing copy clones only the repos it lacks and prints its path. `--json` prints `{name, path, repos, setup, ports}` instead. |
 | `mws include <folder> [copy]` | Clone a registered optional repo into a working copy (the current one by default). |
-| `mws promote <path>` | Move a top-level file or directory from the current working copy into `.mws/`, symlink it back, backfill the symlink into every other working copy, and link it into every copy's worktrees. Refuses an mws marker (`.mws-*`) and any `[[renders]]` target. |
-| `mws ls` | List working copies in the current meta workspace with each one's ports (`default` or `slot N`); `--json`. |
+| `mws promote <path>` | Move a top-level file or directory from a working copy into the harness (`.mws/`), symlink it back, backfill the symlink into every other working copy, and link it into every copy's worktrees. Refuses an mws marker (`.mws-*`) and any `[[renders]]` target. |
+| `mws ls` | List working copies in this meta workspace with each one's ports (`default` or `slot N`); `--json`. |
 | `mws rm <copy>` | Remove a working copy. Confirms first (`--yes` skips), releases its port slot (re-rendering its env files at the default ports), then moves it to `.trash/` so it can be brought back on the defaults; `--purge` deletes outright without rendering, `--dry-run` previews. `--json` prints `{dry_run, name, path, entry, purged, released_slot}`. |
 | `mws restore [copy]` | Bring a trashed working copy back and repair its harness symlinks. `--as <newname>` restores under a different name. `--json` prints `{name, path, entry}`. |
-| `mws path [copy]` | Print a working copy's absolute path (the current copy by default); exits `4` when there is none. `--json` prints `{name, path}`. |
-| `mws trash [ls\|prune\|empty]` | Inspect the trash, purge entries past their retention window, or empty it completely; `prune` and `empty` take `--dry-run`. `--json` on all three (`prune` and `empty` list the purged entries). |
-| `mws relink` | Refresh harness symlinks across every working copy. Diverged content is asked about, or settled by `--prefer copy\|harness\|skip`; `--dry-run` previews. |
-| `mws env sync [copy]` | Render staged env files from `.envs/` and `[[renders]]` sources from `.mws/` into a working copy at its port slot (overwrites), refreshing its worktrees' unedited copies, then run root `[[setup]]` (`--setup` / `--no-setup`); `--all` for every copy, `--dry-run` previews. |
-| `mws env stage [copy]` | Inverse of `env sync`: capture a working copy's env files into staging as the new default; `--dry-run` previews. Skips a staged source holding `${VAR}` placeholders with a warning unless `--force`. Refuses inside a worktree. |
-| `mws env diff [copy]` | Report each rendered file as `same`, `differs`, `missing in copy` or `missing in staging` against its rendered source; exits `1` unless all are the same. `--all` for every copy. All three `env` commands take `--json` and cover the optional repos present in the copy. |
-| `mws worktree` (`mws wt`) `new\|ls\|path\|exec\|rm\|prune` | Manage worktrees of the current working copy: `new <name>` creates one and prints its path, `ls [--all]` shows branches, dirty state and liveness, `path <name>` prints its path, `exec <name> -- <cmd>` runs in it, `rm <name>...` removes (refuses to lose work; `--force` discards uncommitted files, unreachable detached commits and changed root files; `--dry-run` previews), `prune` removes every clean, idle, merged one. `--json` everywhere. |
+| `mws path [copy]` | Print the absolute path of a working copy (the current copy by default); exits `4` when there is none. `--json` prints `{name, path}`. |
+| `mws trash` | Inspect and manage trashed working copies. With no subcommand it runs `ls`. `--json` on all three subcommands. |
+| `mws trash ls` | List trashed working copies. |
+| `mws trash prune` | Purge trashed working copies past their retention window; `--dry-run` previews. |
+| `mws trash empty` | Purge every trashed working copy, regardless of age; `--dry-run` previews, `--yes` skips the confirmation. |
+| `mws relink` | Refresh harness symlinks in every working copy. Diverged content is asked about, or settled by `--prefer copy\|harness\|skip`; `--dry-run` previews. |
+| `mws env` | Sync, stage and diff env files between staging and working copies. All three subcommands take `--json` and cover the optional repos present in the copy. |
+| `mws env sync [copy]` | Render staged env files into a working copy (overwrites): from `.envs/` and the `[[renders]]` sources in `.mws/`, at the copy's port slot, refreshing its worktrees' unedited copies, then run root `[[setup]]` (`--setup` / `--no-setup`); `--all` for every copy, `--dry-run` previews. |
+| `mws env stage [copy]` | Capture a working copy's env files into staging (overwrites) as the new default, the inverse of `env sync`; `--dry-run` previews. Skips a staged source holding `${VAR}` placeholders with a warning unless `--force`. Refuses inside a worktree. |
+| `mws env diff [copy]` | Compare a working copy's env files with staging: each rendered file is `same`, `differs`, `missing in copy` or `missing in staging` against its rendered source; exits `1` unless all are the same. `--all` for every copy. |
+| `mws ports [copy]` | Claim, release, show and check the Port slot of a working copy. Without a subcommand it runs `show`. `--json` on every subcommand. See [ADR-0015](./docs/adr/0015-per-copy-port-slots.md). |
+| `mws ports show [copy]` | Print a working copy's slot and exported variables, one `VAR=value` per line; `--export` prefixes `export ` for `eval "$(mws ports show --export)"` in a shell without direnv. |
+| `mws ports claim [copy]` | Give a working copy its own Port slot and re-render it: the lowest free slot, or `--slot N`. Refuses (exit `3`) a slot another copy holds. Re-renders env files, `[[renders]]` targets and worktrees, then runs root `[[setup]]` (`--setup` / `--no-setup`); `--dry-run` previews. |
+| `mws ports release [copy]` | Put a working copy back on the default ports and re-render it. Takes `--setup` / `--no-setup` and `--dry-run` like `claim`. |
+| `mws ports ls` | List every working copy's Port slot and the next free slot, flagging two leases that name one slot. |
+| `mws ports check [copy]` | Report which of a working copy's ports have a listener. Changes nothing and exits `0` either way. |
+| `mws worktree` (`mws wt`) | Create, list, run in and remove worktrees of a working copy. Non-interactive; `--json` on every subcommand but `exec`. |
+| `mws worktree new <name>` | Create a worktree of this working copy and print its path. `--branch`, `--base` and `--no-setup` adjust it; re-running for an existing worktree prints its path. |
+| `mws worktree ls` | List worktrees with their branches, state and liveness; `--all` covers every working copy. |
+| `mws worktree path <name>` | Print the absolute path of a worktree. |
+| `mws worktree exec <name> -- <cmd>` | Run a command in a worktree's root and exit with its status. |
+| `mws worktree rm <name>...` | Remove worktrees, deleting their fully merged branches. Refuses to lose work; `--force` discards uncommitted files, unreachable detached commits and changed root files; `--keep-branch` keeps every branch; `--dry-run` previews. |
+| `mws worktree prune` | Remove every clean, idle, fully merged worktree; `--dry-run` previews. |
+| `mws shell-init [shell]` | Print, install or check the shell function that cds into a copy after `mws clone` or `mws restore`. `--install` adds it to the rc file; `--status` reports whether it is active. |
+| `mws version` | Print mws version, commit, and build date. |
 
 ### Scripting and agents
 
-Every command runs without prompts when given its arguments and flags, and `mws <command> --help` shows examples. Without a terminal on stdin mws never prompts: a missing input fails with exit `2` and the invocation that supplies it, and a confirmation needs `--yes`. Results go to stdout (paths, lists, `--json`), progress to stderr, so `cd "$(mws clone feature-x --no-optional --setup | tail -n1)"` works. Every `--dry-run` prints one `would <verb> <object>` line per planned change on stdout and nothing else there; under `--json` the same list sits inside `{"dry_run": true, ...}`. Exit codes: `0` ok, `1` failure, `2` usage, `3` refused by a safety check, `4` not found. Re-running a command that half-succeeded finishes it, and removing something already gone exits `4` with a message saying so. See [ADR-0012](./docs/adr/0012-headless-cli-contract.md).
+Every command runs without prompts when given its arguments and flags, and `mws <command> --help` shows examples. Without a terminal on stdin mws never prompts: a missing input fails with exit `2` and the invocation that supplies it, and a confirmation needs `--yes`. `--json` is available wherever a command has a result: `ls`, `path`, `clone`, `rm`, `restore`, `trash`, `env`, `ports` and `wt`. Results go to stdout (paths, lists, `--json`), progress to stderr, so `cd "$(mws clone feature-x --no-optional --setup | tail -n1)"` works. Every `--dry-run` prints one `would <verb> <object>` line per planned change on stdout and nothing else there; under `--json` the same list sits inside `{"dry_run": true, ...}`. Exit codes: `0` ok, `1` failure, `2` usage, `3` refused by a safety check (under `mws ports`, a slot another copy holds), `4` not found. Re-running a command that half-succeeded finishes it, and removing something already gone exits `4` with a message saying so. See [ADR-0012](./docs/adr/0012-headless-cli-contract.md).
 
 Output is coloured only when the stream is a terminal, and colour is the only difference: piped output carries the same text, `--json` is untouched, and `NO_COLOR` is respected. See [ADR-0013](./docs/adr/0013-colour-on-a-terminal-only.md).
 
@@ -173,6 +192,20 @@ On `mws clone`:
 
 - **Env files** are rendered (not symlinked) into the new working copy at their target paths, with `${VAR}` placeholders substituted at the copy's port slot, so peers can hold different ports or service keys. `.envs/` is allowlist-gitignored -- secrets stay local. `mws env sync` re-pushes staged defaults; `mws env stage` captures the current working copy back into staging; `mws env diff` shows drift.
 - **Setup commands** run via `sh -c` from the cloned repo's directory after env-copy completes, only for the repos that run clones; root `[[setup]]` commands then run at the copy root after every render (`clone`, `include`, `env sync`). You are prompted before any run; `--setup` skips the prompt, `--no-setup` skips execution. Without a terminal one of the two is required.
+
+**Port slots** keep parallel copies from fighting over ports. Declare the ports once, and each copy can claim a slot that shifts all of them:
+
+```toml
+[ports]
+  [[ports.port]]
+    name = "web"
+    base = 5173
+
+[vars]
+  APP_URL = "http://localhost:${MWS_PORT_WEB}"
+```
+
+`mws ports claim feature-x` (or `mws clone feature-x --ports`) gives the copy slot 1, so `web` becomes 5183, and re-renders its env files. The slot is recorded in the copy's `.mws-ports.env`; `mws ports show` prints the variables, `eval "$(mws ports show --export)"` loads them into a shell, and direnv can `dotenv .mws-ports.env` instead. A copy with no slot stays on the base ports, and `mws rm` releases the slot. Rendered env targets must be gitignored in the native repo, since they differ per copy.
 
 Full schema and rationale: [`docs/config.md`](./docs/config.md).
 

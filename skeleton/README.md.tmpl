@@ -25,7 +25,7 @@ mws add-repo <git-url> [folder]
 {{.ProjectName}}/                  # this directory (git-versioned)
   .gitignore               # allowlist: only tracks .gitignore, .mws.toml, .mws/, README.md, CLAUDE.md
   CLAUDE.md                # mws workspace notes; Claude Code loads it from every working copy by walk-up
-  .mws.toml                # mws config (project name, repos, env mappings)
+  .mws.toml                # mws config (project name, repos, env mappings, ports)
   .mws/                    # harness; everything here symlinks into every working copy
   .envs/                   # env staging (per-repo files, copied into working copies on clone)
   main/                    # first working copy created by `mws init`
@@ -37,4 +37,5 @@ mws add-repo <git-url> [folder]
 - Edit harness content under `.mws/`. Working copies see the change instantly through symlinks.
 - New top-level files added directly in a working copy stay local until you `mws promote <path>` them into `.mws/`.
 - Native repos inside each working copy are independent git clones -- every working copy has its own `.git/` inside each repo dir.
-- Env files: populate them in a working copy, then `mws env stage <copy>` to capture defaults. Subsequent `mws clone` reproduces them automatically. `mws env sync <copy>` resets a copy back to staged defaults; `mws env diff <copy>` shows what differs.
+- Env files: populate them in a working copy, then `mws env stage <copy>` to capture defaults. Subsequent `mws clone` reproduces them automatically, substituting `${VAR}` placeholders for the copy's ports. `mws env sync <copy>` resets a copy back to staged defaults; `mws env diff <copy>` shows what differs.
+- Ports: when `.mws.toml` declares `[ports]`, `mws ports claim <copy>` gives a copy its own port slot so parallel copies can run side by side; `mws ports release <copy>` puts it back on the default ports.

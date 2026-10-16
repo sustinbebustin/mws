@@ -1,6 +1,6 @@
 # Per-copy port slots rendered at env staging time
 
-> Status: ACCEPTED 2026-10-15, not yet implemented. Ships in one release with the CLI review changes listed under Consequences.
+> Status: ACCEPTED 2026-10-15, implemented. Ships in one release with the CLI review changes listed under Consequences.
 
 A **Meta workspace** may declare named ports in the **mws config**. A
 **Working copy** is in one of two states. On the **default ports** (slot 0,
@@ -32,7 +32,7 @@ Three config tables, each usable without the others:
 ```toml
 [ports]                               # allocation: numbers
   stride = 10                         # default 10; slot k moves every port by k * stride
-  slots  = 50                         # optional cap; default: the largest count without a collision
+  slots  = 50                         # optional cap; default: the largest slot whose ports stay at or below 65535
 
   [[ports.port]]
     name = "api"                      # exported as MWS_PORT_API
@@ -103,7 +103,7 @@ that a mechanism inside mws has to make impossible rather than patch:
 - **A forgotten sync was silent.** `quick-fixes` has no registry line;
   nothing said so, so it renders the default ports and collides with `main`.
   Allocation stays opt-in (a copy on the shared default stack is a legitimate
-  state), but `mws clone` and `mws list` say which copies are on the defaults.
+  state), but `mws clone` and `mws ls` say which copies are on the defaults.
 - **The harness symlink fought the generated file.** `sync-ports` replaces
   the `.mcp.json` symlink with a file; `mws relink` then sees a diverged
   harness file and `--prefer peer` would move one copy's ports into the
@@ -124,14 +124,14 @@ Each of those becomes a line of `.mws.toml` or a line in a staged source.
   Rejected. It needs an exact inverse that drifted twice, it depends on the
   previous state of each file, it cannot tell a hand-set host from a slot-0
   default without heuristics, and it fights the harness fan-out. Env staging is
-  a byte copy (`atomicfile.Copy` in `copyEnvsFor`, `runSyncEnv`, `carryEnvs`),
+  a byte copy (`atomicfile.Copy` in the clone, env sync and worktree carry paths),
   so one substitution step on that path reaches every consumer: clone,
   include, env sync, restore, and worktree creation (which copies the rendered
   files from the copy and renders nothing itself).
 - **Env only, no rendering.** mws would write the lease and tools would read
   ports from the environment (Supabase `env()`, Next's dotenv-expand, compose
   `${VAR}`, `os.Getenv`). Staged files would stay identical across copies and
-  `stage-env` would round-trip cleanly. Rejected as the only mode: a process
+  `env stage` would round-trip cleanly. Rejected as the only mode: a process
   started outside direnv or `just` (an IDE launch, an agent's shell) sees empty
   values or a compiled-in default, which for a Go server on `:8088` is another
   copy's port. It remains available at zero cost: a staged file with no
@@ -232,10 +232,13 @@ Each of those becomes a line of `.mws.toml` or a line in a staged source.
 - **Slot arithmetic is exact, not block-based.** A copy owns
   `base + k * stride` for each named port and nothing in between. Two ports
   collide at some pair of slots only when their bases are congruent modulo
-  the stride; `Config.Validate` rejects such a pair unless `slots` caps the
-  count below the first collision, and the allocator stops at the last slot
-  whose ports stay at or below 65535. For app (bases 3000, 3001, 3002,
-  8088, 54320-54323; stride 10) no pair is congruent, so the limit is 1121.
+  the stride, and then at slot `d = (b - a) / stride`; `Config.Validate`
+  rejects such a pair unless the effective limit (`slots`, or the last slot
+  whose ports stay at or below 65535) is below `d`. The allocator stops at
+  that limit. For app (bases 3000, 3001, 3002, 8088, 54320-54323;
+  stride 10) the limit is 1121, set by 54323. Three pairs (3000/54320,
+  3001/54321, 3002/54322) are congruent modulo 10 but first meet at slot
+  5132, past the limit, so the config is valid.
 - **Slot 0 is the committed defaults and is never leased.** A workspace that
   adds `[ports]` changes nothing for its existing copies until one claims a
   slot; `main` stays on today's ports by never claiming one.
@@ -244,7 +247,7 @@ Each of those becomes a line of `.mws.toml` or a line in a staged source.
   env sync` does (ADR-0005), so a hand edit in a rendered file is lost.
   Release after claim restores the exact bytes a fresh clone produces, because
   both are `render(source, 0)`. Env targets of an **Optional repo** present
-  in the copy render too; before this, `sync-env` and `stage-env` iterated
+  in the copy render too; before this, the env commands iterated
   `[[repos]]` only. `mws env stage` of a copy whose staged source holds
   placeholders would bake one slot's ports into the source, so it skips
   that file with a `[WARN]` and stages the rest; `--force` stages the
