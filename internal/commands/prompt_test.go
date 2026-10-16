@@ -95,6 +95,7 @@ func TestInitWithoutTerminal(t *testing.T) {
 		t.Skip("git not on PATH")
 	}
 	noTerminal(t)
+	isolateGit(t, true)
 	parent, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
