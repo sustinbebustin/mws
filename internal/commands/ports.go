@@ -230,7 +230,7 @@ func runPortsLs(o output) error {
 			state := slotLabel(row.Slot)
 			switch {
 			case row.Error != "":
-				state = "invalid lease"
+				state = invalidLease
 			case row.Conflict:
 				state += "  conflict: " + strings.Join(inConflict[row.Copy], ", ")
 			}

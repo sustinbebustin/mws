@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -140,6 +142,36 @@ func TestRmPurgeSkipsTheRenderAndDryRunNamesTheSlot(t *testing.T) {
 	}
 	if fileExists(f.copy) {
 		t.Error("c was not deleted")
+	}
+}
+
+func TestLsShowsEachCopysPorts(t *testing.T) {
+	f := seedEnvWorkspace(t)
+	f.withFreePort(t)
+	mustPorts(t, f.meta, "claim", "b", "--slot", "3")
+
+	res := mustMWS(t, f.meta, "ls")
+	for _, want := range []string{"  a  default\n", "  b  slot 3\n"} {
+		if !strings.Contains(res.stdout, want) {
+			t.Errorf("ls stdout lacks %q:\n%s", want, res.stdout)
+		}
+	}
+
+	var got struct {
+		Copies []struct {
+			Name  string `json:"name"`
+			Ports string `json:"ports"`
+		} `json:"copies"`
+	}
+	if err := json.Unmarshal([]byte(mustMWS(t, f.meta, "ls", "--json").stdout), &got); err != nil {
+		t.Fatal(err)
+	}
+	byCopy := map[string]string{}
+	for _, c := range got.Copies {
+		byCopy[c.Name] = c.Ports
+	}
+	if want := map[string]string{"a": "default", "b": "slot 3"}; !maps.Equal(byCopy, want) {
+		t.Errorf("ls --json ports = %v, want %v", byCopy, want)
 	}
 }
 
