@@ -81,6 +81,7 @@ func setupChoiceFlags(cmd *cobra.Command) (setupChoice, error) {
 
 func newCloneCmd() *cobra.Command {
 	var with []string
+	var claimPorts bool
 	cmd := &cobra.Command{
 		Use:   "clone <name>",
 		Short: "Create a new working copy inside this meta workspace",
@@ -104,12 +105,19 @@ commands. Use --setup to run without prompting or --no-setup to skip
 entirely. Without a terminal, every choice above must come from a flag; clone
 fails before creating anything otherwise.
 
+--ports claims the lowest free Port slot for the copy after its repos are
+cloned, as ` + "`mws ports claim`" + ` does, so its env files are rendered and its
+setup runs once, at the final ports. Without --ports a copy starts on the
+default ports, and when .mws.toml declares [ports] clone ends with a warning
+that it shares them.
+
 Re-running for an existing working copy finishes it: registered repos (and
 --with ones) that are missing are cloned and get their env files, setup runs
 for those, and the path is printed. Repos already there are left as they
 are; a re-run that clones nothing changes nothing and runs no setup.`,
 		Example: `  mws clone feature-x
   mws clone feature-x --no-optional --no-setup
+  mws clone feature-x --ports --no-optional --setup
   mws clone feature-x --with docs --with infra --setup
   cd "$(mws clone feature-x --no-optional --setup | tail -n1)"`,
 		Args: cobra.MaximumNArgs(1),
@@ -126,9 +134,10 @@ are; a re-run that clones nothing changes nothing and runs no setup.`,
 			if err != nil {
 				return err
 			}
-			return runClone(cmd.Context(), reporterFor(cmd.ErrOrStderr()), cmd.OutOrStdout(), name, choice, optional)
+			return runClone(cmd.Context(), reporterFor(cmd.ErrOrStderr()), cmd.OutOrStdout(), name, choice, optional, claimPorts)
 		},
 	}
+	cmd.Flags().BoolVar(&claimPorts, "ports", false, "claim the lowest free Port slot for the new copy")
 	cmd.Flags().Bool("setup", false, "run [[repos.setup]] and root [[setup]] commands without prompting")
 	cmd.Flags().Bool("no-setup", false, "skip [[repos.setup]] and root [[setup]] commands without prompting")
 	cmd.Flags().StringSliceVar(&with, "with", nil, "include named optional repo(s) in this working copy (repeatable)")
@@ -136,7 +145,7 @@ are; a re-run that clones nothing changes nothing and runs no setup.`,
 	return cmd
 }
 
-func runClone(ctx context.Context, r Reporter, out io.Writer, name string, choice setupChoice, optional optionalChoice) error {
+func runClone(ctx context.Context, r Reporter, out io.Writer, name string, choice setupChoice, optional optionalChoice, claimPorts bool) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -169,6 +178,12 @@ func runClone(ctx context.Context, r Reporter, out io.Writer, name string, choic
 	if err := project.ValidateName(name); err != nil {
 		return usagef("working copy name %q: %w", name, err)
 	}
+	var policy config.PortPolicy
+	if claimPorts {
+		if policy, err = portPolicy(cfg, ws); err != nil {
+			return err
+		}
+	}
 
 	target := filepath.Join(ws.CopiesRoot(), name)
 	existing := false
@@ -196,6 +211,7 @@ func runClone(ctx context.Context, r Reporter, out io.Writer, name string, choic
 	missing := missingRepos(target, repos)
 	if existing && len(missing) == 0 {
 		r.Info(fmt.Sprintf("Working copy %s already exists and has every repo", target))
+		warnDefaultPorts(r, cfg, target)
 		return handOffCopy(r, out, target)
 	}
 	// [[repos.setup]] runs only for the repos this run clones; the root
@@ -224,11 +240,24 @@ func runClone(ctx context.Context, r Reporter, out io.Writer, name string, choic
 			failed = append(failed, repo.Folder)
 		}
 	}
+	// Claim before the render, so the env files and the setup below see the
+	// final ports.
+	var claimErr error
+	if claimPorts {
+		var slot, previous int
+		if slot, previous, claimErr = claimLease(r, ws, cfg, policy, target, nil, false); claimErr == nil {
+			r.OK(fmt.Sprintf("%s: %s -> %s", name, slotLabel(previous), slotLabel(slot)))
+		}
+	}
 	renderEnv(r, ws.MetaRoot, cfg, target, false)
 
 	if len(failed) > 0 {
 		return fmt.Errorf("clone completed with errors: %d repo(s) failed: %s; the rest are in place, so rerunning the same command clones only these",
 			len(failed), strings.Join(failed, ", "))
+	}
+	if claimErr != nil {
+		return fmt.Errorf("clone completed but claimed no Port slot: %w; the copy is in place on the default ports and no setup command ran. Claim one with `mws ports claim %s`, then run the setup commands by hand",
+			claimErr, name)
 	}
 
 	run, err := confirmSetup(choice, items)
@@ -248,7 +277,22 @@ func runClone(ctx context.Context, r Reporter, out io.Writer, name string, choic
 	}
 
 	r.OK(fmt.Sprintf("Working copy ready at %s", target))
+	warnDefaultPorts(r, cfg, target)
 	return handOffCopy(r, out, target)
+}
+
+// warnDefaultPorts warns that the working copy at target shares the default
+// ports with every other copy without a Port slot, when .mws.toml declares
+// [ports] and the copy holds no slot.
+func warnDefaultPorts(r Reporter, cfg *config.Config, target string) {
+	if _, ok := cfg.PortPolicy(); !ok {
+		return
+	}
+	if slot, err := ports.ReadSlot(target); err != nil || slot != 0 {
+		return
+	}
+	name := filepath.Base(target)
+	r.Warn(fmt.Sprintf("%s is on the default ports, which it shares with every copy without a Port slot; give it its own with `mws ports claim %s`", name, name))
 }
 
 // missingRepos returns the repos of list with no directory in the copy at
