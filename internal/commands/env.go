@@ -142,17 +142,15 @@ func runEnvSync(ctx context.Context, o output, name string, all, dryRun bool, ch
 	case name != "":
 		invocation += " " + name
 	}
-	runRoot := false
-	if !dryRun {
-		if runRoot, err = resolveRootSetup(cfg, choice, invocation); err != nil {
-			return o.fail(err)
-		}
+	mode, err := resolveRenderMode(cfg, dryRun, choice, invocation)
+	if err != nil {
+		return o.fail(err)
 	}
 	r := o.reporter()
 	res := envRunResult{DryRun: dryRun, Copies: make([]envCopyResult, 0, len(copies))}
 	var setupErrs []error
 	for _, c := range copies {
-		cr, err := renderCopy(ctx, r, ws.MetaRoot, cfg, c, dryRun, runRoot, o.stderr)
+		cr, err := workingCopy{metaRoot: ws.MetaRoot, cfg: cfg, path: c}.render(ctx, r, mode, o.stderr)
 		res.Copies = append(res.Copies, cr)
 		if err != nil {
 			setupErrs = append(setupErrs, err)
@@ -172,39 +170,66 @@ func rootSetupItems(cfg *config.Config) []setupItem {
 	return collectSetup([]config.Repo{{Folder: ".", Setup: cfg.Setup}})
 }
 
-// resolveRootSetup decides, before anything changes, whether the root
-// [[setup]] commands run after a render: from --setup / --no-setup, else by
-// prompting. Without a terminal and without a flag it is a usage error naming
-// invocation with each flag, whenever [[setup]] is configured.
-func resolveRootSetup(cfg *config.Config, choice setupChoice, invocation string) (bool, error) {
+// renderMode is how far a render of a working copy goes.
+type renderMode int
+
+const (
+	renderPreview  renderMode = iota // --dry-run: report each file as would_copy; change nothing
+	renderFiles                      // write the rendered files; skip the root [[setup]]
+	renderAndSetup                   // write the rendered files, then run the root [[setup]]
+)
+
+// resolveRenderMode decides, before anything changes, how far a render goes:
+// a preview under dryRun, else whether the root [[setup]] commands follow it,
+// from --setup / --no-setup or by prompting. Without a terminal and without a
+// flag it is a usage error naming invocation with each flag, whenever
+// [[setup]] is configured.
+func resolveRenderMode(cfg *config.Config, dryRun bool, choice setupChoice, invocation string) (renderMode, error) {
+	if dryRun {
+		return renderPreview, nil
+	}
 	items := rootSetupItems(cfg)
 	if err := requireSetupChoice(choice, items, invocation); err != nil {
-		return false, err
+		return renderFiles, err
 	}
-	return confirmSetup(choice, items)
+	run, err := confirmSetup(choice, items)
+	if err != nil || !run {
+		return renderFiles, err
+	}
+	return renderAndSetup, nil
 }
 
-// renderCopy renders the working copy at copyPath through renderEnv and then,
-// when runRoot is set and not under dryRun, runs the root [[setup]] commands
-// at the copy root with the copy's export set, streaming their output to
-// setupOut. It is the whole of a render for the commands that clone nothing
-// (`env sync`, `ports claim`, `ports release`); clone and include run the
-// repos' setup between the two halves and call them separately. The error
-// names the setup commands that failed; the render result stands either way.
-func renderCopy(ctx context.Context, r Reporter, metaRoot string, cfg *config.Config, copyPath string, dryRun, runRoot bool, setupOut io.Writer) (envCopyResult, error) {
-	res := renderEnv(r, metaRoot, cfg, copyPath, dryRun)
-	if dryRun || !runRoot {
+// workingCopy is a working copy as the render path sees it: the copy at path
+// in the meta workspace at metaRoot, configured by cfg.
+type workingCopy struct {
+	metaRoot string
+	cfg      *config.Config
+	path     string
+}
+
+func (c workingCopy) name() string { return filepath.Base(c.path) }
+
+// render renders the copy through renderEnv and then, under renderAndSetup,
+// runs the root [[setup]] commands at the copy root with the copy's export
+// set, streaming their output to setupOut. It is the whole of a render for
+// the commands that clone nothing (`env sync`, `ports claim`, `ports
+// release`); clone and include run the repos' setup between the two halves
+// and call them separately. The error names the setup commands that failed;
+// the render result stands either way.
+func (c workingCopy) render(ctx context.Context, r Reporter, mode renderMode, setupOut io.Writer) (envCopyResult, error) {
+	res := c.renderEnv(r, mode == renderPreview)
+	if mode != renderAndSetup {
 		return res, nil
 	}
-	items := rootSetupItems(cfg)
+	items := rootSetupItems(c.cfg)
 	if len(items) == 0 {
 		return res, nil
 	}
-	exports, err := copyExports(metaRoot, cfg, copyPath)
+	exports, err := c.exports()
 	if err != nil {
 		return res, fmt.Errorf("%s: no root setup command ran: %w", res.Copy, err)
 	}
-	if failed := runSetup(ctx, r, copyPath, exports, items, setupOut, setupOut); len(failed) > 0 {
+	if failed := runSetup(ctx, r, c.path, exports, items, setupOut, setupOut); len(failed) > 0 {
 		return res, fmt.Errorf("%s: %d root setup %s failed: %s; the env files were rendered. Fix the cause and rerun with --setup",
 			res.Copy, len(failed), plural(len(failed), "command", "commands"), strings.Join(failed, "; "))
 	}
@@ -212,17 +237,18 @@ func renderCopy(ctx context.Context, r Reporter, metaRoot string, cfg *config.Co
 }
 
 // renderEnv is the render path: it renders every staged env file of the
-// working copy at copyPath at the copy's Port slot and writes it to its
-// target in the copy, overwriting it, then refreshes the carried copies of
-// those files and of the lease in each of the copy's worktrees
-// (worktree.Rerender). clone, include, restore and `env sync` all
-// materialise env files through it. Under dryRun it changes nothing and
-// reports each file as would_copy. Progress, unsubstituted placeholders and
-// per-file failures go to r; the result says what happened to each file.
-func renderEnv(r Reporter, metaRoot string, cfg *config.Config, copyPath string, dryRun bool) envCopyResult {
-	files := renderedFilesOf(r, metaRoot, cfg, copyPath)
-	res := envCopyResult{Copy: filepath.Base(copyPath), Path: copyPath, Files: make([]envFileResult, 0, len(files))}
-	exports, err := copyExports(metaRoot, cfg, copyPath)
+// copy at its Port slot and writes it to its target in the copy, overwriting
+// it, then refreshes the carried copies of those files and of the lease in
+// each of the copy's worktrees (worktree.Rerender). clone, include, restore
+// and `env sync` all materialise env files through it. Under dryRun it
+// changes nothing and reports each file as would_copy. Progress,
+// unsubstituted placeholders and per-file failures go to r; the result says
+// what happened to each file.
+func (c workingCopy) renderEnv(r Reporter, dryRun bool) envCopyResult {
+	metaRoot, copyPath := c.metaRoot, c.path
+	files := c.renderedFiles(r)
+	res := envCopyResult{Copy: c.name(), Path: copyPath, Files: make([]envFileResult, 0, len(files))}
+	exports, err := c.exports()
 	if err != nil {
 		r.Fail(fmt.Sprintf("%s: %v; no env file of the copy was rendered", res.Copy, err))
 		for _, f := range files {
@@ -242,21 +268,21 @@ func renderEnv(r Reporter, metaRoot string, cfg *config.Config, copyPath string,
 			rels = append(rels, filepath.ToSlash(rel))
 		}
 	}
-	if err := worktree.Rerender(r, copyPath, cfg.WorktreePolicy(), rels); err != nil {
+	if err := worktree.Rerender(r, copyPath, c.cfg.WorktreePolicy(), rels); err != nil {
 		res.Error = err.Error()
 		r.Fail(fmt.Sprintf("%s: refreshing its worktrees: %v; the copy's own files were rendered", res.Copy, err))
 	}
 	return res
 }
 
-// copyExports is the export set of the working copy at copyPath at the slot
-// its Port lease records, slot 0 when it has none.
-func copyExports(metaRoot string, cfg *config.Config, copyPath string) (ports.Exports, error) {
-	slot, err := ports.ReadSlot(copyPath)
+// exports is the export set of the copy at the slot its Port lease records,
+// slot 0 when it has none.
+func (c workingCopy) exports() (ports.Exports, error) {
+	slot, err := ports.ReadSlot(c.path)
 	if err != nil {
 		return ports.Exports{}, err
 	}
-	return ports.NewExports(cfg, metaRoot, filepath.Base(copyPath), slot), nil
+	return ports.NewExports(c.cfg, c.metaRoot, c.name(), slot), nil
 }
 
 // renderFile renders f's source with e onto its target, keeping the
@@ -356,13 +382,14 @@ func runEnvStage(o output, name string, force, dryRun bool) error {
 	}
 	r := o.reporter()
 	res := envRunResult{DryRun: dryRun, Copies: make([]envCopyResult, 0, len(copies))}
-	for _, c := range copies {
-		exports, err := copyExports(ws.MetaRoot, cfg, c)
+	for _, path := range copies {
+		c := workingCopy{metaRoot: ws.MetaRoot, cfg: cfg, path: path}
+		exports, err := c.exports()
 		if err != nil {
-			return o.fail(clierr.Failuref("%s: %w; nothing was staged", filepath.Base(c), err))
+			return o.fail(clierr.Failuref("%s: %w; nothing was staged", c.name(), err))
 		}
-		files := envFilesOf(r, ws.MetaRoot, cfg, c)
-		cr := envCopyResult{Copy: filepath.Base(c), Path: c, Files: make([]envFileResult, 0, len(files))}
+		files := c.envFiles(r)
+		cr := envCopyResult{Copy: c.name(), Path: path, Files: make([]envFileResult, 0, len(files))}
 		for _, f := range files {
 			cr.Files = append(cr.Files, stageEnvFile(r, ws.MetaRoot, f, exports, force, dryRun))
 		}
@@ -441,13 +468,14 @@ func runEnvDiff(o output, name string, all bool) error {
 		Same   bool          `json:"same"`
 		Copies []envDiffCopy `json:"copies"`
 	}{Same: true, Copies: make([]envDiffCopy, 0, len(copies))}
-	for _, c := range copies {
-		dc := envDiffCopy{Copy: filepath.Base(c), Path: c, Files: []envDiffFile{}}
-		exports, err := copyExports(ws.MetaRoot, cfg, c)
+	for _, path := range copies {
+		c := workingCopy{metaRoot: ws.MetaRoot, cfg: cfg, path: path}
+		dc := envDiffCopy{Copy: c.name(), Path: path, Files: []envDiffFile{}}
+		exports, err := c.exports()
 		if err != nil {
-			return o.fail(clierr.Failuref("%s: %w; nothing was compared", filepath.Base(c), err))
+			return o.fail(clierr.Failuref("%s: %w; nothing was compared", c.name(), err))
 		}
-		for _, f := range renderedFilesOf(r, ws.MetaRoot, cfg, c) {
+		for _, f := range c.renderedFiles(r) {
 			state, err := compareEnvFile(f, exports)
 			if err != nil {
 				return o.fail(clierr.Failuref("compare %s with %s: %w; nothing was changed", f.target, f.source, err))
@@ -507,47 +535,47 @@ type envFile struct {
 	repo, source, target string
 }
 
-// envFilesOf lists the env files of the working copy at copyPath: the
-// mappings of every default repo and of every optional repo the copy holds. A
-// default repo missing from the copy is skipped with a warning, so its env
-// files never create the repo's directory.
-func envFilesOf(r Reporter, metaRoot string, cfg *config.Config, copyPath string) []envFile {
+// envFiles lists the env files of the copy: the mappings of every default
+// repo and of every optional repo the copy holds. A default repo missing from
+// the copy is skipped with a warning, so its env files never create the
+// repo's directory.
+func (c workingCopy) envFiles(r Reporter) []envFile {
 	var repos []config.Repo
-	for _, repo := range cfg.Repos {
-		if _, err := os.Stat(filepath.Join(copyPath, repo.Folder)); err != nil {
+	for _, repo := range c.cfg.Repos {
+		if _, err := os.Stat(filepath.Join(c.path, repo.Folder)); err != nil {
 			if len(repo.Envs) > 0 {
-				r.Warn(fmt.Sprintf("%s: %s is not in the copy, skipping its env files", filepath.Base(copyPath), repo.Folder))
+				r.Warn(fmt.Sprintf("%s: %s is not in the copy, skipping its env files", c.name(), repo.Folder))
 			}
 			continue
 		}
 		repos = append(repos, repo)
 	}
-	repos = append(repos, presentRepos(copyPath, cfg.OptionalRepos)...)
+	repos = append(repos, presentRepos(c.path, c.cfg.OptionalRepos)...)
 
-	staging := envStagingDir(metaRoot)
+	staging := envStagingDir(c.metaRoot)
 	var files []envFile
 	for _, repo := range repos {
 		for _, env := range repo.Envs {
 			files = append(files, envFile{
 				repo:   repo.Folder,
 				source: filepath.Join(staging, repo.Folder, env.Source),
-				target: filepath.Join(copyPath, repo.Folder, env.Target),
+				target: filepath.Join(c.path, repo.Folder, env.Target),
 			})
 		}
 	}
 	return files
 }
 
-// renderedFilesOf lists every file the render path writes into the working
-// copy at copyPath: its env files, then each `[[renders]]` target at the
-// copy root with its `.render` source under the harness dir.
-func renderedFilesOf(r Reporter, metaRoot string, cfg *config.Config, copyPath string) []envFile {
-	files := envFilesOf(r, metaRoot, cfg, copyPath)
-	harness := filepath.Join(metaRoot, project.HarnessDirName)
-	for _, rd := range cfg.Renders {
+// renderedFiles lists every file the render path writes into the copy: its
+// env files, then each `[[renders]]` target at the copy root with its
+// `.render` source under the harness dir.
+func (c workingCopy) renderedFiles(r Reporter) []envFile {
+	files := c.envFiles(r)
+	harness := filepath.Join(c.metaRoot, project.HarnessDirName)
+	for _, rd := range c.cfg.Renders {
 		files = append(files, envFile{
 			source: filepath.Join(harness, rd.Source),
-			target: filepath.Join(copyPath, rd.Target),
+			target: filepath.Join(c.path, rd.Target),
 		})
 	}
 	return files

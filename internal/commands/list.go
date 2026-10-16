@@ -23,7 +23,7 @@ func newListCmd() *cobra.Command {
 the current directory with "*", naming its ports ("default" on the default
 ports, "slot N" when it holds a Port slot, "invalid lease" when mws cannot
 read its lease) and counting its worktrees. --json prints
-{"meta", "copies": [{"name", "path", "current", "ports", "worktrees"}]}.`,
+{"meta", "copies": [{"copy", "path", "current", "ports", "worktrees"}]}.`,
 		Example: `  mws ls
   mws ls --json`,
 		Args: cobra.NoArgs,
@@ -37,7 +37,7 @@ read its lease) and counting its worktrees. --json prints
 
 // copyJSON is one working copy in `mws ls --json`.
 type copyJSON struct {
-	Name      string `json:"name"`
+	Copy      string `json:"copy"`
 	Path      string `json:"path"`
 	Current   bool   `json:"current"`
 	Ports     string `json:"ports"`
@@ -71,14 +71,14 @@ func runList(o output) error {
 		s := ui.Detect(w)
 		width := 0
 		for _, c := range copies {
-			width = max(width, len(c.Name))
+			width = max(width, len(c.Copy))
 		}
 		for _, c := range copies {
 			marker := "  "
 			if c.Current {
 				marker = "* "
 			}
-			line := fmt.Sprintf("%s%-*s  %s", marker, width, c.Name, c.Ports)
+			line := fmt.Sprintf("%s%-*s  %s", marker, width, c.Copy, c.Ports)
 			if c.Worktrees > 0 {
 				line += fmt.Sprintf("  (+%d %s)", c.Worktrees, plural(c.Worktrees, "worktree", "worktrees"))
 			}
@@ -108,13 +108,18 @@ func collectCopies(r Reporter, ws *project.Workspace, cfg *config.Config) ([]cop
 		if err != nil {
 			return nil, clierr.Failuref("count worktrees of %s: %w", peer, err)
 		}
-		label := invalidLease
-		if slot, err := ports.ReadSlot(peer); err != nil {
-			r.Warn(err.Error())
-		} else {
-			label = slotLabel(slot)
-		}
-		copies = append(copies, copyJSON{Name: filepath.Base(peer), Path: peer, Current: peer == ws.WorkingCopy, Ports: label, Worktrees: len(roots)})
+		copies = append(copies, copyJSON{Copy: filepath.Base(peer), Path: peer, Current: peer == ws.WorkingCopy, Ports: portsLabel(r, peer), Worktrees: len(roots)})
 	}
 	return copies, nil
+}
+
+// portsLabel names the ports of the working copy at copyPath: "default",
+// "slot N", or invalidLease, warned about on r, when its lease is unreadable.
+func portsLabel(r Reporter, copyPath string) string {
+	slot, err := ports.ReadSlot(copyPath)
+	if err != nil {
+		r.Warn(err.Error())
+		return invalidLease
+	}
+	return slotLabel(slot)
 }

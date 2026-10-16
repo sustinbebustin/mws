@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -114,9 +115,11 @@ that it shares them.
 Re-running for an existing working copy finishes it: registered repos (and
 --with ones) that are missing are cloned and get their env files, setup runs
 for those, and the path is printed. Repos already there are left as they
-are; a re-run that clones nothing changes nothing and runs no setup.
+are; a re-run that clones nothing changes nothing and runs no setup, unless
+--ports is given: then it claims a slot (a copy that holds one keeps it),
+re-renders the copy and runs the root [[setup]] commands once.
 
---json prints {"name", "path", "repos", "setup", "ports"} instead of the path:
+--json prints {"copy", "path", "repos", "setup", "ports"} instead of the path:
 the repos cloned this run, the setup outcome ("none" when no command was
 scheduled, "skipped" for --no-setup or a declined prompt, "ran") and the
 copy's ports ("default" or "slot N"). A failure prints
@@ -168,7 +171,7 @@ const (
 // already complete), what became of the setup commands, and the copy's ports
 // ("default" or "slot N").
 type cloneResult struct {
-	Name  string       `json:"name"`
+	Copy  string       `json:"copy"`
 	Path  string       `json:"path"`
 	Repos []string     `json:"repos"`
 	Setup setupOutcome `json:"setup"`
@@ -178,7 +181,11 @@ type cloneResult struct {
 // runClone clones the working copy and reports it: its path as the last stdout
 // line, or the cloneResult under --json. r is where progress goes.
 func runClone(ctx context.Context, r Reporter, o output, name string, choice setupChoice, optional optionalChoice, claimPorts bool) error {
-	res, err := cloneCopy(ctx, r, name, choice, optional, claimPorts)
+	ws, cfg, err := o.locate()
+	if err != nil {
+		return err
+	}
+	res, err := cloneCopy(ctx, r, ws, cfg, cloneRequest{name: name, setup: choice, optional: optional, ports: claimPorts})
 	if err != nil {
 		return o.fail(err)
 	}
@@ -189,13 +196,12 @@ func runClone(ctx context.Context, r Reporter, o output, name string, choice set
 	})
 }
 
-// copyPorts labels the Port slot the working copy at target holds.
-func copyPorts(target string) string {
-	slot, err := ports.ReadSlot(target)
-	if err != nil {
-		return invalidLease
-	}
-	return slotLabel(slot)
+// cloneRequest is what one `mws clone` run was asked for.
+type cloneRequest struct {
+	name     string // empty: prompt for it
+	setup    setupChoice
+	optional optionalChoice
+	ports    bool // --ports: claim a Port slot before the render
 }
 
 // folders lists the folder of each repo.
@@ -207,111 +213,61 @@ func folders(list []config.Repo) []string {
 	return out
 }
 
-func cloneCopy(ctx context.Context, r Reporter, name string, choice setupChoice, optional optionalChoice, claimPorts bool) (cloneResult, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return cloneResult{}, err
-	}
-	ws, err := project.Locate(cwd)
-	if err != nil {
-		return cloneResult{}, err
-	}
-	cfg, err := config.Load(ws.MetaRoot)
-	if err != nil {
-		return cloneResult{}, err
-	}
+// cloneCopy creates or finishes the working copy req names in ws. Every
+// choice (name, optional repos, setup) is resolved before the first
+// filesystem mutation, so an unknown --with name, a cancelled prompt or a
+// missing flag fails without leaving a half-built copy.
+func cloneCopy(ctx context.Context, r Reporter, ws *project.Workspace, cfg *config.Config, req cloneRequest) (cloneResult, error) {
 	if err := project.ValidateWorkingCopiesDir(ws.WorkingCopiesDir); err != nil {
 		return cloneResult{}, fmt.Errorf("invalid working_copies_dir %q in .mws.toml: %w", ws.WorkingCopiesDir, err)
 	}
-
-	if name == "" {
-		if !canPrompt() {
-			return cloneResult{}, noPrompt("no working copy name given", "mws clone <name> --no-optional --setup", "mws clone <name> --no-optional --no-setup")
-		}
-		if err := runField(huh.NewInput().
-			Title("New working copy name").
-			Description(clonePromptDescription(ws)).
-			Validate(project.ValidateName).
-			Value(&name)); err != nil {
-			return cloneResult{}, err
-		}
-		name = strings.TrimSpace(name)
+	name, err := cloneName(ws, req.name)
+	if err != nil {
+		return cloneResult{}, err
 	}
-	if err := project.ValidateName(name); err != nil {
-		return cloneResult{}, usagef("working copy name %q: %w", name, err)
-	}
-	var policy config.PortPolicy
-	if claimPorts {
-		if policy, err = portPolicy(cfg, ws); err != nil {
+	if req.ports {
+		if _, err := portPolicy(cfg, ws); err != nil {
 			return cloneResult{}, err
 		}
 	}
-
-	target := filepath.Join(ws.CopiesRoot(), name)
-	existing := false
-	if _, err := os.Stat(target); err == nil {
-		if !looksLikeWorkingCopy(ws.MetaRoot, target) {
-			return cloneResult{}, clierr.Refusedf("%s already exists and is not a working copy of %s; nothing was changed; choose another name", target, ws.MetaRoot)
-		}
-		existing = true
-	} else if !errors.Is(err, os.ErrNotExist) {
+	target, existing, err := cloneTarget(ws, name)
+	if err != nil {
 		return cloneResult{}, err
 	}
-
-	// Resolve every choice before any filesystem mutation: an unknown --with
-	// name, a cancelled prompt or a missing flag must fail without leaving a
-	// half-built copy.
-	var selected []config.Repo
-	if existing && optional.kind == optionalAsk {
-		// A retry keeps the optional repos the copy already has; it does not
-		// ask again.
-		selected = presentRepos(target, cfg.OptionalRepos)
-	} else if selected, err = resolveOptional(cfg, optional); err != nil {
+	repos, err := cloneRepos(cfg, target, existing, req.optional)
+	if err != nil {
 		return cloneResult{}, err
 	}
-	repos := append(append([]config.Repo{}, cfg.Repos...), selected...)
 	missing := missingRepos(target, repos)
 	if existing && len(missing) == 0 {
 		r.Info(fmt.Sprintf("Working copy %s already exists and has every repo", target))
-		warnDefaultPorts(r, cfg, target)
-		return cloneResult{Name: name, Path: target, Repos: []string{}, Setup: setupNone, Ports: copyPorts(target)}, nil
+		if !req.ports {
+			warnDefaultPorts(r, cfg, target)
+			return cloneResult{Copy: name, Path: target, Repos: []string{}, Setup: setupNone, Ports: portsLabel(r, target)}, nil
+		}
 	}
 	// [[repos.setup]] runs only for the repos this run clones; the root
 	// [[setup]] follows it, after the render.
 	items := append(collectSetup(missing), rootSetupItems(cfg)...)
-	if err := requireSetupChoice(choice, items, "mws clone "+name); err != nil {
+	if err := requireSetupChoice(req.setup, items, "mws clone "+name); err != nil {
 		return cloneResult{}, err
 	}
 
-	if err := os.MkdirAll(target, 0o755); err != nil {
-		return cloneResult{}, err
-	}
-
-	linked, err := project.LinkHarnessIntoWorkingCopy(ws.MetaRoot, target)
+	failed, err := populateCopy(ctx, r, ws.MetaRoot, target, missing)
 	if err != nil {
 		return cloneResult{}, err
 	}
-	for _, n := range linked {
-		r.OK(fmt.Sprintf("Linked %s/%s", name, n))
-	}
-
-	var failed []string
-	for _, repo := range missing {
-		if err := cloneNative(ctx, r, repo, target); err != nil {
-			r.Fail(fmt.Sprintf("%s: %v", repo.Folder, err))
-			failed = append(failed, repo.Folder)
-		}
-	}
 	// Claim before the render, so the env files and the setup below see the
 	// final ports.
+	wc := workingCopy{metaRoot: ws.MetaRoot, cfg: cfg, path: target}
 	var claimErr error
-	if claimPorts {
-		var slot, previous int
-		if slot, previous, claimErr = claimLease(r, ws, cfg, policy, target, nil, false); claimErr == nil {
-			r.OK(fmt.Sprintf("%s: %s -> %s", name, slotLabel(previous), slotLabel(slot)))
+	if req.ports {
+		var ch leaseChange
+		if ch, claimErr = claimLease(r, ws, wc, slotClaim{}); claimErr == nil {
+			r.OK(fmt.Sprintf("%s: %s -> %s", name, slotLabel(ch.previous), slotLabel(ch.slot)))
 		}
 	}
-	renderEnv(r, ws.MetaRoot, cfg, target, false)
+	wc.renderEnv(r, false)
 
 	if len(failed) > 0 {
 		return cloneResult{}, fmt.Errorf("clone completed with errors: %d repo(s) failed: %s; the rest are in place, so rerunning the same command clones only these",
@@ -321,31 +277,111 @@ func cloneCopy(ctx context.Context, r Reporter, name string, choice setupChoice,
 		return cloneResult{}, fmt.Errorf("clone completed but claimed no Port slot: %w; the copy is in place on the default ports and no setup command ran. Claim one with `mws ports claim %s`, then run the setup commands by hand",
 			claimErr, name)
 	}
-
-	run, err := confirmSetup(choice, items)
+	setup, err := cloneSetup(ctx, r, wc, req.setup, items)
 	if err != nil {
 		return cloneResult{}, err
-	}
-	setup := setupNone
-	if len(items) > 0 {
-		setup = setupSkipped
-	}
-	if run {
-		exports, err := copyExports(ws.MetaRoot, cfg, target)
-		if err != nil {
-			return cloneResult{}, fmt.Errorf("clone completed but no setup command ran: %w", err)
-		}
-		setupFailed := runSetup(ctx, r, target, exports, items, os.Stderr, os.Stderr)
-		if len(setupFailed) > 0 {
-			return cloneResult{}, fmt.Errorf("clone completed but %d setup command(s) failed:\n  %s\nthe working copy is kept; fix the cause, then run the failed command(s) by hand",
-				len(setupFailed), strings.Join(setupFailed, "\n  "))
-		}
-		setup = setupRan
 	}
 
 	r.OK(fmt.Sprintf("Working copy ready at %s", target))
 	warnDefaultPorts(r, cfg, target)
-	return cloneResult{Name: name, Path: target, Repos: folders(missing), Setup: setup, Ports: copyPorts(target)}, nil
+	return cloneResult{Copy: name, Path: target, Repos: folders(missing), Setup: setup, Ports: portsLabel(r, target)}, nil
+}
+
+// cloneName is the validated name of the copy to clone: name, or when it is
+// empty, the answer to a prompt.
+func cloneName(ws *project.Workspace, name string) (string, error) {
+	if name == "" {
+		if !canPrompt() {
+			return "", noPrompt("no working copy name given", "mws clone <name> --no-optional --setup", "mws clone <name> --no-optional --no-setup")
+		}
+		if err := runField(huh.NewInput().
+			Title("New working copy name").
+			Description(clonePromptDescription(ws)).
+			Validate(project.ValidateName).
+			Value(&name)); err != nil {
+			return "", err
+		}
+		name = strings.TrimSpace(name)
+	}
+	if err := project.ValidateName(name); err != nil {
+		return "", usagef("working copy name %q: %w", name, err)
+	}
+	return name, nil
+}
+
+// cloneTarget is where the copy called name lives, and whether a working
+// copy is already there. Anything else at that path is refused.
+func cloneTarget(ws *project.Workspace, name string) (target string, existing bool, err error) {
+	target = filepath.Join(ws.CopiesRoot(), name)
+	if _, err := os.Stat(target); errors.Is(err, os.ErrNotExist) {
+		return target, false, nil
+	} else if err != nil {
+		return "", false, err
+	}
+	if !looksLikeWorkingCopy(ws.MetaRoot, target) {
+		return "", false, clierr.Refusedf("%s already exists and is not a working copy of %s; nothing was changed; choose another name", target, ws.MetaRoot)
+	}
+	return target, true, nil
+}
+
+// cloneRepos is every repo the copy at target should hold: the default repos
+// and the chosen optional ones. A retry without --with or --no-optional keeps
+// the optional repos the copy already has; it does not ask again.
+func cloneRepos(cfg *config.Config, target string, existing bool, optional optionalChoice) ([]config.Repo, error) {
+	var selected []config.Repo
+	if existing && optional.kind == optionalAsk {
+		selected = presentRepos(target, cfg.OptionalRepos)
+	} else {
+		var err error
+		if selected, err = resolveOptional(cfg, optional); err != nil {
+			return nil, err
+		}
+	}
+	return slices.Concat(cfg.Repos, selected), nil
+}
+
+// populateCopy creates the copy at target, links the harness into it and
+// clones each of missing. A repo that fails to clone is reported on r and
+// named in failed; the rest are still cloned.
+func populateCopy(ctx context.Context, r Reporter, metaRoot, target string, missing []config.Repo) (failed []string, err error) {
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		return nil, err
+	}
+	linked, err := project.LinkHarnessIntoWorkingCopy(metaRoot, target)
+	if err != nil {
+		return nil, err
+	}
+	for _, n := range linked {
+		r.OK(fmt.Sprintf("Linked %s/%s", filepath.Base(target), n))
+	}
+	for _, repo := range missing {
+		if err := cloneNative(ctx, r, repo, target); err != nil {
+			r.Fail(fmt.Sprintf("%s: %v", repo.Folder, err))
+			failed = append(failed, repo.Folder)
+		}
+	}
+	return failed, nil
+}
+
+// cloneSetup runs the setup items of a clone into the copy c, when choice (or
+// the prompt) says so, and says what became of them.
+func cloneSetup(ctx context.Context, r Reporter, c workingCopy, choice setupChoice, items []setupItem) (setupOutcome, error) {
+	if len(items) == 0 {
+		return setupNone, nil
+	}
+	run, err := confirmSetup(choice, items)
+	if err != nil || !run {
+		return setupSkipped, err
+	}
+	exports, err := c.exports()
+	if err != nil {
+		return "", fmt.Errorf("clone completed but no setup command ran: %w", err)
+	}
+	if failed := runSetup(ctx, r, c.path, exports, items, os.Stderr, os.Stderr); len(failed) > 0 {
+		return "", fmt.Errorf("clone completed but %d setup command(s) failed:\n  %s\nthe working copy is kept; fix the cause, then run the failed command(s) by hand",
+			len(failed), strings.Join(failed, "\n  "))
+	}
+	return setupRan, nil
 }
 
 // warnDefaultPorts warns that the working copy at target shares the default

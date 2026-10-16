@@ -57,7 +57,7 @@ copy, then "would trash <path>" or "would delete <path>". A name that is no work
 when it was trashed earlier, the message names the trash entry and its age,
 so a retried rm can tell "already removed" from a typo.
 
---json prints {"dry_run", "name", "path", "entry", "purged", "released_slot"}:
+--json prints {"dry_run", "copy", "path", "entry", "purged", "released_slot"}:
 the trash entry id (absent when purged) and the slot given back (absent for a
 copy on the default ports), or {"error": {"code", "message"}} on failure.`,
 		Example: `  mws rm feature-x
@@ -85,7 +85,7 @@ copy on the default ports), or {"error": {"code", "message"}} on failure.`,
 // copy on the default ports. A dry run fills it with what would happen.
 type rmResult struct {
 	DryRun       bool   `json:"dry_run"`
-	Name         string `json:"name"`
+	Copy         string `json:"copy"`
 	Path         string `json:"path"`
 	Entry        string `json:"entry,omitempty"`
 	Purged       bool   `json:"purged"`
@@ -99,7 +99,7 @@ func (res rmResult) printWouldRemove(w io.Writer) error {
 	if !res.Purged {
 		verb = "trash"
 		if res.ReleasedSlot > 0 {
-			if _, err := fmt.Fprintf(w, "would release slot %d from %s\n", res.ReleasedSlot, res.Name); err != nil {
+			if _, err := fmt.Fprintf(w, "would release slot %d from %s\n", res.ReleasedSlot, res.Copy); err != nil {
 				return err
 			}
 		}
@@ -199,7 +199,7 @@ func removeCopy(ctx context.Context, r Reporter, name string, f rmFlags) (*rmRes
 			r.Warn(fmt.Sprintf("%v; rm would trash %s with it, without rendering its env files at the default ports", leaseErr, name))
 		}
 		r.Info("Dry run: " + description)
-		res := &rmResult{DryRun: true, Name: name, Path: target, Purged: !toTrash}
+		res := &rmResult{DryRun: true, Copy: name, Path: target, Purged: !toTrash}
 		if toTrash {
 			res.ReleasedSlot = slot
 		}
@@ -226,10 +226,10 @@ func removeCopy(ctx context.Context, r Reporter, name string, f rmFlags) (*rmRes
 				r.Warn(fmt.Sprintf("Could not drop the deleted worktrees' registrations from the meta repo: %v. Run `git worktree prune` in %s", err, ws.MetaRoot))
 			}
 		}
-		return &rmResult{Name: name, Path: target, Purged: true}, nil
+		return &rmResult{Copy: name, Path: target, Purged: true}, nil
 	}
 
-	released := releaseBeforeTrash(r, ws.MetaRoot, cfg, target)
+	released := releaseBeforeTrash(r, workingCopy{metaRoot: ws.MetaRoot, cfg: cfg, path: target})
 	entry, err := trash.Stash(ws.MetaRoot, target)
 	if err != nil {
 		return nil, err
@@ -245,7 +245,7 @@ func removeCopy(ctx context.Context, r Reporter, name string, f rmFlags) (*rmRes
 	} else {
 		r.Info(fmt.Sprintf("Kept until purged. Restore with `mws restore %s`.", entry.Name))
 	}
-	return &rmResult{Name: name, Path: target, Entry: entry.ID, ReleasedSlot: released}, nil
+	return &rmResult{Copy: name, Path: target, Entry: entry.ID, ReleasedSlot: released}, nil
 }
 
 // notACopy is the not-found error for `mws rm name` when no working copy has
@@ -263,15 +263,15 @@ func notACopy(metaRoot, name, target string) error {
 	return clierr.NotFoundf("%s is not a working copy of %s; `mws ls` shows the working copies", target, metaRoot)
 }
 
-// releaseBeforeTrash puts the working copy at copyPath back on the default
-// ports before rm trashes it: it drops the copy's Port lease and renders its
-// env files at slot 0, so the trash only holds copies on the default ports
-// and restore needs no port logic (ADR-0015). It runs no setup. Every failure
-// is a warning; rm trashes the copy anyway. It returns the slot it gave back,
-// 0 when the copy held none or its lease could not be dropped.
-func releaseBeforeTrash(r Reporter, metaRoot string, cfg *config.Config, copyPath string) int {
-	name := filepath.Base(copyPath)
-	slot, err := releaseLease(metaRoot, copyPath)
+// releaseBeforeTrash puts the working copy c back on the default ports before
+// rm trashes it: it drops the copy's Port lease and renders its env files at
+// slot 0, so the trash only holds copies on the default ports and restore
+// needs no port logic (ADR-0015). It runs no setup. Every failure is a
+// warning; rm trashes the copy anyway. It returns the slot it gave back, 0
+// when the copy held none or its lease could not be dropped.
+func releaseBeforeTrash(r Reporter, c workingCopy) int {
+	name := c.name()
+	slot, err := releaseLease(c.metaRoot, c.path)
 	if err != nil {
 		r.Warn(fmt.Sprintf("%s: %v; trashing it anyway with its lease. After `mws restore %s`, fix or delete %s and run `mws env sync %s`",
 			name, err, name, ports.LeaseFile, name))
@@ -281,11 +281,11 @@ func releaseBeforeTrash(r Reporter, metaRoot string, cfg *config.Config, copyPat
 		return 0
 	}
 	r.OK(fmt.Sprintf("%s: %s -> %s", name, slotLabel(slot), slotLabel(0)))
-	res := renderEnv(r, metaRoot, cfg, copyPath, false)
+	res := c.renderEnv(r, false)
 	var stale []string
 	for _, f := range res.Files {
 		if f.Status != envCopied {
-			stale = append(stale, relToMeta(metaRoot, f.To))
+			stale = append(stale, relToMeta(c.metaRoot, f.To))
 		}
 	}
 	if res.Error != "" {

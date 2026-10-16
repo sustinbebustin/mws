@@ -49,10 +49,10 @@ mws clone feature-x --no-optional --setup             # new peer copy, default b
 mws clone feature-x --with docs --no-setup            # include optional repo "docs", skip setup
 cd "$(mws clone feature-x --no-optional --setup | tail -n1)"
 mws clone feature-x --no-optional --setup --ports     # also claim the lowest free port slot
-mws clone feature-x --no-optional --setup --json      # {name, path, repos, setup, ports}
-mws path feature-x                                    # absolute path; exit 4 if no such copy (--json: {name, path})
+mws clone feature-x --no-optional --setup --json      # {copy, path, repos, setup, ports}
+mws path feature-x                                    # absolute path; exit 4 if no such copy (--json: {copy, path})
 mws rm feature-x --yes                                # to .trash/, restorable for 7 days (--json: entry, released_slot)
-mws restore feature-x --yes                           # back from the trash (--as <name> if taken; --json: {name, path, entry})
+mws restore feature-x --yes                           # back from the trash (--as <name> if taken; --json: {copy, path, entry})
 mws trash ls --json
 ```
 

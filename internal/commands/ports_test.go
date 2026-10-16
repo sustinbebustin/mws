@@ -212,6 +212,25 @@ func TestPortsShowPrintsTheExportSet(t *testing.T) {
 	}
 }
 
+func TestPortsWithAnArgumentThatIsNeitherACopyNorASubcommandIsAUsageError(t *testing.T) {
+	f := seedEnvWorkspace(t)
+	f.withFreePort(t)
+
+	res := runMWS(t, f.meta, "ports", "chek")
+	if res.code != 2 {
+		t.Fatalf("mws ports chek: exit %d, want 2\nstderr: %s", res.code, res.stderr)
+	}
+	for _, want := range []string{`"chek"`, "check", "claim", "show"} {
+		if !strings.Contains(res.stderr, want) {
+			t.Errorf("stderr lacks %q:\n%s", want, res.stderr)
+		}
+	}
+
+	if res := runMWS(t, f.meta, "ports", "show", "chek"); res.code != 4 {
+		t.Errorf("mws ports show chek: exit %d, want 4\nstderr: %s", res.code, res.stderr)
+	}
+}
+
 func TestPortsLsShowsSlotsConflictsAndTheNextFreeSlot(t *testing.T) {
 	f := seedEnvWorkspace(t)
 	f.withFreePort(t)

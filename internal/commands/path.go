@@ -15,7 +15,7 @@ func newPathCmd() *cobra.Command {
 		Short: "Print the absolute path of a working copy",
 		Long: `path prints the absolute path of a working copy on stdout. Without a name it
 uses the working copy containing the current directory. A name that is no
-working copy exits 4 (not found). --json prints {"name", "path"}.`,
+working copy exits 4 (not found). --json prints {"copy", "path"}.`,
 		Example: `  mws path feature-x
   cd "$(mws path feature-x)"
   mws path feature-x --json`,
@@ -24,7 +24,7 @@ working copy exits 4 (not found). --json prints {"name", "path"}.`,
 			return runPath(newOutput(cmd, jsonOut), copyArg(args))
 		},
 	}
-	cmd.Flags().BoolVar(&jsonOut, "json", false, "print the name and path as JSON")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "print the copy and path as JSON")
 	return cmd
 }
 
@@ -38,7 +38,7 @@ func runPath(o output, name string) error {
 		return o.fail(err)
 	}
 	return o.result(struct {
-		Name string `json:"name"`
+		Copy string `json:"copy"`
 		Path string `json:"path"`
 	}{filepath.Base(copyPath), copyPath}, func(w io.Writer) error {
 		_, err := fmt.Fprintln(w, copyPath)

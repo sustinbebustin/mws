@@ -57,6 +57,34 @@ func TestClonePortsClaimsTheLowestFreeSlotBeforeTheOneSetupPass(t *testing.T) {
 	}
 }
 
+func TestClonePortsOnACompleteCopyClaimsKeepsItsSlotAndRunsTheRootSetupOnce(t *testing.T) {
+	f := seedWtWorkspace(t)
+	base := f.withPortTemplate(t)
+	mustMWS(t, f.meta, "clone", "d", "--no-optional", "--no-setup")
+	d := filepath.Join(f.meta, "d")
+
+	var got cloneJSON
+	decodeJSON(t, mustMWS(t, f.meta, "clone", "d", "--ports", "--no-optional", "--setup", "--json"), &got)
+
+	if got.Ports != "slot 1" || got.Setup != "ran" || len(got.Repos) != 0 {
+		t.Errorf("clone --ports on a complete copy --json = %+v, want slot 1, setup ran, no repos", got)
+	}
+	if got, want := readFile(t, filepath.Join(d, "frontend", "app.env")), "PORT="+strconv.Itoa(base+10)+"\n"; got != want {
+		t.Errorf("d/frontend/app.env = %q, want %q", got, want)
+	}
+	if got := readFile(t, filepath.Join(d, "setup.out")); got != "1\n" {
+		t.Errorf("setup.out = %q, want one root setup run at slot 1", got)
+	}
+
+	mustMWS(t, f.meta, "clone", "d", "--ports", "--no-optional", "--setup")
+	if got := slotOf(t, d); got != 1 {
+		t.Errorf("a second clone --ports moved d to slot %d, want it kept on 1", got)
+	}
+	if got := readFile(t, filepath.Join(d, "setup.out")); got != "1\n1\n" {
+		t.Errorf("setup.out = %q, want a second run at slot 1", got)
+	}
+}
+
 // trashedCopy is the working copy inside the newest trash entry for name.
 func trashedCopy(t *testing.T, meta, name string) string {
 	t.Helper()
@@ -159,7 +187,7 @@ func TestLsShowsEachCopysPorts(t *testing.T) {
 
 	var got struct {
 		Copies []struct {
-			Name  string `json:"name"`
+			Copy  string `json:"copy"`
 			Ports string `json:"ports"`
 		} `json:"copies"`
 	}
@@ -168,7 +196,7 @@ func TestLsShowsEachCopysPorts(t *testing.T) {
 	}
 	byCopy := map[string]string{}
 	for _, c := range got.Copies {
-		byCopy[c.Name] = c.Ports
+		byCopy[c.Copy] = c.Ports
 	}
 	if want := map[string]string{"a": "default", "b": "slot 3"}; !maps.Equal(byCopy, want) {
 		t.Errorf("ls --json ports = %v, want %v", byCopy, want)

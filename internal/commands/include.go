@@ -90,14 +90,15 @@ func runInclude(ctx context.Context, r Reporter, folder, copyName string, choice
 	if err := cloneNative(ctx, r, repo, target); err != nil {
 		return fmt.Errorf("%s: %w", repo.Folder, err)
 	}
-	renderEnv(r, ws.MetaRoot, cfg, target, false)
+	wc := workingCopy{metaRoot: ws.MetaRoot, cfg: cfg, path: target}
+	wc.renderEnv(r, false)
 
 	run, err := confirmSetup(choice, items)
 	if err != nil {
 		return err
 	}
 	if run {
-		exports, err := copyExports(ws.MetaRoot, cfg, target)
+		exports, err := wc.exports()
 		if err != nil {
 			return fmt.Errorf("included %s but no setup command ran: %w", repo.Folder, err)
 		}

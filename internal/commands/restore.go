@@ -41,7 +41,7 @@ a different one. Without a terminal, give a name (or --yes) wherever restore
 would prompt. A name with no trash entry exits 4 (not found); the message says
 when a working copy of that name exists, as after a retried restore.
 
---json prints {"name", "path", "entry"}: the restored copy and the trash entry
+--json prints {"copy", "path", "entry"}: the restored copy and the trash entry
 it came from, or {"error": {"code", "message"}} on failure.`,
 		Example: `  mws restore feature-x
   mws restore feature-x --yes
@@ -65,7 +65,7 @@ it came from, or {"error": {"code", "message"}} on failure.`,
 // restoreResult is the outcome of `mws restore`: the working copy now at Path
 // and the trash entry it came out of.
 type restoreResult struct {
-	Name  string `json:"name"`
+	Copy  string `json:"copy"`
 	Path  string `json:"path"`
 	Entry string `json:"entry"`
 }
@@ -136,8 +136,8 @@ func restoreCopy(ctx context.Context, r Reporter, name, as string, yes bool) (re
 		r.OK(fmt.Sprintf("Repaired %d %s", n, plural(n, "worktree", "worktrees")))
 	}
 
-	renderEnv(r, ws.MetaRoot, cfg, dest, false)
-	return restoreResult{Name: destName, Path: dest, Entry: entry.ID}, nil
+	workingCopy{metaRoot: ws.MetaRoot, cfg: cfg, path: dest}.renderEnv(r, false)
+	return restoreResult{Copy: destName, Path: dest, Entry: entry.ID}, nil
 }
 
 // selectEntry resolves the trash entry to restore. An empty name prompts over
