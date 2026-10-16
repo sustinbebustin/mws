@@ -14,6 +14,7 @@ import (
 
 	"github.com/sustinbebustin/mws/internal/clierr"
 	"github.com/sustinbebustin/mws/internal/config"
+	"github.com/sustinbebustin/mws/internal/ports"
 	"github.com/sustinbebustin/mws/internal/project"
 	"github.com/sustinbebustin/mws/internal/trash"
 	"github.com/sustinbebustin/mws/internal/worktree"
@@ -130,18 +131,30 @@ func runRm(ctx context.Context, o output, name string, f rmFlags) error {
 		return fmt.Errorf("refusing to remove working copy %s: %w", target, err)
 	}
 
+	// An unreadable lease reads as slot 0 (ReadSlot returns 0 with the
+	// error); a real run reports it from the release step before trashing.
+	slot, leaseErr := ports.ReadSlot(target)
+	description := rmConfirmDescription(ws.MetaRoot, name, toTrash, slot, wts)
 	if f.dryRun {
-		r.Info("Dry run: " + rmConfirmDescription(ws.MetaRoot, name, toTrash, wts))
+		if leaseErr != nil && toTrash {
+			r.Warn(fmt.Sprintf("%v; rm would trash %s with it, without rendering its env files at the default ports", leaseErr, name))
+		}
+		r.Info("Dry run: " + description)
 		verb := "delete"
 		if toTrash {
 			verb = "trash"
+			if slot > 0 {
+				if _, err := fmt.Fprintf(o.stdout, "would release slot %d from %s\n", slot, name); err != nil {
+					return err
+				}
+			}
 		}
 		_, err := fmt.Fprintf(o.stdout, "would %s %s\n", verb, target)
 		return err
 	}
 	ok, err := confirm(r, f.yes, confirmation{
 		title:       fmt.Sprintf("Remove working copy %s?", target),
-		description: rmConfirmDescription(ws.MetaRoot, name, toTrash, wts),
+		description: description,
 		affirmative: "Remove",
 		missing:     "removing a working copy needs confirmation",
 		try:         []string{fmt.Sprintf("mws rm %s --yes", name), fmt.Sprintf("mws rm %s --dry-run", name)},
@@ -163,6 +176,7 @@ func runRm(ctx context.Context, o output, name string, f rmFlags) error {
 		return nil
 	}
 
+	releaseBeforeTrash(r, ws.MetaRoot, cfg, target)
 	entry, err := trash.Stash(ws.MetaRoot, target)
 	if err != nil {
 		return err
@@ -196,9 +210,42 @@ func notACopy(metaRoot, name, target string) error {
 	return clierr.NotFoundf("%s is not a working copy of %s; `mws ls` shows the working copies", target, metaRoot)
 }
 
+// releaseBeforeTrash puts the working copy at copyPath back on the default
+// ports before rm trashes it: it drops the copy's Port lease and renders its
+// env files at slot 0, so the trash only holds copies on the default ports
+// and restore needs no port logic (ADR-0015). It runs no setup. Every failure
+// is a warning; rm trashes the copy anyway.
+func releaseBeforeTrash(r Reporter, metaRoot string, cfg *config.Config, copyPath string) {
+	name := filepath.Base(copyPath)
+	slot, err := releaseLease(metaRoot, copyPath)
+	if err != nil {
+		r.Warn(fmt.Sprintf("%s: %v; trashing it anyway with its lease. After `mws restore %s`, fix or delete %s and run `mws env sync %s`",
+			name, err, name, ports.LeaseFile, name))
+		return
+	}
+	if slot == 0 {
+		return
+	}
+	r.OK(fmt.Sprintf("%s: %s -> %s", name, slotLabel(slot), slotLabel(0)))
+	res := renderEnv(r, metaRoot, cfg, copyPath, false)
+	var stale []string
+	for _, f := range res.Files {
+		if f.Status != envCopied {
+			stale = append(stale, relToMeta(metaRoot, f.To))
+		}
+	}
+	if res.Error != "" {
+		stale = append(stale, "its worktrees' carried files")
+	}
+	if len(stale) > 0 {
+		r.Warn(fmt.Sprintf("%s: not every env file was rendered at the default ports, so %s may still hold %s's ports; trashing it anyway. After `mws restore %s`, run `mws env sync %s`",
+			name, strings.Join(stale, ", "), slotLabel(slot), name, name))
+	}
+}
+
 // rmConfirmDescription explains what removing the copy called name does,
-// naming its worktrees, which go with it.
-func rmConfirmDescription(metaRoot, name string, toTrash bool, wts []worktree.Entry) string {
+// naming its worktrees, which go with it, and the Port slot it gives back.
+func rmConfirmDescription(metaRoot, name string, toTrash bool, slot int, wts []worktree.Entry) string {
 	contents := "the directory and any native repo clones inside it"
 	if len(wts) > 0 {
 		names := make([]string, len(wts))
@@ -208,7 +255,14 @@ func rmConfirmDescription(metaRoot, name string, toTrash bool, wts []worktree.En
 		contents = fmt.Sprintf("the directory, any native repo clones inside it, and its %s %s", plural(len(wts), "worktree", "worktrees"), strings.Join(names, ", "))
 	}
 	if toTrash {
-		return fmt.Sprintf("This moves %s into %s. Bring it back with `mws restore %s`.", contents, trash.Root(metaRoot), name)
+		release := ""
+		if slot > 0 {
+			release = fmt.Sprintf("It first releases %s and renders the env files at the default ports. ", slotLabel(slot))
+		}
+		return fmt.Sprintf("%sThis moves %s into %s. Bring it back on the default ports with `mws restore %s`.", release, contents, trash.Root(metaRoot), name)
+	}
+	if slot > 0 {
+		return fmt.Sprintf("This deletes %s, giving back %s. It cannot be undone.", contents, slotLabel(slot))
 	}
 	return fmt.Sprintf("This deletes %s. It cannot be undone.", contents)
 }

@@ -159,12 +159,12 @@ func TestRmConfirmationListsWorktrees(t *testing.T) {
 	}
 
 	for _, toTrash := range []bool{true, false} {
-		got := rmConfirmDescription(f.meta, "c", toTrash, wts)
+		got := rmConfirmDescription(f.meta, "c", toTrash, 0, wts)
 		if !strings.Contains(got, "worktrees x, y") {
 			t.Fatalf("toTrash=%v: confirmation %q does not list worktrees x, y", toTrash, got)
 		}
 	}
-	if got := rmConfirmDescription(f.meta, "c", true, nil); strings.Contains(got, "worktree") {
+	if got := rmConfirmDescription(f.meta, "c", true, 0, nil); strings.Contains(got, "worktree") {
 		t.Fatalf("confirmation for a copy without worktrees mentions them: %q", got)
 	}
 }
