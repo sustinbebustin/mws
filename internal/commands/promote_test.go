@@ -107,6 +107,25 @@ func TestPromoteCandidatesOmitMarkersAndRenderTargets(t *testing.T) {
 	}
 }
 
+func TestPromoteRefusesTheWorktreesDirAndOmitsItFromTheCandidates(t *testing.T) {
+	f := seedWtWorkspace(t)
+	if res := runWt(t, f.copy, "new", "x", "--no-setup"); res.code != 0 {
+		t.Fatalf("wt new: exit %d\nstderr: %s", res.code, res.stderr)
+	}
+	dir := f.cfg.WorktreePolicy().Dir
+
+	assertRefused(t, runMWS(t, f.copy, "promote", dir), dir, "worktrees")
+	if !fileExists(f.wtPath("x")) {
+		t.Error("a refused promote moved the worktrees dir")
+	}
+
+	res := runMWS(t, f.copy, "promote")
+	assertUsage(t, res, "promotable: ")
+	if strings.Contains(res.stderr, dir) {
+		t.Errorf("candidate list names the worktrees dir %s:\n%s", dir, res.stderr)
+	}
+}
+
 func TestPromoteRefusesANativeRepoAndOmitsItFromTheCandidates(t *testing.T) {
 	f := seedWtWorkspace(t)
 

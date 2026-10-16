@@ -27,9 +27,9 @@ and backfills the symlink into every other working copy so the item is now
 shared across all copies. It then refreshes the links of every copy's
 worktrees, as relink does.
 
-promote refuses (exit 3) a native repo folder, an mws marker (a .mws-* file)
-and any [[renders]] target: each belongs to one copy and must never become a
-shared harness entry.
+promote refuses (exit 3) a native repo folder, the worktrees dir ([worktrees]
+dir), an mws marker (a .mws-* file) and any [[renders]] target: each belongs
+to one copy and must never become a shared harness entry.
 
 With no path, it prompts with the entries that can be promoted; without a
 terminal, it lists them in the error instead.`,
@@ -247,13 +247,17 @@ func promoteCandidates(cfg *config.Config, workingCopy, harnessRoot string) ([]s
 }
 
 // unpromotable reports why the top-level entry name must stay per-copy: a
-// native repo, an mws marker or a `[[renders]]` target would otherwise become
-// one shared harness entry. ok is false for any other name.
+// native repo, the worktrees dir, an mws marker or a `[[renders]]` target
+// would otherwise become one shared harness entry. ok is false for any other
+// name.
 func unpromotable(cfg *config.Config, name string) (why string, ok bool) {
 	for _, repo := range slices.Concat(cfg.Repos, cfg.OptionalRepos) {
 		if repo.Folder == name {
 			return "is a native repo, cloned into each working copy on its own, and is never promoted", true
 		}
+	}
+	if name == cfg.WorktreePolicy().Dir {
+		return "is the working copy's worktrees dir ([worktrees] dir), which holds this copy's own worktrees, and is never promoted", true
 	}
 	if strings.HasPrefix(name, config.MarkerPrefix) {
 		return fmt.Sprintf("is an mws marker (a %s* file mws writes for this copy alone) and is never promoted", config.MarkerPrefix), true
