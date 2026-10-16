@@ -156,7 +156,7 @@ func runWorktreeNew(ctx context.Context, o output, ws *project.Workspace, cfg *c
 // copy's export set, since a worktree shares its copy's Port slot. Command
 // output goes to w so stdout stays reserved for the result.
 func runWorktreeSetup(ctx context.Context, r Reporter, metaRoot string, cfg *config.Config, res worktree.Result, w io.Writer) error {
-	exports, err := copyExports(metaRoot, cfg, res.Copy)
+	exports, err := workingCopy{metaRoot: metaRoot, cfg: cfg, path: res.Copy}.exports()
 	if err != nil {
 		return &setupFailedError{err: fmt.Errorf(
 			"worktree %s was created at %s, but no setup command ran: %w; the worktree is kept and usable",

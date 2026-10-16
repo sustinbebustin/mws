@@ -229,7 +229,7 @@ func removeCopy(ctx context.Context, r Reporter, name string, f rmFlags) (*rmRes
 		return &rmResult{Copy: name, Path: target, Purged: true}, nil
 	}
 
-	released := releaseBeforeTrash(r, ws.MetaRoot, cfg, target)
+	released := releaseBeforeTrash(r, workingCopy{metaRoot: ws.MetaRoot, cfg: cfg, path: target})
 	entry, err := trash.Stash(ws.MetaRoot, target)
 	if err != nil {
 		return nil, err
@@ -263,15 +263,15 @@ func notACopy(metaRoot, name, target string) error {
 	return clierr.NotFoundf("%s is not a working copy of %s; `mws ls` shows the working copies", target, metaRoot)
 }
 
-// releaseBeforeTrash puts the working copy at copyPath back on the default
-// ports before rm trashes it: it drops the copy's Port lease and renders its
-// env files at slot 0, so the trash only holds copies on the default ports
-// and restore needs no port logic (ADR-0015). It runs no setup. Every failure
-// is a warning; rm trashes the copy anyway. It returns the slot it gave back,
-// 0 when the copy held none or its lease could not be dropped.
-func releaseBeforeTrash(r Reporter, metaRoot string, cfg *config.Config, copyPath string) int {
-	name := filepath.Base(copyPath)
-	slot, err := releaseLease(metaRoot, copyPath)
+// releaseBeforeTrash puts the working copy c back on the default ports before
+// rm trashes it: it drops the copy's Port lease and renders its env files at
+// slot 0, so the trash only holds copies on the default ports and restore
+// needs no port logic (ADR-0015). It runs no setup. Every failure is a
+// warning; rm trashes the copy anyway. It returns the slot it gave back, 0
+// when the copy held none or its lease could not be dropped.
+func releaseBeforeTrash(r Reporter, c workingCopy) int {
+	name := c.name()
+	slot, err := releaseLease(c.metaRoot, c.path)
 	if err != nil {
 		r.Warn(fmt.Sprintf("%s: %v; trashing it anyway with its lease. After `mws restore %s`, fix or delete %s and run `mws env sync %s`",
 			name, err, name, ports.LeaseFile, name))
@@ -281,11 +281,11 @@ func releaseBeforeTrash(r Reporter, metaRoot string, cfg *config.Config, copyPat
 		return 0
 	}
 	r.OK(fmt.Sprintf("%s: %s -> %s", name, slotLabel(slot), slotLabel(0)))
-	res := renderEnv(r, metaRoot, cfg, copyPath, false)
+	res := c.renderEnv(r, false)
 	var stale []string
 	for _, f := range res.Files {
 		if f.Status != envCopied {
-			stale = append(stale, relToMeta(metaRoot, f.To))
+			stale = append(stale, relToMeta(c.metaRoot, f.To))
 		}
 	}
 	if res.Error != "" {

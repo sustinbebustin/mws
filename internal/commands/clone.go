@@ -225,9 +225,8 @@ func cloneCopy(ctx context.Context, r Reporter, ws *project.Workspace, cfg *conf
 	if err != nil {
 		return cloneResult{}, err
 	}
-	var policy config.PortPolicy
 	if req.ports {
-		if policy, err = portPolicy(cfg, ws); err != nil {
+		if _, err := portPolicy(cfg, ws); err != nil {
 			return cloneResult{}, err
 		}
 	}
@@ -260,14 +259,15 @@ func cloneCopy(ctx context.Context, r Reporter, ws *project.Workspace, cfg *conf
 	}
 	// Claim before the render, so the env files and the setup below see the
 	// final ports.
+	wc := workingCopy{metaRoot: ws.MetaRoot, cfg: cfg, path: target}
 	var claimErr error
 	if req.ports {
-		var slot, previous int
-		if slot, previous, claimErr = claimLease(r, ws, cfg, policy, target, nil, false); claimErr == nil {
-			r.OK(fmt.Sprintf("%s: %s -> %s", name, slotLabel(previous), slotLabel(slot)))
+		var ch leaseChange
+		if ch, claimErr = claimLease(r, ws, wc, slotClaim{}); claimErr == nil {
+			r.OK(fmt.Sprintf("%s: %s -> %s", name, slotLabel(ch.previous), slotLabel(ch.slot)))
 		}
 	}
-	renderEnv(r, ws.MetaRoot, cfg, target, false)
+	wc.renderEnv(r, false)
 
 	if len(failed) > 0 {
 		return cloneResult{}, fmt.Errorf("clone completed with errors: %d repo(s) failed: %s; the rest are in place, so rerunning the same command clones only these",
@@ -277,7 +277,7 @@ func cloneCopy(ctx context.Context, r Reporter, ws *project.Workspace, cfg *conf
 		return cloneResult{}, fmt.Errorf("clone completed but claimed no Port slot: %w; the copy is in place on the default ports and no setup command ran. Claim one with `mws ports claim %s`, then run the setup commands by hand",
 			claimErr, name)
 	}
-	setup, err := cloneSetup(ctx, r, ws.MetaRoot, cfg, target, req.setup, items)
+	setup, err := cloneSetup(ctx, r, wc, req.setup, items)
 	if err != nil {
 		return cloneResult{}, err
 	}
@@ -363,9 +363,9 @@ func populateCopy(ctx context.Context, r Reporter, metaRoot, target string, miss
 	return failed, nil
 }
 
-// cloneSetup runs the setup items of a clone into the copy at target, when
-// choice (or the prompt) says so, and says what became of them.
-func cloneSetup(ctx context.Context, r Reporter, metaRoot string, cfg *config.Config, target string, choice setupChoice, items []setupItem) (setupOutcome, error) {
+// cloneSetup runs the setup items of a clone into the copy c, when choice (or
+// the prompt) says so, and says what became of them.
+func cloneSetup(ctx context.Context, r Reporter, c workingCopy, choice setupChoice, items []setupItem) (setupOutcome, error) {
 	if len(items) == 0 {
 		return setupNone, nil
 	}
@@ -373,11 +373,11 @@ func cloneSetup(ctx context.Context, r Reporter, metaRoot string, cfg *config.Co
 	if err != nil || !run {
 		return setupSkipped, err
 	}
-	exports, err := copyExports(metaRoot, cfg, target)
+	exports, err := c.exports()
 	if err != nil {
 		return "", fmt.Errorf("clone completed but no setup command ran: %w", err)
 	}
-	if failed := runSetup(ctx, r, target, exports, items, os.Stderr, os.Stderr); len(failed) > 0 {
+	if failed := runSetup(ctx, r, c.path, exports, items, os.Stderr, os.Stderr); len(failed) > 0 {
 		return "", fmt.Errorf("clone completed but %d setup command(s) failed:\n  %s\nthe working copy is kept; fix the cause, then run the failed command(s) by hand",
 			len(failed), strings.Join(failed, "\n  "))
 	}

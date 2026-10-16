@@ -121,19 +121,15 @@ type portCheckJSON struct {
 }
 
 func runPortsCheck(o output, name string) error {
-	ws, cfg, err := o.locate()
+	ws, c, err := portsTarget(o, name, "mws ports check <copy>")
 	if err != nil {
 		return err
 	}
-	policy, err := portPolicy(cfg, ws)
+	policy, err := portPolicy(c.cfg, ws)
 	if err != nil {
 		return o.fail(err)
 	}
-	copyPath, err := portsCopy(ws, name, "mws ports check <copy>")
-	if err != nil {
-		return o.fail(err)
-	}
-	slot, err := ports.ReadSlot(copyPath)
+	slot, err := ports.ReadSlot(c.path)
 	if err != nil {
 		return o.fail(clierr.Failuref("%w", err))
 	}
@@ -148,18 +144,13 @@ func runPortsCheck(o output, name string) error {
 		checks[i] = portCheckJSON{Name: p.Name, Port: slotPorts[i], Listening: slices.Contains(listening, slotPorts[i])}
 		width = max(width, len(p.Name))
 	}
-	return o.result(struct {
-		Copy  string          `json:"copy"`
-		Path  string          `json:"path"`
-		Slot  int             `json:"slot"`
-		Ports []portCheckJSON `json:"ports"`
-	}{filepath.Base(copyPath), copyPath, slot, checks}, func(w io.Writer) error {
-		for _, c := range checks {
+	return o.result(portsCheck{Copy: c.name(), Path: c.path, Slot: slot, Ports: checks}, func(w io.Writer) error {
+		for _, pc := range checks {
 			state := "free"
-			if c.Listening {
+			if pc.Listening {
 				state = "listening"
 			}
-			if _, err := fmt.Fprintf(w, "%-*s  %d  %s\n", width, c.Name, c.Port, state); err != nil {
+			if _, err := fmt.Fprintf(w, "%-*s  %d  %s\n", width, pc.Name, pc.Port, state); err != nil {
 				return err
 			}
 		}
@@ -249,11 +240,7 @@ func runPortsLs(o output) error {
 			nextNote = fmt.Sprintf("none: all %d slots are held", policy.Limit)
 		}
 	}
-	return o.result(struct {
-		Copies    []portsLsCopy       `json:"copies"`
-		Conflicts []portsConflictJSON `json:"conflicts"`
-		NextFree  *int                `json:"next_free"`
-	}{rows, conflictsJSON, nextFree}, func(w io.Writer) error {
+	return o.result(portsLs{Copies: rows, Conflicts: conflictsJSON, NextFree: nextFree}, func(w io.Writer) error {
 		width := 0
 		for _, row := range rows {
 			width = max(width, len(row.Copy))
@@ -310,15 +297,11 @@ them with eval "$(mws ports show --export)". --json prints
 }
 
 func runPortsShow(o output, name string, export bool) error {
-	ws, cfg, err := o.locate()
+	_, c, err := portsTarget(o, name, "mws ports show <copy>")
 	if err != nil {
 		return err
 	}
-	copyPath, err := portsCopy(ws, name, "mws ports show <copy>")
-	if err != nil {
-		return o.fail(err)
-	}
-	exports, err := copyExports(ws.MetaRoot, cfg, copyPath)
+	exports, err := c.exports()
 	if err != nil {
 		return o.fail(clierr.Failuref("%w", err))
 	}
@@ -326,12 +309,7 @@ func runPortsShow(o output, name string, export bool) error {
 	for _, v := range exports.Vars {
 		vars[v.Name] = v.Value
 	}
-	return o.result(struct {
-		Copy string            `json:"copy"`
-		Path string            `json:"path"`
-		Slot int               `json:"slot"`
-		Vars map[string]string `json:"vars"`
-	}{filepath.Base(copyPath), copyPath, exports.Slot, vars}, func(w io.Writer) error {
+	return o.result(portsShow{Copy: c.name(), Path: c.path, Slot: exports.Slot, Vars: vars}, func(w io.Writer) error {
 		prefix := ""
 		if export {
 			prefix = "export "
@@ -385,7 +363,7 @@ with files as in ` + "`mws env sync --json`" + `.`,
 			if cmd.Flags().Changed("slot") {
 				want = &slot
 			}
-			return runPortsClaim(cmd.Context(), o, copyArg(args), want, dryRun, choice)
+			return runPortsClaim(cmd.Context(), o, copyArg(args), want, leaseRequest{dryRun: dryRun, setup: choice})
 		},
 	}
 	cmd.Flags().IntVar(&slot, "slot", 0, "take or move to this slot, without probing for listeners")
@@ -418,7 +396,7 @@ with slot 0.`,
 			if err != nil {
 				return o.fail(err)
 			}
-			return runPortsRelease(cmd.Context(), o, copyArg(args), dryRun, choice)
+			return runPortsRelease(cmd.Context(), o, copyArg(args), leaseRequest{dryRun: dryRun, setup: choice})
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "name the slot and files; change nothing")
@@ -466,6 +444,33 @@ type portsChange struct {
 	Error        string          `json:"error,omitempty"`
 }
 
+// portsShow is the result of `ports show`: the copy's slot and its export
+// set by name.
+type portsShow struct {
+	Copy string            `json:"copy"`
+	Path string            `json:"path"`
+	Slot int               `json:"slot"`
+	Vars map[string]string `json:"vars"`
+}
+
+// portsCheck is the result of `ports check`: each port of the copy's slot and
+// whether a listener holds it.
+type portsCheck struct {
+	Copy  string          `json:"copy"`
+	Path  string          `json:"path"`
+	Slot  int             `json:"slot"`
+	Ports []portCheckJSON `json:"ports"`
+}
+
+// portsLs is the result of `ports ls`: every live copy's slot, the slots two
+// or more leases name, and the slot a claim would take (nil when there is
+// none).
+type portsLs struct {
+	Copies    []portsLsCopy       `json:"copies"`
+	Conflicts []portsConflictJSON `json:"conflicts"`
+	NextFree  *int                `json:"next_free"`
+}
+
 // slotLabel names a slot as `ports ls` shows it: "default" or "slot N".
 func slotLabel(slot int) string {
 	if slot == 0 {
@@ -474,115 +479,168 @@ func slotLabel(slot int) string {
 	return "slot " + strconv.Itoa(slot)
 }
 
-func runPortsClaim(ctx context.Context, o output, name string, want *int, dryRun bool, choice setupChoice) error {
+// leaseRequest is the part of a `ports claim` or `ports release` run that
+// both share: whether it only previews, the setup choice, and the command
+// line that repeats it.
+type leaseRequest struct {
+	dryRun     bool
+	setup      setupChoice
+	invocation string
+}
+
+// leaseChange is what claim or release did, or under --dry-run would do, to a
+// copy's Port lease: the slot it held before and the one it is on after (0
+// for the default ports), with the change's "would" line.
+type leaseChange struct {
+	previous, slot int
+	plan           string
+}
+
+// portsTarget locates the workspace and resolves the [copy] argument of a
+// ports subcommand; usage names the command line with a <copy> placeholder.
+// Errors have been reported through o.
+func portsTarget(o output, name, usage string) (*project.Workspace, workingCopy, error) {
 	ws, cfg, err := o.locate()
+	if err != nil {
+		return nil, workingCopy{}, err
+	}
+	copyPath, err := portsCopy(ws, name, usage)
+	if err != nil {
+		return nil, workingCopy{}, o.fail(err)
+	}
+	return ws, workingCopy{metaRoot: ws.MetaRoot, cfg: cfg, path: copyPath}, nil
+}
+
+// changeLease is the pipeline claim and release share once the copy c is
+// known: decide the render mode (prompting for the root setup), let apply
+// change the lease (or, previewing, only decide the change), then re-render
+// the copy and print the result.
+func changeLease(ctx context.Context, o output, c workingCopy, req leaseRequest, apply func(r Reporter, preview bool) (leaseChange, error)) error {
+	mode, err := resolveRenderMode(c.cfg, req.dryRun, req.setup, req.invocation)
+	if err != nil {
+		return o.fail(err)
+	}
+	r := o.reporter()
+	change, err := apply(r, mode == renderPreview)
+	if err != nil {
+		return o.fail(err)
+	}
+	if mode != renderPreview {
+		r.OK(fmt.Sprintf("%s: %s -> %s", c.name(), slotLabel(change.previous), slotLabel(change.slot)))
+	}
+	return finishPortsChange(ctx, o, r, c, mode, change, req.invocation)
+}
+
+func runPortsClaim(ctx context.Context, o output, name string, want *int, req leaseRequest) error {
+	ws, c, err := portsTarget(o, name, "mws ports claim <copy>")
 	if err != nil {
 		return err
 	}
-	policy, err := portPolicy(cfg, ws)
-	if err != nil {
+	// Without [ports] there is nothing to claim: fail before the setup prompt.
+	if _, err := portPolicy(c.cfg, ws); err != nil {
 		return o.fail(err)
 	}
-	copyPath, err := portsCopy(ws, name, "mws ports claim <copy>")
-	if err != nil {
-		return o.fail(err)
-	}
-	invocation := "mws ports claim " + filepath.Base(copyPath)
+	req.invocation = "mws ports claim " + c.name()
 	if want != nil {
-		invocation += " --slot " + strconv.Itoa(*want)
+		req.invocation += " --slot " + strconv.Itoa(*want)
 	}
-	runRoot := false
-	if !dryRun {
-		if runRoot, err = resolveRootSetup(cfg, choice, invocation); err != nil {
-			return o.fail(err)
-		}
-	}
-	r := o.reporter()
-	slot, previous, err := claimLease(r, ws, cfg, policy, copyPath, want, dryRun)
-	if err != nil {
-		return o.fail(err)
-	}
-	if !dryRun {
-		r.OK(fmt.Sprintf("%s: %s -> %s", filepath.Base(copyPath), slotLabel(previous), slotLabel(slot)))
-	}
-	return finishPortsChange(ctx, o, r, ws.MetaRoot, cfg, copyPath, previous, slot, dryRun, runRoot, invocation,
-		fmt.Sprintf("would claim slot %d for %s", slot, filepath.Base(copyPath)))
+	return changeLease(ctx, o, c, req, func(r Reporter, preview bool) (leaseChange, error) {
+		return claimLease(r, ws, c, slotClaim{want: want, dryRun: preview})
+	})
 }
 
-// claimLease decides the Port slot of the working copy at copyPath and,
-// unless dryRun, writes its lease, all under the meta-root lock: *want when
+// slotClaim is what a claim asks for: the slot named by --slot (nil for the
+// lowest free one), and whether to only decide it.
+type slotClaim struct {
+	want   *int
+	dryRun bool
+}
+
+// claimLease decides the Port slot of the working copy c and, unless
+// sc.dryRun, writes its lease, all under the meta-root lock: *sc.want when
 // given (--slot), else the slot the copy holds, else the lowest free slot
-// whose ports have no listener. It returns the slot and the one the copy held
-// before.
-func claimLease(r Reporter, ws *project.Workspace, cfg *config.Config, policy config.PortPolicy, copyPath string, want *int, dryRun bool) (slot, previous int, err error) {
+// whose ports have no listener.
+func claimLease(r Reporter, ws *project.Workspace, c workingCopy, sc slotClaim) (leaseChange, error) {
+	policy, err := portPolicy(c.cfg, ws)
+	if err != nil {
+		return leaseChange{}, err
+	}
 	unlock, err := ports.LockMeta(ws.MetaRoot)
 	if err != nil {
-		return 0, 0, clierr.Failuref("%w; no lease was written", err)
+		return leaseChange{}, clierr.Failuref("%w; no lease was written", err)
 	}
 	defer unlock()
 	copies, err := ws.EnumerateCopies()
 	if err != nil {
-		return 0, 0, clierr.Failuref("list working copies: %w; no lease was written", err)
+		return leaseChange{}, clierr.Failuref("list working copies: %w; no lease was written", err)
 	}
 	held, err := ports.ReadHoldings(copies)
 	if err != nil {
-		return 0, 0, clierr.Failuref("%w; no lease was written", err)
+		return leaseChange{}, clierr.Failuref("%w; no lease was written", err)
 	}
-	name := filepath.Base(copyPath)
+	name := c.name()
+	var ch leaseChange
 	for _, h := range held {
 		if h.Copy == name {
-			previous = h.Slot
+			ch.previous = h.Slot
 		}
 	}
-	if want != nil {
-		slot = *want
-		err = ports.ClaimSlot(held, name, slot, policy.Limit)
+	if sc.want != nil {
+		ch.slot = *sc.want
+		err = ports.ClaimSlot(held, name, ch.slot, policy.Limit)
 	} else {
-		var probeErr error
-		busy := func(s int) bool {
-			if probeErr != nil {
-				return true
-			}
-			listening, err := ports.Listeners(ports.SlotPorts(policy, s))
-			if err != nil {
-				probeErr = err
-				return true
-			}
-			if len(listening) > 0 {
-				r.Warn(fmt.Sprintf("slot %d skipped: %s %s a listener; `--slot %d` takes it anyway",
-					s, portList(listening), plural(len(listening), "has", "have"), s))
-				return true
-			}
-			return false
-		}
-		slot, err = ports.Claim(held, name, policy.Limit, busy)
-		if probeErr != nil {
-			return 0, 0, clierr.Failuref("%w; no lease was written. Pick a slot with --slot N, which skips the probe", probeErr)
-		}
+		ch.slot, err = ports.Claim(held, name, policy.Limit, listenerProbe(r, policy))
 	}
 	if err != nil {
-		return 0, 0, claimError(err)
+		return leaseChange{}, claimError(err)
 	}
-	if dryRun {
-		return slot, previous, nil
+	ch.plan = fmt.Sprintf("would claim slot %d for %s", ch.slot, name)
+	if sc.dryRun {
+		return ch, nil
 	}
-	if err := ports.WriteLease(copyPath, ports.NewExports(cfg, ws.MetaRoot, name, slot)); err != nil {
-		return 0, 0, clierr.Failuref("%w; the copy is still on %s", err, slotLabel(previous))
+	if err := ports.WriteLease(c.path, ports.NewExports(c.cfg, c.metaRoot, name, ch.slot)); err != nil {
+		return leaseChange{}, clierr.Failuref("%w; the copy is still on %s", err, slotLabel(ch.previous))
 	}
-	return slot, previous, nil
+	return ch, nil
 }
 
+// listenerProbe is the busy test of a claim without --slot: a slot is busy
+// while any of its ports has a listener, which it warns about on r.
+func listenerProbe(r Reporter, policy config.PortPolicy) ports.Busy {
+	return func(slot int) (bool, error) {
+		listening, err := ports.Listeners(ports.SlotPorts(policy, slot))
+		if err != nil {
+			return false, &probeError{err: err}
+		}
+		if len(listening) > 0 {
+			r.Warn(fmt.Sprintf("slot %d skipped: %s %s a listener; `--slot %d` takes it anyway",
+				slot, portList(listening), plural(len(listening), "has", "have"), slot))
+		}
+		return len(listening) > 0, nil
+	}
+}
+
+// probeError is a listener probe that could not run.
+type probeError struct{ err error }
+
+func (e *probeError) Error() string { return e.err.Error() }
+func (e *probeError) Unwrap() error { return e.err }
+
 // claimError tags an allocation refusal with its exit code: a held slot or
-// conflicting leases are refused (3), a slot out of range is a usage error.
+// conflicting leases are refused (3), a slot out of range is a usage error,
+// and a failed listener probe names --slot, which skips it.
 func claimError(err error) error {
 	var conflict *ports.ConflictError
 	var held *ports.SlotHeldError
 	var outOfRange *ports.SlotRangeError
+	var probe *probeError
 	switch {
 	case errors.As(err, &conflict), errors.As(err, &held):
 		return clierr.Refusedf("%w; nothing was changed", err)
 	case errors.As(err, &outOfRange):
 		return usagef("%w", err)
+	case errors.As(err, &probe):
+		return clierr.Failuref("%w; no lease was written. Pick a slot with --slot N, which skips the probe", err)
 	default:
 		return clierr.Failuref("%w; nothing was changed", err)
 	}
@@ -597,44 +655,33 @@ func portList(list []int) string {
 	return plural(len(list), "port ", "ports ") + strings.Join(spelled, ", ")
 }
 
-func runPortsRelease(ctx context.Context, o output, name string, dryRun bool, choice setupChoice) error {
-	ws, cfg, err := o.locate()
+func runPortsRelease(ctx context.Context, o output, name string, req leaseRequest) error {
+	_, c, err := portsTarget(o, name, "mws ports release <copy>")
 	if err != nil {
 		return err
 	}
-	copyPath, err := portsCopy(ws, name, "mws ports release <copy>")
-	if err != nil {
-		return o.fail(err)
-	}
-	copyName := filepath.Base(copyPath)
-	previous, err := ports.ReadSlot(copyPath)
+	held, err := ports.ReadSlot(c.path)
 	if err != nil {
 		return o.fail(clierr.Failuref("%w", err))
 	}
-	r := o.reporter()
-	if previous == 0 {
-		r.Info(fmt.Sprintf("%s is already on the default ports; nothing to release", copyName))
-		return o.result(portsChange{DryRun: dryRun, Copy: copyName, Path: copyPath, Files: []envFileResult{}}, func(w io.Writer) error {
-			if dryRun {
+	if held == 0 {
+		o.reporter().Info(fmt.Sprintf("%s is already on the default ports; nothing to release", c.name()))
+		return o.result(portsChange{DryRun: req.dryRun, Copy: c.name(), Path: c.path, Files: []envFileResult{}}, func(w io.Writer) error {
+			if req.dryRun {
 				return nil
 			}
-			_, err := fmt.Fprintf(w, "%s %s\n", copyName, slotLabel(0))
+			_, err := fmt.Fprintf(w, "%s %s\n", c.name(), slotLabel(0))
 			return err
 		})
 	}
-	invocation := "mws ports release " + copyName
-	runRoot := false
-	if !dryRun {
-		if runRoot, err = resolveRootSetup(cfg, choice, invocation); err != nil {
-			return o.fail(err)
+	req.invocation = "mws ports release " + c.name()
+	return changeLease(ctx, o, c, req, func(_ Reporter, preview bool) (leaseChange, error) {
+		if preview {
+			return leaseChange{previous: held, plan: fmt.Sprintf("would release slot %d from %s", held, c.name())}, nil
 		}
-		if previous, err = releaseLease(ws.MetaRoot, copyPath); err != nil {
-			return o.fail(err)
-		}
-		r.OK(fmt.Sprintf("%s: %s -> %s", copyName, slotLabel(previous), slotLabel(0)))
-	}
-	return finishPortsChange(ctx, o, r, ws.MetaRoot, cfg, copyPath, previous, 0, dryRun, runRoot, invocation,
-		fmt.Sprintf("would release slot %d from %s", previous, copyName))
+		previous, err := releaseLease(c.metaRoot, c.path)
+		return leaseChange{previous: previous}, err
+	})
 }
 
 // releaseLease removes the Port lease of the working copy at copyPath under
@@ -656,21 +703,22 @@ func releaseLease(metaRoot, copyPath string) (int, error) {
 	return previous, nil
 }
 
-// finishPortsChange re-renders the working copy at copyPath after its lease
-// changed (or, under dryRun, would change; plan is that change's "would"
-// line), runs the root setup when runRoot, and prints the result.
-func finishPortsChange(ctx context.Context, o output, r Reporter, metaRoot string, cfg *config.Config, copyPath string, previous, slot int, dryRun, runRoot bool, invocation, plan string) error {
-	cr, setupErr := renderCopy(ctx, r, metaRoot, cfg, copyPath, dryRun, runRoot, o.stderr)
-	res := portsChange{DryRun: dryRun, Copy: cr.Copy, Path: copyPath, Slot: slot, PreviousSlot: previous, Files: cr.Files, Error: cr.Error}
+// finishPortsChange renders the working copy c in mode after its lease
+// changed as change says (or, previewing, would change), and prints the
+// result. invocation is the command line that repeats the run.
+func finishPortsChange(ctx context.Context, o output, r Reporter, c workingCopy, mode renderMode, change leaseChange, invocation string) error {
+	cr, setupErr := c.render(ctx, r, mode, o.stderr)
+	dryRun := mode == renderPreview
+	res := portsChange{DryRun: dryRun, Copy: cr.Copy, Path: c.path, Slot: change.slot, PreviousSlot: change.previous, Files: cr.Files, Error: cr.Error}
 	if err := o.result(res, func(w io.Writer) error {
 		if !dryRun {
-			_, err := fmt.Fprintf(w, "%s %s\n", res.Copy, slotLabel(slot))
+			_, err := fmt.Fprintf(w, "%s %s\n", res.Copy, slotLabel(change.slot))
 			return err
 		}
-		if _, err := fmt.Fprintln(w, plan); err != nil {
+		if _, err := fmt.Fprintln(w, change.plan); err != nil {
 			return err
 		}
-		return writeWouldCopy(w, metaRoot, res.Files)
+		return writeWouldCopy(w, c.metaRoot, res.Files)
 	}); err != nil {
 		return err
 	}

@@ -24,10 +24,25 @@ func TestClaimKeepsASlottedCopysSlot(t *testing.T) {
 }
 
 func TestClaimSkipsBusySlots(t *testing.T) {
-	busy := func(slot int) bool { return slot == 1 || slot == 2 }
+	busy := func(slot int) (bool, error) { return slot == 1 || slot == 2, nil }
 	slot, err := Claim([]Holding{{"a", 0}}, "a", 10, busy)
 	if err != nil || slot != 3 {
 		t.Fatalf("Claim = %d, %v; want 3, nil", slot, err)
+	}
+}
+
+func TestClaimStopsAtAProbeError(t *testing.T) {
+	probeErr := errors.New("probe failed")
+	probed := 0
+	busy := func(int) (bool, error) {
+		probed++
+		return false, probeErr
+	}
+	if _, err := Claim([]Holding{{"a", 0}}, "a", 10, busy); !errors.Is(err, probeErr) {
+		t.Fatalf("Claim error = %v, want the probe's error", err)
+	}
+	if probed != 1 {
+		t.Errorf("busy was called %d times, want the search to stop at the first error", probed)
 	}
 }
 

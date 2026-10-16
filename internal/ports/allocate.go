@@ -106,18 +106,28 @@ func Conflicts(held []Holding) []Conflict {
 	return out
 }
 
+// Busy reports whether a free slot is in use anyway, typically because a
+// listener holds one of its ports. An error ends the search for a slot.
+type Busy func(slot int) (bool, error)
+
 // NextFree returns the lowest slot in 1..limit that no copy holds and busy
-// does not reject. busy, typically a listener probe, may be nil. When none
-// is left the error is an *ExhaustedError.
-func NextFree(held []Holding, limit int, busy func(slot int) bool) (int, error) {
+// does not reject. busy may be nil. When none is left the error is an
+// *ExhaustedError; when busy fails, its error.
+func NextFree(held []Holding, limit int, busy Busy) (int, error) {
 	var skipped []int
 	for slot := 1; slot <= limit; slot++ {
 		if isHeld(held, slot) {
 			continue
 		}
-		if busy != nil && busy(slot) {
-			skipped = append(skipped, slot)
-			continue
+		if busy != nil {
+			inUse, err := busy(slot)
+			if err != nil {
+				return 0, err
+			}
+			if inUse {
+				skipped = append(skipped, slot)
+				continue
+			}
 		}
 		return slot, nil
 	}
@@ -127,7 +137,7 @@ func NextFree(held []Holding, limit int, busy func(slot int) bool) (int, error) 
 // Claim decides the slot for the copy named copyName given every live
 // copy's holding: its current slot when it holds one, otherwise NextFree.
 // While any two leases conflict it refuses with a *ConflictError.
-func Claim(held []Holding, copyName string, limit int, busy func(slot int) bool) (int, error) {
+func Claim(held []Holding, copyName string, limit int, busy Busy) (int, error) {
 	if conflicts := Conflicts(held); len(conflicts) > 0 {
 		return 0, &ConflictError{Conflicts: conflicts}
 	}

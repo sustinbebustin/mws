@@ -136,7 +136,7 @@ func restoreCopy(ctx context.Context, r Reporter, name, as string, yes bool) (re
 		r.OK(fmt.Sprintf("Repaired %d %s", n, plural(n, "worktree", "worktrees")))
 	}
 
-	renderEnv(r, ws.MetaRoot, cfg, dest, false)
+	workingCopy{metaRoot: ws.MetaRoot, cfg: cfg, path: dest}.renderEnv(r, false)
 	return restoreResult{Copy: destName, Path: dest, Entry: entry.ID}, nil
 }
 
