@@ -16,8 +16,10 @@ import (
 // through a tempfile-based handoff: the binary writes the working copy's path
 // to $MWS_CD_FILE, the wrapper reads it and cds the parent shell. Every other
 // subcommand is a pure passthrough via `command mws`. The match is on $1 --
-// mws has no global flags today, so this is sufficient. Each wrapper exports
-// MWS_SHELL_WRAPPER once defined, which `shell-init --status` reads.
+// mws has no global flags today, so this is sufficient. Each wrapper sets
+// MWS_SHELL_WRAPPER=1 for every mws it runs, never in the shell itself, so a
+// child shell or script that calls the binary directly does not inherit it;
+// `shell-init --status` reads it.
 
 const shellInitPOSIX = `# mws shell integration -- add it with ` + "`mws shell-init --install`" + `, or eval at shell start:
 #   eval "$(mws shell-init zsh)"
@@ -25,8 +27,8 @@ const shellInitPOSIX = `# mws shell integration -- add it with ` + "`mws shell-i
 mws() {
   case "$1" in clone|restore)
     local _mws_cd_file _mws_rc _mws_target
-    _mws_cd_file=$(mktemp -t mws-cd.XXXXXX) || { command mws "$@"; return $?; }
-    MWS_CD_FILE="$_mws_cd_file" command mws "$@"
+    _mws_cd_file=$(mktemp -t mws-cd.XXXXXX) || { MWS_SHELL_WRAPPER=1 command mws "$@"; return $?; }
+    MWS_SHELL_WRAPPER=1 MWS_CD_FILE="$_mws_cd_file" command mws "$@"
     _mws_rc=$?
     if [ $_mws_rc -eq 0 ] && [ -s "$_mws_cd_file" ]; then
       _mws_target=$(cat "$_mws_cd_file")
@@ -36,9 +38,8 @@ mws() {
     return $_mws_rc
     ;;
   esac
-  command mws "$@"
+  MWS_SHELL_WRAPPER=1 command mws "$@"
 }
-export MWS_SHELL_WRAPPER=1
 `
 
 const shellInitFish = `# mws shell integration -- add it with ` + "`mws shell-init --install`" + `, or at shell start:
@@ -47,10 +48,10 @@ function mws
   if test (count $argv) -gt 0; and contains -- "$argv[1]" clone restore
     set -l _mws_cd_file (mktemp -t mws-cd.XXXXXX)
     if test -z "$_mws_cd_file"
-      command mws $argv
+      MWS_SHELL_WRAPPER=1 command mws $argv
       return $status
     end
-    MWS_CD_FILE=$_mws_cd_file command mws $argv
+    MWS_SHELL_WRAPPER=1 MWS_CD_FILE=$_mws_cd_file command mws $argv
     set -l _mws_rc $status
     if test $_mws_rc -eq 0 -a -s "$_mws_cd_file"
       set -l _mws_target (cat $_mws_cd_file)
@@ -61,9 +62,8 @@ function mws
     rm -f $_mws_cd_file
     return $_mws_rc
   end
-  command mws $argv
+  MWS_SHELL_WRAPPER=1 command mws $argv
 end
-set -gx MWS_SHELL_WRAPPER 1
 `
 
 // shellInitMarker opens the block --install appends to an rc file; finding it
@@ -240,8 +240,8 @@ func installShellInit(cmd *cobra.Command, spec shellSpec) error {
 	return nil
 }
 
-// shellWrapperEnv is exported by the wrapper when it is defined, so --status
-// can tell a loaded wrapper from a line that only sits in the rc file.
+// shellWrapperEnv is set by the wrapper on each mws it runs, so --status can
+// tell a loaded wrapper from a line that only sits in the rc file.
 const shellWrapperEnv = "MWS_SHELL_WRAPPER"
 
 // shellInitStatus prints whether the wrapper is active, installed but not

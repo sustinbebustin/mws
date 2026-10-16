@@ -25,9 +25,10 @@ func TestShellInitEmitsWrapperPerShell(t *testing.T) {
 				"command mws",
 				`case "$1" in clone|restore)`,
 				`cd "$_mws_target"`,
-				"export MWS_SHELL_WRAPPER=1",
+				`MWS_SHELL_WRAPPER=1 command mws "$@"`,
+				`MWS_SHELL_WRAPPER=1 MWS_CD_FILE="$_mws_cd_file" command mws "$@"`,
 			},
-			mustNotContain:  []string{"function mws", "set -l"},
+			mustNotContain:  []string{"function mws", "set -l", "export MWS_SHELL_WRAPPER"},
 			funcDeclaration: "mws() {",
 		},
 		{
@@ -37,9 +38,10 @@ func TestShellInitEmitsWrapperPerShell(t *testing.T) {
 				"command mws",
 				`case "$1" in clone|restore)`,
 				`cd "$_mws_target"`,
-				"export MWS_SHELL_WRAPPER=1",
+				`MWS_SHELL_WRAPPER=1 command mws "$@"`,
+				`MWS_SHELL_WRAPPER=1 MWS_CD_FILE="$_mws_cd_file" command mws "$@"`,
 			},
-			mustNotContain:  []string{"function mws", "set -l"},
+			mustNotContain:  []string{"function mws", "set -l", "export MWS_SHELL_WRAPPER"},
 			funcDeclaration: "mws() {",
 		},
 		{
@@ -50,9 +52,10 @@ func TestShellInitEmitsWrapperPerShell(t *testing.T) {
 				`contains -- "$argv[1]" clone restore`,
 				`cd "$_mws_target"`,
 				"set -l",
-				"set -gx MWS_SHELL_WRAPPER 1",
+				"MWS_SHELL_WRAPPER=1 command mws $argv",
+				"MWS_SHELL_WRAPPER=1 MWS_CD_FILE=$_mws_cd_file command mws $argv",
 			},
-			mustNotContain:  []string{"mws() {", `case "$1"`},
+			mustNotContain:  []string{"mws() {", `case "$1"`, "set -gx MWS_SHELL_WRAPPER"},
 			funcDeclaration: "function mws",
 		},
 	}
@@ -217,7 +220,7 @@ func TestShellWrapperCdsAfterRestore(t *testing.T) {
 
 			script := `eval "$(mws shell-init ` + shell + `)" || exit 9
 mws restore feature --yes || exit 8
-printf 'cwd=%s\nwrapper=%s\n' "$PWD" "$MWS_SHELL_WRAPPER"`
+printf 'cwd=%s\nwrapper=%s\nstatus=%s\n' "$PWD" "$MWS_SHELL_WRAPPER" "$(mws shell-init --status)"`
 			sh := exec.Command(shellPath, "-c", script)
 			sh.Dir = meta
 			sh.Env = append(os.Environ(), cliEnv+"=1", "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -230,8 +233,13 @@ printf 'cwd=%s\nwrapper=%s\n' "$PWD" "$MWS_SHELL_WRAPPER"`
 			if want := "cwd=" + wc + "\n"; !strings.Contains(out, want) {
 				t.Errorf("shell cwd after restore should be %s, got:\n%s", wc, out)
 			}
-			if strings.Contains(out, "wrapper=\n") {
-				t.Errorf("the wrapper did not export MWS_SHELL_WRAPPER:\n%s", out)
+			// The wrapper sets MWS_SHELL_WRAPPER for each mws it runs, never
+			// in the shell, so a child shell or script does not inherit it.
+			if !strings.Contains(out, "wrapper=\n") {
+				t.Errorf("the wrapper exported MWS_SHELL_WRAPPER into the shell:\n%s", out)
+			}
+			if !strings.Contains(out, "status=active\n") {
+				t.Errorf("shell-init --status through the wrapper is not active:\n%s", out)
 			}
 		})
 	}
