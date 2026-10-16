@@ -217,7 +217,10 @@ func installShellInit(cmd *cobra.Command, spec shellSpec) error {
 	if len(body) > 0 && !bytes.HasSuffix(body, []byte("\n")) {
 		block.WriteString("\n")
 	}
-	block.WriteString(shellInitMarker + "\n" + spec.line + "\n" + shellInitMarkerEnd + "\n")
+	for _, line := range []string{shellInitMarker, spec.line, shellInitMarkerEnd} {
+		block.WriteString(line)
+		block.WriteString("\n")
+	}
 	if err := os.MkdirAll(filepath.Dir(rc), 0o755); err != nil {
 		return fmt.Errorf("create %s for the mws shell-init line: %w", filepath.Dir(rc), err)
 	}
