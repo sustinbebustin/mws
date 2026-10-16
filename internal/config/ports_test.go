@@ -155,7 +155,7 @@ func TestValidatePortTables(t *testing.T) {
 	}
 }
 
-// supabaseAppConfig is the app configuration from ADR-0015.
+// supabaseAppConfig is the Next.js + Supabase monorepo example from ADR-0015.
 const supabaseAppConfig = `project_name = "app"
 
 [ports]
@@ -254,7 +254,7 @@ func loadConfig(t *testing.T, body string) *Config {
 func TestPortPolicyEightPortApp(t *testing.T) {
 	p, ok := loadConfig(t, supabaseAppConfig).PortPolicy()
 	if !ok {
-		t.Fatal("PortPolicy reported no [ports] for app")
+		t.Fatal("PortPolicy reported no [ports] for the eight-port app")
 	}
 	// The 65535 bound decides: the highest base, 54323, stays in range up to
 	// slot 1121 (65533). Some pairs are congruent modulo 10 (3000 and 54320,
