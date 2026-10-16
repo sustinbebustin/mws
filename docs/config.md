@@ -207,7 +207,7 @@ Declares the named ports of the workspace. A **Working copy** starts on the defa
 
 Every lease also exports four builtins: `MWS_SLOT`, `MWS_COPY` (the copy's directory name), `MWS_COPY_SLUG` (lower-cased, every character outside `[a-z0-9-]` replaced by `-`) and `MWS_META` (absolute meta root).
 
-Slot arithmetic is exact. Two ports whose bases are congruent modulo the stride meet at some pair of slots: bases `a < b` with `b - a = d * stride` mean slot `d` of the first is slot 0 of the second. Validation rejects such a pair unless the slot limit (`slots`, or the 65535 bound) stays below `d`. The highest claimable slot is the smaller of `slots` and the last slot whose ports all stay at or below 65535.
+Slot arithmetic is exact. Two ports whose bases are congruent modulo the stride meet at some pair of slots: bases `a < b` with `b - a = d * stride` mean slot `d` of the first is slot 0 of the second. Validation rejects such a pair unless the slot limit (`slots`, or the 65535 bound) stays below `d`. The highest claimable slot is the smaller of `slots` and the last slot whose ports all stay at or below 65535; validation requires it to be at least 1, so the highest base plus one stride must not exceed 65535. A copy whose slot lies above it after an edit (a lower `slots`, a higher base) is flagged `out of range` by `mws ports ls`, and `mws ports claim` refuses to keep it until `--slot N` moves it.
 
 ### `[vars]`
 

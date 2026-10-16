@@ -78,7 +78,10 @@ func TestValidatePortTables(t *testing.T) {
 
 		{"base 0", func(c *Config) { c.Ports.Port[1].Base = 0 }, "ports.port[1].base"},
 		{"base above 65535", func(c *Config) { c.Ports.Port[1].Base = 65536 }, "ports.port[1].base"},
-		{"base 65535", func(c *Config) { c.Ports.Port[1].Base = 65535 }, ""},
+		// The highest base must leave at least slot 1 below 65536.
+		{"base 65535 leaves no claimable slot", func(c *Config) { c.Ports.Port[1].Base = 65535 }, "ports.port[1].base"},
+		{"base within one stride of 65535", func(c *Config) { c.Ports.Port[1].Base = 65526 }, "stride 10"},
+		{"base exactly one stride below 65535", func(c *Config) { c.Ports.Port[1].Base = 65525 }, ""},
 		{"base 1", func(c *Config) { c.Ports.Port[1].Base = 1 }, ""},
 
 		{"stride 0", func(c *Config) { c.Ports.Stride = intp(0) }, "ports.stride"},

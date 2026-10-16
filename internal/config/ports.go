@@ -96,7 +96,32 @@ func (p *Ports) validate(owner map[string]string) error {
 		}
 		owner[port.Var] = key
 	}
+	if err := p.validateLimit(); err != nil {
+		return err
+	}
 	return p.validateCollisions()
+}
+
+// validateLimit requires at least slot 1 to be claimable: the highest base
+// plus one stride must stay at or below MaxPort, or no copy could ever leave
+// the default ports.
+func (p *Ports) validateLimit() error {
+	if p.limit() >= 1 {
+		return nil
+	}
+	top := 0
+	for i, port := range p.Port {
+		if port.Base > p.Port[top].Base {
+			top = i
+		}
+	}
+	stride := p.stride()
+	fix := fmt.Sprintf("lower that base to at most %d or lower ports.stride", MaxPort-stride)
+	if MaxPort-stride < 1 {
+		fix = fmt.Sprintf("lower ports.stride below %d", MaxPort)
+	}
+	return fmt.Errorf("ports.port[%d].base (%d, %q) is the highest base, and at stride %d its slot 1 would be port %d, above %d, so no slot is claimable; %s",
+		top, p.Port[top].Base, p.Port[top].Name, stride, p.Port[top].Base+stride, MaxPort, fix)
 }
 
 // validateCollisions enforces exact slot arithmetic (ADR-0015): ports a < b
