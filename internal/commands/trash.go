@@ -287,7 +287,8 @@ func runTrashEmpty(ctx context.Context, o output, f confirmFlags) error {
 		return o.fail(err)
 	}
 	if !ok {
-		return nil
+		// Declined: nothing was purged, which --json still reports.
+		return emitPurge(o, newPurgeResult(false, nil, nil))
 	}
 
 	// Name what is going before clearing the directory, so the log says which
