@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -22,6 +23,7 @@ import (
 
 func newRestoreCmd() *cobra.Command {
 	var as string
+	var jsonOut bool
 	yes := false
 	cmd := &cobra.Command{
 		Use:   "restore [copy]",
@@ -37,28 +39,50 @@ name given, the most recently trashed copy of any name. restore never
 overwrites: if a working copy already holds the name, use --as to restore under
 a different one. Without a terminal, give a name (or --yes) wherever restore
 would prompt. A name with no trash entry exits 4 (not found); the message says
-when a working copy of that name exists, as after a retried restore.`,
+when a working copy of that name exists, as after a retried restore.
+
+--json prints {"name", "path", "entry"}: the restored copy and the trash entry
+it came from, or {"error": {"code", "message"}} on failure.`,
 		Example: `  mws restore feature-x
   mws restore feature-x --yes
-  mws restore feature-x --as feature-x-old`,
-		Args: cobra.MaximumNArgs(1),
+  mws restore feature-x --as feature-x-old
+  mws restore feature-x --yes --json`,
+		Args: usageCheckedArgs(cobra.MaximumNArgs(1), &jsonOut),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var name string
 			if len(args) == 1 {
 				name = args[0]
 			}
-			return runRestore(cmd.Context(), reporterFor(cmd.ErrOrStderr()), name, as, yes)
+			return runRestore(cmd.Context(), newOutput(cmd, jsonOut), name, as, yes)
 		},
 	}
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "print the result as JSON")
 	cmd.Flags().StringVar(&as, "as", "", "restore under a different working copy name")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip prompts; pick the most recent matching entry")
 	return cmd
 }
 
-func runRestore(ctx context.Context, r Reporter, name, as string, yes bool) error {
+// restoreResult is the outcome of `mws restore`: the working copy now at Path
+// and the trash entry it came out of.
+type restoreResult struct {
+	Name  string `json:"name"`
+	Path  string `json:"path"`
+	Entry string `json:"entry"`
+}
+
+func runRestore(ctx context.Context, o output, name, as string, yes bool) error {
+	res, err := restoreCopy(ctx, o.reporter(), name, as, yes)
+	if err != nil {
+		return o.fail(err)
+	}
+	writeCdFile(o.reporter(), res.Path)
+	return o.result(res, func(io.Writer) error { return nil })
+}
+
+func restoreCopy(ctx context.Context, r Reporter, name, as string, yes bool) (restoreResult, error) {
 	ws, cfg, err := locateForTrash()
 	if err != nil {
-		return err
+		return restoreResult{}, err
 	}
 	policy := cfg.TrashPolicy()
 	// Sweep first so an entry that is already past its retention can't be
@@ -68,10 +92,10 @@ func runRestore(ctx context.Context, r Reporter, name, as string, yes bool) erro
 	entry, err := selectEntry(ws.MetaRoot, name, yes, policy)
 	if clierr.KindOf(err) == clierr.NotFound && looksLikeWorkingCopy(ws.MetaRoot, filepath.Join(ws.CopiesRoot(), name)) {
 		// A retried restore finds the copy back in place and the trash without it.
-		return clierr.NotFoundf("no trashed working copy named %q, but %s is a working copy, so a previous restore already brought it back", name, filepath.Join(ws.CopiesRoot(), name))
+		return restoreResult{}, clierr.NotFoundf("no trashed working copy named %q, but %s is a working copy, so a previous restore already brought it back", name, filepath.Join(ws.CopiesRoot(), name))
 	}
 	if err != nil {
-		return err
+		return restoreResult{}, err
 	}
 
 	destName := entry.Name
@@ -79,17 +103,17 @@ func runRestore(ctx context.Context, r Reporter, name, as string, yes bool) erro
 		destName = as
 	}
 	if err := project.ValidateName(destName); err != nil {
-		return fmt.Errorf("restore name %q: %w", destName, err)
+		return restoreResult{}, fmt.Errorf("restore name %q: %w", destName, err)
 	}
 	dest := filepath.Join(ws.CopiesRoot(), destName)
 	if _, err := os.Lstat(dest); err == nil {
-		return fmt.Errorf("%s already exists; refusing to overwrite it. Restore under another name with `mws restore %s --as <newname>`, or remove the existing copy first", dest, entry.Name)
+		return restoreResult{}, fmt.Errorf("%s already exists; refusing to overwrite it. Restore under another name with `mws restore %s --as <newname>`, or remove the existing copy first", dest, entry.Name)
 	} else if !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("stat %s: %w", dest, err)
+		return restoreResult{}, fmt.Errorf("stat %s: %w", dest, err)
 	}
 
 	if err := trash.Restore(entry, dest); err != nil {
-		return err
+		return restoreResult{}, err
 	}
 	r.OK(fmt.Sprintf("Restored %s -> %s", entry.ID, dest))
 
@@ -97,7 +121,7 @@ func runRestore(ctx context.Context, r Reporter, name, as string, yes bool) erro
 	// dangled while it sat in the trash; re-link them against the real one.
 	linked, err := project.LinkHarnessIntoWorkingCopy(ws.MetaRoot, dest)
 	if err != nil {
-		return fmt.Errorf("restored %s but failed to relink the harness: %w. Run `mws relink` to retry", dest, err)
+		return restoreResult{}, fmt.Errorf("restored %s but failed to relink the harness: %w. Run `mws relink` to retry", dest, err)
 	}
 	if len(linked) > 0 {
 		r.OK(fmt.Sprintf("Relinked %d harness %s", len(linked), plural(len(linked), "entry", "entries")))
@@ -106,15 +130,14 @@ func runRestore(ctx context.Context, r Reporter, name, as string, yes bool) erro
 	// Worktree links are absolute and still name the trash (or the old name).
 	repaired, err := worktree.RepairCopy(ctx, ws.MetaRoot, dest, cfg.WorktreePolicy())
 	if err != nil {
-		return fmt.Errorf("restored %s but %w. Its files are intact; run `mws wt prune` in %s to retry the repair", dest, err, dest)
+		return restoreResult{}, fmt.Errorf("restored %s but %w. Its files are intact; run `mws wt prune` in %s to retry the repair", dest, err, dest)
 	}
 	if n := len(repaired); n > 0 {
 		r.OK(fmt.Sprintf("Repaired %d %s", n, plural(n, "worktree", "worktrees")))
 	}
 
 	renderEnv(r, ws.MetaRoot, cfg, dest, false)
-	writeCdFile(r, dest)
-	return nil
+	return restoreResult{Name: destName, Path: dest, Entry: entry.ID}, nil
 }
 
 // selectEntry resolves the trash entry to restore. An empty name prompts over
