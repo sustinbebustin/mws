@@ -14,12 +14,31 @@ import (
 	"github.com/sustinbebustin/mws/internal/project"
 )
 
+// fakeListeners replaces the listener lookup for the rest of the test: a port
+// has a listener exactly when it is in listening. Allocation tests then do
+// not depend on which ports the host's other processes hold; internal/ports
+// tests the real probe.
+func fakeListeners(t *testing.T, listening ...int) {
+	t.Helper()
+	prev := listeners
+	listeners = func(probed []int) ([]int, error) {
+		var held []int
+		for _, p := range probed {
+			if slices.Contains(listening, p) {
+				held = append(held, p)
+			}
+		}
+		return held, nil
+	}
+	t.Cleanup(func() { listeners = prev })
+}
+
 // withFreePort gives the env fixture a [ports] table with one port, web
-// aliased PORT at stride 10, whose base the OS just handed out as free, so
-// the listener probe of a claim does not trip over the host's own services.
-// It returns the base.
+// aliased PORT at stride 10, whose base the OS just handed out as free, and
+// no listeners on any slot. It returns the base.
 func (f envFixture) withFreePort(t *testing.T) int {
 	t.Helper()
+	fakeListeners(t)
 	cfg, err := config.Load(f.meta)
 	if err != nil {
 		t.Fatal(err)
@@ -281,11 +300,7 @@ func TestPortsClaimSkipsASlotWithAListenerAndCheckReportsIt(t *testing.T) {
 	f := seedEnvWorkspace(t)
 	base := f.withFreePort(t)
 	busy := base + 10
-	l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(busy)))
-	if err != nil {
-		t.Skipf("cannot hold slot 1's port %d for the test: %v", busy, err)
-	}
-	t.Cleanup(func() { _ = l.Close() })
+	fakeListeners(t, busy)
 
 	res := mustPorts(t, f.meta, "claim", "a")
 	if got := slotOf(t, f.copy("a")); got != 2 {
@@ -346,6 +361,7 @@ func TestPortsInsideAWorktreeActOnItsWorkingCopy(t *testing.T) {
 
 func TestPortsReleaseAfterClaimRestoresTheBytesOfAFreshClone(t *testing.T) {
 	f := seedWtWorkspace(t)
+	fakeListeners(t)
 	f.cfg.Ports = freePortTable(t)
 	f.cfg.Vars = map[string]string{"SITE_URL": "http://localhost:${PORT}"}
 	f.cfg.Renders = []config.Render{{Source: ".mcp.json.render", Target: ".mcp.json"}}

@@ -134,7 +134,7 @@ func runPortsCheck(o output, name string) error {
 		return o.fail(clierr.Failuref("%w", err))
 	}
 	slotPorts := ports.SlotPorts(policy, slot)
-	listening, err := ports.Listeners(slotPorts)
+	listening, err := listeners(slotPorts)
 	if err != nil {
 		return o.fail(clierr.Failuref("%w", err))
 	}
@@ -604,11 +604,15 @@ func claimLease(r Reporter, ws *project.Workspace, c workingCopy, sc slotClaim) 
 	return ch, nil
 }
 
+// listeners returns which of the given ports have a listener. It is a
+// variable so tests can script the host's sockets.
+var listeners = ports.Listeners
+
 // listenerProbe is the busy test of a claim without --slot: a slot is busy
 // while any of its ports has a listener, which it warns about on r.
 func listenerProbe(r Reporter, policy config.PortPolicy) ports.Busy {
 	return func(slot int) (bool, error) {
-		listening, err := ports.Listeners(ports.SlotPorts(policy, slot))
+		listening, err := listeners(ports.SlotPorts(policy, slot))
 		if err != nil {
 			return false, &probeError{err: err}
 		}
