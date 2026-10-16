@@ -302,6 +302,29 @@ func TestPortsClaimSkipsASlotWithAListenerAndCheckReportsIt(t *testing.T) {
 	}
 }
 
+func TestPortsInsideAWorktreeActOnItsWorkingCopy(t *testing.T) {
+	f := seedRenderedWorktree(t)
+	wt := f.wtPath("x")
+
+	res := mustPorts(t, wt, "show")
+	for _, want := range []string{"MWS_SLOT=2\n", "MWS_COPY=c\n", "PORT=3020\n"} {
+		if !strings.Contains(res.stdout, want) {
+			t.Errorf("show inside worktree x lacks %q:\n%s", want, res.stdout)
+		}
+	}
+
+	mustPorts(t, wt, "claim", "--slot", "3")
+	if got := slotOf(t, f.copy); got != 3 {
+		t.Fatalf("claim inside the worktree left copy c on slot %d, want 3", got)
+	}
+	if got := slotOf(t, wt); got != 3 {
+		t.Errorf("worktree's carried lease records slot %d, want 3", got)
+	}
+	if got := readFile(t, filepath.Join(wt, "frontend", "app.env")); got != "PORT=3030\n" {
+		t.Errorf("worktree app.env = %q, want it re-rendered at slot 3", got)
+	}
+}
+
 func TestPortsReleaseAfterClaimRestoresTheBytesOfAFreshClone(t *testing.T) {
 	f := seedWtWorkspace(t)
 	f.cfg.Ports = freePortTable(t)
