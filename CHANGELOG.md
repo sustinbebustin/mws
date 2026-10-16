@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-16
+
 ### Added
 - Per-copy port slots, so parallel working copies can run their stacks side by side. `.mws.toml` gains `[ports]` (named base ports, stride, slot cap), `[vars]` (derived values such as URLs) and `[[renders]]` (harness `.render` sources rendered into each copy). Env files and render sources substitute `${VAR}` placeholders at the copy's slot; slot 0 keeps the base ports.
 - `mws ports [copy]` shows a copy's slot and exported variables (`--export` for shell use); `mws ports claim|release [copy]` moves a copy onto its own slot or back to the defaults (`--slot N` picks one); `mws ports ls` lists every copy's slot, conflicts and the next free slot; `mws ports check` reports which of the copy's ports are listening. The slot is recorded in a `.mws-ports.env` lease inside the copy, which `just` and direnv can read.
@@ -134,7 +136,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tag-driven release pipeline: pushing a `v*` tag publishes darwin and linux binaries (amd64 and arm64) to GitHub Releases via goreleaser, with checksums and a conventional-commit-grouped changelog.
 - Homebrew tap: every release pushes a formula to `sustinbebustin/homebrew-mws`, enabling `brew install sustinbebustin/mws/mws`.
 
-[Unreleased]: https://github.com/sustinbebustin/mws/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/sustinbebustin/mws/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/sustinbebustin/mws/releases/tag/v0.8.0
 [0.7.0]: https://github.com/sustinbebustin/mws/releases/tag/v0.7.0
 [0.6.0]: https://github.com/sustinbebustin/mws/releases/tag/v0.6.0
 [0.5.0]: https://github.com/sustinbebustin/mws/releases/tag/v0.5.0
