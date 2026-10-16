@@ -107,6 +107,23 @@ func TestPromoteCandidatesOmitMarkersAndRenderTargets(t *testing.T) {
 	}
 }
 
+func TestPromoteRefusesANativeRepoAndOmitsItFromTheCandidates(t *testing.T) {
+	f := seedWtWorkspace(t)
+
+	assertRefused(t, runMWS(t, f.copy, "promote", "frontend"), "frontend", "native repo")
+	if !fileExists(filepath.Join(f.repo("frontend"), ".git")) {
+		t.Error("a refused promote moved the native repo")
+	}
+
+	res := runMWS(t, f.copy, "promote")
+	assertUsage(t, res, "promotable: ", ".ports.env")
+	for _, repo := range []string{"frontend", "backend"} {
+		if strings.Contains(res.stderr, repo) {
+			t.Errorf("candidate list names the native repo %s:\n%s", repo, res.stderr)
+		}
+	}
+}
+
 // The worktree mirrors a copy-root directory made before `wt new` as a link
 // to the copy's; one made after is absent. Either way promote leaves a direct
 // link into the harness.
