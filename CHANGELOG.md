@@ -11,7 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `mws env diff [copy|--all]` reports each env file as `same`, `differs`, `missing in copy` or `missing in staging`, exiting `0` only when all are the same.
 - `mws shell-init --install` adds the line that loads the shell wrapper to your rc file (`~/.zshrc` or `$ZDOTDIR/.zshrc`, `~/.bashrc`, `~/.config/fish/config.fish`), once; `mws shell-init --status` says whether the wrapper is active in this shell (exit 0) or what to run (exit 1). The shell argument defaults to the one `$SHELL` names.
 
+- `mws clone --ports` claims the lowest free Port slot after cloning, so the env render and the one setup pass see the final ports. Without `--ports`, a workspace with `[ports]` ends the clone with a `[WARN]` that the copy shares the default ports.
+- `mws ls` shows each copy's ports (`default` or `slot N`), and `--json` carries them as `ports`.
+
 ### Changed
+- `mws rm` releases the copy's Port slot before trashing it: it drops the lease and renders the env files at the default ports, so `mws restore` brings it back on the defaults. A failed render is a `[WARN]` and the copy is trashed anyway; `--purge` skips the render; `--dry-run` and the confirmation name the slot released.
 - `mws sync-env` and `mws stage-env` are replaced by `mws env sync [copy] [--all] [--dry-run]` and `mws env stage [copy] [--dry-run]` (no aliases; the old names exit `2`). The `env` group takes `--json`. Both cover the optional repos present in a copy and exit `1` when any file fails to copy, after copying the rest. `env stage` refuses (exit `3`) inside a worktree.
 - `mws clone`, `mws include` and `mws restore` materialise env files through the same path as `mws env sync`: each renders every env file of the copy from staging (`restore` now resets a restored copy's env files to staging).
 - `mws promote` refuses (exit `3`) an mws marker (`.mws-*`) and any `[[renders]]` target, and leaves both out of its candidate list.

@@ -37,15 +37,21 @@ see trash.retention_days in .mws.toml) is purged the next time an mws command
 touches the trash -- nothing purges in the background. Force one with
 'mws trash prune'.
 
-Pass --purge to delete the working copy outright with no way back. Either way
-the meta workspace and harness are untouched.
+Before trashing, rm releases the copy's Port slot: it drops the lease and
+renders the copy's env files at the default ports, so the trash holds no slot
+and a restored copy comes back on the defaults. A file that cannot be
+rendered is a warning; the copy is trashed anyway.
+
+Pass --purge to delete the working copy outright with no way back, and
+without the render. Either way the meta workspace and harness are untouched.
 
 The copy's worktrees go with it. rm refuses (exit 3) while another process
 works inside one of them.
 
 Without a terminal, the name and --yes are required. --dry-run runs every
 check and reports what would happen without changing anything (it does not
-sweep the trash either). A name that is no working copy exits 4 (not found);
+sweep the trash either): "would release slot N from <copy>" for a slotted
+copy, then "would trash <path>" or "would delete <path>". A name that is no working copy exits 4 (not found);
 when it was trashed earlier, the message names the trash entry and its age,
 so a retried rm can tell "already removed" from a typo.`,
 		Example: `  mws rm feature-x
