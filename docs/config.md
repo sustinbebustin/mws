@@ -249,7 +249,7 @@ ports check  {copy, path, slot, ports:[{name, port, listening}]}
 ports ls     {copies:[{copy, path, slot, conflict, error?}], conflicts:[{slot, copies}], next_free}   # next_free: null without [ports] or when full
 ```
 
-Exit codes follow ADR-0012: `0` ok, `1` failure, `2` usage, `3` refused, `4` not found. In `mws ports`, `3` is a slot another copy holds or two leases naming one slot (`--slot` settles it), `2` is a missing `[ports]` table, and `4` is a copy that does not exist. `mws env diff` exits `1` unless every file is `same`. A malformed lease fails every render of that copy with `1`, and `env stage` and `env diff` refuse it.
+Exit codes follow ADR-0012: `0` ok, `1` failure, `2` usage, `3` refused, `4` not found. In `mws ports`, `3` is a slot another copy holds or two leases naming one slot (`--slot` settles it), `2` is a missing `[ports]` table or a bare `mws ports <arg>` whose arg is neither a subcommand nor a working copy (a mistyped subcommand), and `4` is a copy that does not exist when named after a subcommand (`mws ports show <copy>`). `mws env diff` exits `1` unless every file is `same`. A malformed lease fails every render of that copy with `1`, and `env stage` and `env diff` refuse it.
 
 ### Port examples
 

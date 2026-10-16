@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -40,12 +41,14 @@ func newPortsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "ports [copy]",
 		Short: "Claim, release, show and check the Port slot of a working copy",
-		Long:  portsLong + "\n\nWithout a subcommand, ports runs show.",
+		Long: portsLong + "\n\nWithout a subcommand, ports runs show. `mws ports <arg>` with an arg that is\n" +
+			"neither a subcommand nor a working copy is a usage error (exit 2), so a\n" +
+			"mistyped subcommand is not taken for a copy; `mws ports show <copy>` exits 4.",
 		Example: `  mws ports
   eval "$(mws ports show --export)"
   mws ports claim feature-x --no-setup
   mws ports ls --json`,
-		Args: usageCheckedArgs(cobra.MaximumNArgs(1), &jsonOut),
+		Args: usageCheckedArgs(cobra.MatchAll(cobra.MaximumNArgs(1), copyOrSubcommand), &jsonOut),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runPortsShow(newOutput(cmd, jsonOut), copyArg(args), export)
 		},
@@ -60,6 +63,35 @@ func newPortsCmd() *cobra.Command {
 		newPortsCheckCmd(&jsonOut),
 	)
 	return cmd
+}
+
+// copyOrSubcommand rejects the argument of a bare `mws ports <arg>` that names
+// no working copy as a usage error, so a mistyped subcommand ("chek") exits 2
+// instead of 4. `mws ports show <copy>` still reports an unknown copy as not
+// found. A workspace that cannot be located passes, for RunE to report.
+func copyOrSubcommand(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return nil
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil
+	}
+	ws, err := project.Locate(cwd)
+	if err != nil {
+		return nil
+	}
+	if _, err := ws.ResolveCopy(args[0]); !errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	var subs []string
+	for _, c := range cmd.Commands() {
+		if c.IsAvailableCommand() {
+			subs = append(subs, c.Name())
+		}
+	}
+	return usagef("%q is neither a subcommand of `%s` (%s) nor a working copy under %s; see `%s --help`",
+		args[0], cmd.CommandPath(), strings.Join(subs, ", "), ws.CopiesRoot(), cmd.CommandPath())
 }
 
 func newPortsCheckCmd(jsonOut *bool) *cobra.Command {
