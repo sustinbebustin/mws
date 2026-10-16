@@ -159,12 +159,12 @@ func TestRmConfirmationListsWorktrees(t *testing.T) {
 	}
 
 	for _, toTrash := range []bool{true, false} {
-		got := rmConfirmDescription(f.meta, "c", toTrash, wts)
+		got := rmConfirmDescription(f.meta, "c", toTrash, 0, wts)
 		if !strings.Contains(got, "worktrees x, y") {
 			t.Fatalf("toTrash=%v: confirmation %q does not list worktrees x, y", toTrash, got)
 		}
 	}
-	if got := rmConfirmDescription(f.meta, "c", true, nil); strings.Contains(got, "worktree") {
+	if got := rmConfirmDescription(f.meta, "c", true, 0, nil); strings.Contains(got, "worktree") {
 		t.Fatalf("confirmation for a copy without worktrees mentions them: %q", got)
 	}
 }
@@ -212,7 +212,7 @@ func TestListCountsWorktreesPerCopyWithoutListingThem(t *testing.T) {
 			t.Fatalf("runList --json: %v", err)
 		}
 	})
-	if got, want := out.String(), "* c  (+2 worktrees)\n"; got != want {
+	if got, want := out.String(), "* c  default  (+2 worktrees)\n"; got != want {
 		t.Fatalf("list stdout = %q, want %q", got, want)
 	}
 	var got struct {
@@ -221,7 +221,7 @@ func TestListCountsWorktreesPerCopyWithoutListingThem(t *testing.T) {
 	if err := json.Unmarshal(jsonOut.Bytes(), &got); err != nil {
 		t.Fatalf("list --json: %v\n%s", err, jsonOut.String())
 	}
-	want := []copyJSON{{Name: "c", Path: f.copy, Current: true, Worktrees: 2}}
+	want := []copyJSON{{Name: "c", Path: f.copy, Current: true, Ports: "default", Worktrees: 2}}
 	if !slices.Equal(got.Copies, want) {
 		t.Fatalf("list --json copies = %+v, want %+v", got.Copies, want)
 	}
