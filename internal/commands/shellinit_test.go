@@ -189,6 +189,11 @@ func TestRestoreWritesTheCdFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MWS_CD_FILE not written: %v", err)
 	}
+	// restore writes the resolved path; on macOS the temp dir sits behind
+	// the /var -> /private/var symlink.
+	if wc, err = filepath.EvalSymlinks(wc); err != nil {
+		t.Fatal(err)
+	}
 	if string(got) != wc {
 		t.Fatalf("MWS_CD_FILE holds %q, want %q", got, wc)
 	}
@@ -230,6 +235,9 @@ printf 'cwd=%s\nwrapper=%s\nstatus=%s\n' "$PWD" "$MWS_SHELL_WRAPPER" "$(mws shel
 				t.Fatalf("%s: %v\nstdout: %s\nstderr: %s", shell, err, stdout.String(), stderr.String())
 			}
 			out := stdout.String()
+			if wc, err = filepath.EvalSymlinks(wc); err != nil {
+				t.Fatal(err)
+			}
 			if want := "cwd=" + wc + "\n"; !strings.Contains(out, want) {
 				t.Errorf("shell cwd after restore should be %s, got:\n%s", wc, out)
 			}
