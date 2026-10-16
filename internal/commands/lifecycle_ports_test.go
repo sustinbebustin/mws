@@ -17,10 +17,12 @@ import (
 )
 
 // withPortTemplate gives the worktree fixture a [ports] table on a free
-// base, a root [[setup]] entry that appends $MWS_SLOT to setup.out at the
-// copy root, and a staged app.env holding ${PORT}. It returns the base.
+// base with no listeners on any slot, a root [[setup]] entry that appends
+// $MWS_SLOT to setup.out at the copy root, and a staged app.env holding
+// ${PORT}. It returns the base.
 func (f wtFixture) withPortTemplate(t *testing.T) int {
 	t.Helper()
+	fakeListeners(t)
 	f.cfg.Ports = freePortTable(t)
 	f.cfg.Setup = []config.SetupCommand{{Cmd: `printf '%s\n' "$MWS_SLOT" >> setup.out`}}
 	f.saveConfig(t)
