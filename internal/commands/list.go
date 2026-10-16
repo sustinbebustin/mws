@@ -108,13 +108,18 @@ func collectCopies(r Reporter, ws *project.Workspace, cfg *config.Config) ([]cop
 		if err != nil {
 			return nil, clierr.Failuref("count worktrees of %s: %w", peer, err)
 		}
-		label := invalidLease
-		if slot, err := ports.ReadSlot(peer); err != nil {
-			r.Warn(err.Error())
-		} else {
-			label = slotLabel(slot)
-		}
-		copies = append(copies, copyJSON{Copy: filepath.Base(peer), Path: peer, Current: peer == ws.WorkingCopy, Ports: label, Worktrees: len(roots)})
+		copies = append(copies, copyJSON{Copy: filepath.Base(peer), Path: peer, Current: peer == ws.WorkingCopy, Ports: portsLabel(r, peer), Worktrees: len(roots)})
 	}
 	return copies, nil
+}
+
+// portsLabel names the ports of the working copy at copyPath: "default",
+// "slot N", or invalidLease, warned about on r, when its lease is unreadable.
+func portsLabel(r Reporter, copyPath string) string {
+	slot, err := ports.ReadSlot(copyPath)
+	if err != nil {
+		r.Warn(err.Error())
+		return invalidLease
+	}
+	return slotLabel(slot)
 }
