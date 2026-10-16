@@ -69,9 +69,10 @@ required when [[setup]] is configured. --dry-run runs no setup.
 
 --dry-run prints one "would copy <source> -> <target>" line per file and
 changes nothing. --json prints
-{"dry_run", "copies": [{"copy", "path", "files": [{"repo", "from", "to", "status", "error"}]}]}
+{"dry_run", "copies": [{"copy", "path", "files": [{"repo", "from", "to", "status", "error"}], "error", "setup_error"}]}
 with status copied, would_copy, skipped or failed; repo is absent for a
-[[renders]] target.`,
+[[renders]] target. A copy's error is set when its worktrees were not fully
+refreshed, setup_error when a root [[setup]] command failed.`,
 		Example: `  mws env sync
   mws env sync feature-x --dry-run
   mws env sync --all --json --no-setup`,
@@ -214,31 +215,45 @@ func (c workingCopy) name() string { return filepath.Base(c.path) }
 // set, streaming their output to setupOut. It is the whole of a render for
 // the commands that clone nothing (`env sync`, `ports claim`, `ports
 // release`); clone and include run the repos' setup between the two halves
-// and call them separately. The error names the setup commands that failed;
-// the render result stands either way.
+// and call them separately. The error names the setup commands that failed,
+// and the result carries it as SetupError; the render result stands either
+// way.
 func (c workingCopy) render(ctx context.Context, r Reporter, mode renderMode, setupOut io.Writer) (envCopyResult, error) {
 	res := c.renderEnv(r, mode == renderPreview)
 	if mode != renderAndSetup {
 		return res, nil
 	}
-	items := rootSetupItems(c.cfg)
-	if len(items) == 0 {
-		return res, nil
-	}
-	exports, err := c.exports()
-	if err != nil {
-		return res, fmt.Errorf("%s: no root setup command ran: %w", res.Copy, err)
-	}
-	if failed := runSetup(ctx, r, c.path, exports, items, setupOut, setupOut); len(failed) > 0 {
-		return res, fmt.Errorf("%s: %d root setup %s failed: %s; the env files were rendered. Fix the cause and rerun with --setup",
-			res.Copy, len(failed), plural(len(failed), "command", "commands"), strings.Join(failed, "; "))
+	if err := c.runRootSetup(ctx, r, setupOut); err != nil {
+		err = fmt.Errorf("%s: %w", res.Copy, err)
+		res.SetupError = err.Error()
+		return res, err
 	}
 	return res, nil
 }
 
-// renderEnv is the render path: it renders every staged env file of the
-// copy at its Port slot and writes it to its target in the copy, overwriting
-// it, then refreshes the carried copies of those files and of the lease in
+// runRootSetup runs the root [[setup]] commands at the copy root with the
+// copy's export set, streaming their output to setupOut. The error names the
+// commands that failed.
+func (c workingCopy) runRootSetup(ctx context.Context, r Reporter, setupOut io.Writer) error {
+	items := rootSetupItems(c.cfg)
+	if len(items) == 0 {
+		return nil
+	}
+	exports, err := c.exports()
+	if err != nil {
+		return fmt.Errorf("no root setup command ran: %w", err)
+	}
+	if failed := runSetup(ctx, r, c.path, exports, items, setupOut, setupOut); len(failed) > 0 {
+		return fmt.Errorf("%d root setup %s failed: %s; the env files were rendered. Fix the cause and rerun with --setup",
+			len(failed), plural(len(failed), "command", "commands"), strings.Join(failed, "; "))
+	}
+	return nil
+}
+
+// renderEnv is the render path: it rewrites the copy's Port lease from the
+// current config (refreshLease), renders every staged env file of the copy at
+// its Port slot and writes it to its target in the copy, overwriting it, then
+// refreshes the carried copies of those files and of the lease in
 // each of the copy's worktrees (worktree.Rerender). clone, include, restore
 // and `env sync` all materialise env files through it. Under dryRun it
 // changes nothing and reports each file as would_copy. Progress,
@@ -248,7 +263,11 @@ func (c workingCopy) renderEnv(r Reporter, dryRun bool) envCopyResult {
 	metaRoot, copyPath := c.metaRoot, c.path
 	files := c.renderedFiles(r)
 	res := envCopyResult{Copy: c.name(), Path: copyPath, Files: make([]envFileResult, 0, len(files))}
-	exports, err := c.exports()
+	readExports := c.refreshLease
+	if dryRun {
+		readExports = c.exports
+	}
+	exports, err := readExports()
 	if err != nil {
 		r.Fail(fmt.Sprintf("%s: %v; no env file of the copy was rendered", res.Copy, err))
 		for _, f := range files {
@@ -283,6 +302,26 @@ func (c workingCopy) exports() (ports.Exports, error) {
 		return ports.Exports{}, err
 	}
 	return ports.NewExports(c.cfg, c.metaRoot, c.name(), slot), nil
+}
+
+// refreshLease rewrites the Port lease of a copy holding a slot from the
+// current config, under the meta-root lock, so a lease written before a
+// [ports] or [vars] edit stops exporting the old values. It returns the copy's
+// export set; a copy on the default ports has no lease and is left alone.
+func (c workingCopy) refreshLease() (ports.Exports, error) {
+	unlock, err := ports.LockMeta(c.metaRoot)
+	if err != nil {
+		return ports.Exports{}, err
+	}
+	defer unlock()
+	e, err := c.exports()
+	if err != nil || e.Slot == 0 {
+		return e, err
+	}
+	if err := ports.WriteLease(c.path, e); err != nil {
+		return ports.Exports{}, err
+	}
+	return e, nil
 }
 
 // renderFile renders f's source with e onto its target, keeping the
@@ -651,12 +690,14 @@ func relToMeta(metaRoot, p string) string {
 }
 
 // envCopyResult is one working copy's part of an env sync or stage result.
-// Error is set when refreshing the copy's worktrees failed.
+// Error is set when refreshing the copy's worktrees failed, SetupError when
+// a root [[setup]] command failed after the render.
 type envCopyResult struct {
-	Copy  string          `json:"copy"`
-	Path  string          `json:"path"`
-	Files []envFileResult `json:"files"`
-	Error string          `json:"error,omitempty"`
+	Copy       string          `json:"copy"`
+	Path       string          `json:"path"`
+	Files      []envFileResult `json:"files"`
+	Error      string          `json:"error,omitempty"`
+	SetupError string          `json:"setup_error,omitempty"`
 }
 
 // envRunResult is the result of `mws env sync|stage`.

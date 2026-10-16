@@ -23,6 +23,15 @@ func TestClaimKeepsASlottedCopysSlot(t *testing.T) {
 	}
 }
 
+func TestClaimRefusesAHeldSlotAboveTheLimit(t *testing.T) {
+	held := []Holding{{"a", 5}, {"b", 1}}
+	_, err := Claim(held, "a", 3, nil)
+	var outOfRange *SlotRangeError
+	if !errors.As(err, &outOfRange) || outOfRange.Slot != 5 || outOfRange.Limit != 3 {
+		t.Fatalf("Claim error = %v, want *SlotRangeError for slot 5 above limit 3", err)
+	}
+}
+
 func TestClaimSkipsBusySlots(t *testing.T) {
 	busy := func(slot int) (bool, error) { return slot == 1 || slot == 2, nil }
 	slot, err := Claim([]Holding{{"a", 0}}, "a", 10, busy)
@@ -111,20 +120,15 @@ func TestConflictsAreSortedBySlot(t *testing.T) {
 	}
 }
 
-func TestReadHoldings(t *testing.T) {
-	root := t.TempDir()
-	one, two := filepath.Join(root, "one"), filepath.Join(root, "two")
-	for _, d := range []string{one, two} {
-		mkdir(t, d)
+// readHoldings reads the lease of each working copy in copyDirs.
+func readHoldings(copyDirs []string) ([]Holding, error) {
+	held := make([]Holding, 0, len(copyDirs))
+	for _, dir := range copyDirs {
+		slot, err := ReadSlot(dir)
+		if err != nil {
+			return nil, err
+		}
+		held = append(held, Holding{Copy: filepath.Base(dir), Slot: slot})
 	}
-	if err := WriteLease(two, Exports{Slot: 6, Vars: []Var{{"MWS_SLOT", "6"}}}); err != nil {
-		t.Fatal(err)
-	}
-	held, err := ReadHoldings([]string{one, two})
-	if err != nil {
-		t.Fatalf("ReadHoldings: %v", err)
-	}
-	if want := []Holding{{"one", 0}, {"two", 6}}; !reflect.DeepEqual(held, want) {
-		t.Fatalf("ReadHoldings = %+v, want %+v", held, want)
-	}
+	return held, nil
 }

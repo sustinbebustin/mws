@@ -98,10 +98,10 @@ func (res rmResult) printWouldRemove(w io.Writer) error {
 	verb := "delete"
 	if !res.Purged {
 		verb = "trash"
-		if res.ReleasedSlot > 0 {
-			if _, err := fmt.Fprintf(w, "would release slot %d from %s\n", res.ReleasedSlot, res.Copy); err != nil {
-				return err
-			}
+	}
+	if res.ReleasedSlot > 0 {
+		if _, err := fmt.Fprintf(w, "would release slot %d from %s\n", res.ReleasedSlot, res.Copy); err != nil {
+			return err
 		}
 	}
 	_, err := fmt.Fprintf(w, "would %s %s\n", verb, res.Path)
@@ -191,19 +191,15 @@ func removeCopy(ctx context.Context, r Reporter, name string, f rmFlags) (*rmRes
 	}
 
 	// An unreadable lease reads as slot 0 (ReadSlot returns 0 with the
-	// error); a real run reports it from the release step before trashing.
+	// error); a real run drops it in the release step before trashing.
 	slot, leaseErr := ports.ReadSlot(target)
 	description := rmConfirmDescription(ws.MetaRoot, name, toTrash, slot, wts)
 	if f.dryRun {
 		if leaseErr != nil && toTrash {
-			r.Warn(fmt.Sprintf("%v; rm would trash %s with it, without rendering its env files at the default ports", leaseErr, name))
+			r.Warn(fmt.Sprintf("%v; rm would drop it and render %s's env files at the default ports before trashing", leaseErr, name))
 		}
 		r.Info("Dry run: " + description)
-		res := &rmResult{DryRun: true, Copy: name, Path: target, Purged: !toTrash}
-		if toTrash {
-			res.ReleasedSlot = slot
-		}
-		return res, nil
+		return &rmResult{DryRun: true, Copy: name, Path: target, Purged: !toTrash, ReleasedSlot: slot}, nil
 	}
 	ok, err := confirm(r, f.yes, confirmation{
 		title:       fmt.Sprintf("Remove working copy %s?", target),
@@ -226,7 +222,8 @@ func removeCopy(ctx context.Context, r Reporter, name string, f rmFlags) (*rmRes
 				r.Warn(fmt.Sprintf("Could not drop the deleted worktrees' registrations from the meta repo: %v. Run `git worktree prune` in %s", err, ws.MetaRoot))
 			}
 		}
-		return &rmResult{Copy: name, Path: target, Purged: true}, nil
+		// Deleting the copy deletes its lease, which gives the slot back.
+		return &rmResult{Copy: name, Path: target, Purged: true, ReleasedSlot: slot}, nil
 	}
 
 	released := releaseBeforeTrash(r, workingCopy{metaRoot: ws.MetaRoot, cfg: cfg, path: target})
@@ -268,19 +265,24 @@ func notACopy(metaRoot, name, target string) error {
 // slot 0, so the trash only holds copies on the default ports and restore
 // needs no port logic (ADR-0015). It runs no setup. Every failure is a
 // warning; rm trashes the copy anyway. It returns the slot it gave back, 0
-// when the copy held none or its lease could not be dropped.
+// when the copy held none, its lease could not be dropped, or its lease was
+// unreadable (dropped and rendered at slot 0 all the same).
 func releaseBeforeTrash(r Reporter, c workingCopy) int {
 	name := c.name()
-	slot, err := releaseLease(c.metaRoot, c.path)
+	previous, err := releaseLease(c.metaRoot, c.path)
 	if err != nil {
 		r.Warn(fmt.Sprintf("%s: %v; trashing it anyway with its lease. After `mws restore %s`, fix or delete %s and run `mws env sync %s`",
 			name, err, name, ports.LeaseFile, name))
 		return 0
 	}
-	if slot == 0 {
+	slot := 0
+	if previous != nil {
+		slot = *previous
+	}
+	if previous != nil && slot == 0 {
 		return 0
 	}
-	r.OK(fmt.Sprintf("%s: %s -> %s", name, slotLabel(slot), slotLabel(0)))
+	r.OK(fmt.Sprintf("%s: %s -> %s", name, previousLabel(previous), slotLabel(0)))
 	res := c.renderEnv(r, false)
 	var stale []string
 	for _, f := range res.Files {
@@ -292,8 +294,8 @@ func releaseBeforeTrash(r Reporter, c workingCopy) int {
 		stale = append(stale, "its worktrees' carried files")
 	}
 	if len(stale) > 0 {
-		r.Warn(fmt.Sprintf("%s: not every env file was rendered at the default ports, so %s may still hold %s's ports; trashing it anyway. After `mws restore %s`, run `mws env sync %s`",
-			name, strings.Join(stale, ", "), slotLabel(slot), name, name))
+		r.Warn(fmt.Sprintf("%s: not every env file was rendered at the default ports, so %s may still hold the ports of %s; trashing it anyway. After `mws restore %s`, run `mws env sync %s`",
+			name, strings.Join(stale, ", "), previousLabel(previous), name, name))
 	}
 	return slot
 }

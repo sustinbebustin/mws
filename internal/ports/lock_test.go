@@ -16,7 +16,7 @@ func claimLocked(meta string, copies []string, copyDir string) (int, error) {
 		return 0, err
 	}
 	defer unlock()
-	held, err := ReadHoldings(copies)
+	held, err := readHoldings(copies)
 	if err != nil {
 		return 0, err
 	}
@@ -51,7 +51,7 @@ func TestLockMetaSerialisesConcurrentAllocations(t *testing.T) {
 	if slots[0] == slots[1] {
 		t.Fatalf("both copies got slot %d", slots[0])
 	}
-	held, err := ReadHoldings(copies)
+	held, err := readHoldings(copies)
 	if err != nil {
 		t.Fatal(err)
 	}

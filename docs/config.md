@@ -241,15 +241,17 @@ clone      {copy, path, repos:[folder], setup, ports}                  # setup: 
 rm         {dry_run, copy, path, entry?, purged, released_slot?}
 restore    {copy, path, entry}
 trash *    {dry_run?, purged:[...], unreadable:[...]} / {trash, entries:[...], unreadable:[...]}
-env sync|stage  {dry_run, copies:[{copy, path, files:[{repo?, from, to, status, error?}]}]}   # status: copied | would_copy | skipped | failed
+env sync|stage  {dry_run, copies:[{copy, path, files:[{repo?, from, to, status, error?}], error?, setup_error?}]}   # status: copied | would_copy | skipped | failed
 env diff   {same, copies:[{copy, path, files:[{repo?, source, target, state}]}]}
 ports show   {copy, path, slot, vars:{NAME: value}}
-ports claim|release  {dry_run, copy, path, slot, previous_slot, files:[...as env sync...], error?}
+ports claim|release  {dry_run, copy, path, slot, previous_slot, files:[...as env sync...], error?, setup_error?}   # previous_slot: null for an unreadable lease
 ports check  {copy, path, slot, ports:[{name, port, listening}]}
-ports ls     {copies:[{copy, path, slot, conflict, error?}], conflicts:[{slot, copies}], next_free}   # next_free: null without [ports] or when full
+ports ls     {copies:[{copy, path, slot, conflict, out_of_range, error?}], conflicts:[{slot, copies}], next_free}   # next_free: null without [ports] or when full
 ```
 
-Exit codes follow ADR-0012: `0` ok, `1` failure, `2` usage, `3` refused, `4` not found. In `mws ports`, `3` is a slot another copy holds or two leases naming one slot (`--slot` settles it), `2` is a missing `[ports]` table or a bare `mws ports <arg>` whose arg is neither a subcommand nor a working copy (a mistyped subcommand), and `4` is a copy that does not exist when named after a subcommand (`mws ports show <copy>`). `mws env diff` exits `1` unless every file is `same`. A malformed lease fails every render of that copy with `1`, and `env stage` and `env diff` refuse it.
+Exit codes follow ADR-0012: `0` ok, `1` failure, `2` usage, `3` refused, `4` not found. Every command that takes a `[copy]` argument exits `4` for a name with no working copy and `2` for an invalid name (one starting with `.` or `-`, say). In `mws ports`, `3` is a slot another copy holds, two leases naming one slot (`--slot` settles it), another copy's unreadable lease, or a claim without `--slot` on a copy whose slot lies above the claimable slots; `2` is a missing `[ports]` table or a bare `mws ports <arg>` whose arg is neither a subcommand nor a working copy (a mistyped subcommand); and `4` is a copy that does not exist when named after a subcommand (`mws ports show <copy>`). `mws env diff` exits `1` unless every file is `same`. A malformed lease fails every render of that copy with `1`, and `env stage` and `env diff` refuse it; `mws ports claim <copy> --slot N` overwrites it and `mws ports release <copy>` (or `mws rm`) drops it.
+
+Every render of a copy that holds a slot (`env sync`, `clone`, `include`, `restore`, `ports claim`) first rewrites its lease from the current `[ports]` and `[vars]` tables, so an edit to either reaches the lease on the next `mws env sync`.
 
 ### Port examples
 

@@ -65,6 +65,24 @@ func TestRmPurgeJSONSaysPurgedWithoutAnEntry(t *testing.T) {
 	}
 }
 
+func TestRmPurgeJSONNamesTheReleasedSlot(t *testing.T) {
+	f := seedWtWorkspace(t)
+	f.withPortTemplate(t)
+	mustMWS(t, f.meta, "ports", "claim", "c", "--slot", "2", "--no-setup")
+
+	var dry rmJSON
+	decodeJSON(t, mustMWS(t, f.meta, "rm", "c", "--purge", "--dry-run", "--json"), &dry)
+	if want := (rmJSON{DryRun: true, Copy: "c", Path: f.copy, Purged: true, ReleasedSlot: 2}); dry != want {
+		t.Errorf("rm --purge --dry-run --json = %+v, want %+v", dry, want)
+	}
+
+	var got rmJSON
+	decodeJSON(t, mustMWS(t, f.meta, "rm", "c", "--purge", "--yes", "--json"), &got)
+	if want := (rmJSON{Copy: "c", Path: f.copy, Purged: true, ReleasedSlot: 2}); got != want {
+		t.Errorf("rm --purge --json = %+v, want %+v", got, want)
+	}
+}
+
 func TestRmDryRunJSONChangesNothing(t *testing.T) {
 	f := seedWtWorkspace(t)
 	f.withPortTemplate(t)

@@ -33,7 +33,7 @@ func runPath(o output, name string) error {
 	if err != nil {
 		return err
 	}
-	copyPath, err := portsCopy(ws, name, "mws path <copy>")
+	copyPath, err := resolveCopy(ws, name, "mws path <copy>")
 	if err != nil {
 		return o.fail(err)
 	}

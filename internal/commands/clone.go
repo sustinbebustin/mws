@@ -264,7 +264,7 @@ func cloneCopy(ctx context.Context, r Reporter, ws *project.Workspace, cfg *conf
 	if req.ports {
 		var ch leaseChange
 		if ch, claimErr = claimLease(r, ws, wc, slotClaim{}); claimErr == nil {
-			r.OK(fmt.Sprintf("%s: %s -> %s", name, slotLabel(ch.previous), slotLabel(ch.slot)))
+			r.OK(fmt.Sprintf("%s: %s -> %s", name, previousLabel(ch.previous), slotLabel(ch.slot)))
 		}
 	}
 	wc.renderEnv(r, false)

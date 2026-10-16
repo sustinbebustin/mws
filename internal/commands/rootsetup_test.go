@@ -3,6 +3,7 @@ package commands
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -224,6 +225,47 @@ func TestEnvSyncLeavesAnEditedWorktreeFileAndWarns(t *testing.T) {
 	}
 	if got := readFile(t, filepath.Join(wt, ".mcp.json")); got != `{"port":3020}` {
 		t.Errorf("the other carried file was not re-rendered: %q", got)
+	}
+}
+
+func TestAFailedRootSetupShowsInTheJSONResult(t *testing.T) {
+	f := seedEnvWorkspace(t)
+	f.withFreePort(t)
+	cfg, err := config.Load(f.meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Setup = []config.SetupCommand{{Cmd: "exit 7"}}
+	if err := config.Save(f.meta, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, args := range [][]string{
+		{"env", "sync", "a", "--setup", "--json"},
+		{"ports", "claim", "a", "--setup", "--json"},
+	} {
+		t.Run(strings.Join(args[:2], " "), func(t *testing.T) {
+			res := runMWS(t, f.meta, args...)
+			if res.code != 1 {
+				t.Fatalf("exit %d, want 1\nstderr: %s", res.code, res.stderr)
+			}
+			var out struct {
+				SetupError string `json:"setup_error"`
+				Copies     []struct {
+					SetupError string `json:"setup_error"`
+				} `json:"copies"`
+			}
+			if err := json.Unmarshal([]byte(res.stdout), &out); err != nil {
+				t.Fatalf("stdout is not one JSON object: %v\n%s", err, res.stdout)
+			}
+			got := out.SetupError
+			if len(out.Copies) == 1 {
+				got = out.Copies[0].SetupError
+			}
+			if !strings.Contains(got, "exit 7") {
+				t.Errorf("setup_error = %q, want it to name the failed command\n%s", got, res.stdout)
+			}
+		})
 	}
 }
 

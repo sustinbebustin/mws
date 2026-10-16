@@ -36,6 +36,25 @@ func TestCopyCommandsFromMetaRootWithoutCopyAreUsageErrors(t *testing.T) {
 	}
 }
 
+func TestCopyCommandsExitFourForAnUnknownCopyAndTwoForAnInvalidName(t *testing.T) {
+	f := seedEnvWorkspace(t)
+	for _, args := range [][]string{
+		{"env", "sync"},
+		{"env", "diff"},
+		{"include", "extra"},
+		{"ports", "show"},
+		{"path"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			res := runMWS(t, f.meta, append(args, "nope")...)
+			if res.code != 4 || !strings.Contains(res.stderr, `"nope"`) {
+				t.Errorf("unknown copy: exit %d, want 4 naming it\nstderr: %s", res.code, res.stderr)
+			}
+			assertUsage(t, runMWS(t, f.meta, append(args, ".mws")...), ".mws")
+		})
+	}
+}
+
 func TestCopyCommandsNameTheCopyArgumentInUsage(t *testing.T) {
 	dir := t.TempDir()
 	for cmd, use := range map[string]string{

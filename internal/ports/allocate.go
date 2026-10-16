@@ -2,7 +2,6 @@ package ports
 
 import (
 	"fmt"
-	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -73,19 +72,6 @@ func (e *ExhaustedError) Error() string {
 	return msg + "; release a slot with `mws ports release <copy>`, or raise ports.slots in .mws.toml if it caps the count"
 }
 
-// ReadHoldings reads the lease of each working copy in copyDirs.
-func ReadHoldings(copyDirs []string) ([]Holding, error) {
-	held := make([]Holding, 0, len(copyDirs))
-	for _, dir := range copyDirs {
-		slot, err := ReadSlot(dir)
-		if err != nil {
-			return nil, err
-		}
-		held = append(held, Holding{Copy: filepath.Base(dir), Slot: slot})
-	}
-	return held, nil
-}
-
 // Conflicts lists every slot of at least 1 that more than one copy holds,
 // sorted by slot.
 func Conflicts(held []Holding) []Conflict {
@@ -136,12 +122,17 @@ func NextFree(held []Holding, limit int, busy Busy) (int, error) {
 
 // Claim decides the slot for the copy named copyName given every live
 // copy's holding: its current slot when it holds one, otherwise NextFree.
-// While any two leases conflict it refuses with a *ConflictError.
+// While any two leases conflict it refuses with a *ConflictError, and a held
+// slot above limit (left by lowering ports.slots or raising a base) with a
+// *SlotRangeError, since keeping it would exceed the collision-free range.
 func Claim(held []Holding, copyName string, limit int, busy Busy) (int, error) {
 	if conflicts := Conflicts(held); len(conflicts) > 0 {
 		return 0, &ConflictError{Conflicts: conflicts}
 	}
 	for _, h := range held {
+		if h.Copy == copyName && h.Slot > limit {
+			return 0, &SlotRangeError{Slot: h.Slot, Limit: limit}
+		}
 		if h.Copy == copyName && h.Slot > 0 {
 			return h.Slot, nil
 		}

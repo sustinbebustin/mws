@@ -168,6 +168,128 @@ func TestPortsClaimDryRunChangesNothing(t *testing.T) {
 	}
 }
 
+// badLease is a Port lease ports.ReadSlot cannot read a slot from.
+const badLease = "MWS_SLOT=x\n"
+
+func TestPortsClaimSlotRewritesTheCopysOwnUnreadableLease(t *testing.T) {
+	f := seedEnvWorkspace(t)
+	f.withFreePort(t)
+	writeFileAll(t, ports.LeasePath(f.copy("a")), badLease)
+
+	res := mustPorts(t, f.meta, "claim", "a", "--slot", "2", "--json")
+	if got := slotOf(t, f.copy("a")); got != 2 {
+		t.Fatalf("claim --slot 2 over an unreadable lease left a on slot %d, want 2", got)
+	}
+	var out struct {
+		Slot         int  `json:"slot"`
+		PreviousSlot *int `json:"previous_slot"`
+	}
+	if err := json.Unmarshal([]byte(res.stdout), &out); err != nil {
+		t.Fatalf("stdout is not one JSON object: %v\n%s", err, res.stdout)
+	}
+	if out.Slot != 2 || out.PreviousSlot != nil {
+		t.Errorf("claim --json = slot %d, previous_slot %v; want 2 and null for the unreadable lease", out.Slot, out.PreviousSlot)
+	}
+}
+
+func TestPortsReleaseDropsAnUnreadableLease(t *testing.T) {
+	f := seedEnvWorkspace(t)
+	f.withFreePort(t)
+	writeFileAll(t, ports.LeasePath(f.copy("a")), badLease)
+
+	mustPorts(t, f.meta, "release", "a")
+	if fileExists(ports.LeasePath(f.copy("a"))) {
+		t.Fatal("release kept the unreadable lease")
+	}
+}
+
+func TestPortsClaimRefusesWhileAnotherCopysLeaseIsUnreadable(t *testing.T) {
+	f := seedEnvWorkspace(t)
+	f.withFreePort(t)
+	bad := ports.LeasePath(f.copy("b"))
+	writeFileAll(t, bad, badLease)
+
+	res := runMWS(t, f.meta, "ports", "claim", "a")
+	if res.code != 3 {
+		t.Fatalf("claim with b's lease unreadable: exit %d, want 3\nstderr: %s", res.code, res.stderr)
+	}
+	for _, want := range []string{bad, "delete it or run `mws ports release b`"} {
+		if !strings.Contains(res.stderr, want) {
+			t.Errorf("stderr lacks %q:\n%s", want, res.stderr)
+		}
+	}
+	if got := slotOf(t, f.copy("a")); got != 0 {
+		t.Errorf("refused claim gave a slot %d", got)
+	}
+}
+
+func TestEnvSyncRewritesAHeldLeaseFromTheCurrentConfig(t *testing.T) {
+	f := seedEnvWorkspace(t)
+	base := f.withFreePort(t)
+	mustPorts(t, f.meta, "claim", "a", "--slot", "2")
+	cfg, err := config.Load(f.meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Vars = map[string]string{"SITE_URL": "http://localhost:${PORT}"}
+	cfg.Ports.Port[0].Base = base + 1
+	if err := config.Save(f.meta, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	if res := runMWS(t, f.meta, "env", "sync", "a"); res.code != 0 {
+		t.Fatalf("env sync: exit %d\nstderr: %s", res.code, res.stderr)
+	}
+	port := strconv.Itoa(base + 1 + 20)
+	lease := readFile(t, ports.LeasePath(f.copy("a")))
+	for _, want := range []string{"MWS_SLOT=2\n", "PORT=" + port + "\n", "SITE_URL=http://localhost:" + port + "\n"} {
+		if !strings.Contains(lease, want) {
+			t.Errorf("lease after env sync lacks %q:\n%s", want, lease)
+		}
+	}
+}
+
+func TestPortsFlagsAndRefusesAHeldSlotAboveTheLimit(t *testing.T) {
+	f := seedEnvWorkspace(t)
+	f.withFreePort(t)
+	mustPorts(t, f.meta, "claim", "a", "--slot", "3")
+	cfg, err := config.Load(f.meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Ports.Slots = new(int)
+	*cfg.Ports.Slots = 2
+	if err := config.Save(f.meta, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	res := mustPorts(t, f.meta, "ls")
+	if want := "a  slot 3  out of range: claimable slots are 1..2\n"; !strings.Contains(res.stdout, want) {
+		t.Errorf("ls stdout lacks %q:\n%s", want, res.stdout)
+	}
+	res = mustPorts(t, f.meta, "ls", "--json")
+	var out struct {
+		Copies []struct {
+			Copy       string `json:"copy"`
+			OutOfRange bool   `json:"out_of_range"`
+		} `json:"copies"`
+	}
+	if err := json.Unmarshal([]byte(res.stdout), &out); err != nil {
+		t.Fatalf("stdout is not one JSON object: %v\n%s", err, res.stdout)
+	}
+	if len(out.Copies) != 2 || !out.Copies[0].OutOfRange || out.Copies[1].OutOfRange {
+		t.Errorf("copies = %+v, want only a out of range", out.Copies)
+	}
+
+	res = runMWS(t, f.meta, "ports", "claim", "a")
+	if res.code != 3 || !strings.Contains(res.stderr, "--slot N") {
+		t.Fatalf("re-claim of slot 3 above limit 2: exit %d, want 3 naming --slot\nstderr: %s", res.code, res.stderr)
+	}
+	if got := slotOf(t, f.copy("a")); got != 3 {
+		t.Errorf("refused claim moved a to slot %d", got)
+	}
+}
+
 func TestPortsReleaseOnTheDefaultsSaysSo(t *testing.T) {
 	f := seedEnvWorkspace(t)
 	f.withFreePort(t)

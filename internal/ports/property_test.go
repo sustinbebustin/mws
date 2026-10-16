@@ -46,9 +46,9 @@ func (m *leaseMachine) holdings(t *rapid.T) []Holding {
 	for _, n := range m.liveNames() {
 		dirs = append(dirs, m.copyDir(n))
 	}
-	held, err := ReadHoldings(dirs)
+	held, err := readHoldings(dirs)
 	if err != nil {
-		t.Fatalf("ReadHoldings: %v", err)
+		t.Fatalf("readHoldings: %v", err)
 	}
 	return held
 }

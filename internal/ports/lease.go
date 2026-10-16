@@ -28,7 +28,9 @@ type LeaseError struct {
 }
 
 func (e *LeaseError) Error() string {
-	return fmt.Sprintf("port lease %s: %s; run `mws ports claim --slot N` to rewrite it, or delete it to put the copy on the default ports", e.Path, e.Reason)
+	copyName := filepath.Base(filepath.Dir(e.Path))
+	return fmt.Sprintf("port lease %s: %s; rewrite it with `mws ports claim %s --slot N`, or delete it or run `mws ports release %s` to put the copy on the default ports",
+		e.Path, e.Reason, copyName, copyName)
 }
 
 // LeasePath is the lease file of the working copy at copyDir.

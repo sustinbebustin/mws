@@ -313,6 +313,17 @@ Each of those becomes a line of `.mws.toml` or a line in a staged source.
   `supabase stop` and start on `main`). There is no slot-0 special case in
   mws or in the config; a bare project id can be kept only by writing it
   without `${MWS_COPY_SLUG}`, which would then be shared by every copy.
+- **Amended: the lease follows the config.** Every render of a copy that
+  holds a slot rewrites its lease from the current `[ports]` and `[vars]`
+  under the meta-root lock, so an edit to either reaches the lease (and the
+  shell, `just` and direnv) on the next `mws env sync`. `Config.Validate`
+  requires at least slot 1 to be claimable. A copy left above the limit by a
+  later edit is flagged `out of range` by `mws ports ls` and refused (exit 3)
+  by a claim without `--slot`. An unreadable lease is overwritten by `mws
+  ports claim <copy> --slot N`, dropped by `mws ports release` and `mws rm`
+  (with `previous_slot: null` under `--json`), and refuses (exit 3) a claim
+  for any other copy, since the slot it holds is unknown and could be handed
+  out twice.
 
 ### Example: a Next.js + Supabase monorepo
 

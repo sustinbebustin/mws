@@ -34,7 +34,8 @@ Every subcommand is non-interactive. Results go to stdout, progress to stderr.
 --json prints one JSON object, or {"error": {"code", "message"}} on failure.
 
 Exit codes: 0 ok, 1 failure, 2 usage, 3 refused (a slot another copy holds,
-or conflicting leases), 4 no working copy by that name.`
+conflicting leases, or another copy's unreadable lease), 4 no working copy by
+that name.`
 
 func newPortsCmd() *cobra.Command {
 	var jsonOut, export bool
@@ -164,11 +165,13 @@ func newPortsLsCmd(jsonOut *bool) *cobra.Command {
 		Short: "List every working copy's Port slot and the next free slot",
 		Long: `ls prints one line per live working copy: "default" for a copy on the
 default ports, "slot N" for one holding a lease, flagged "conflict: <copies>"
-when two or more leases name the same slot, and a copy whose lease mws cannot
-read as "invalid lease". The last line names the next free slot, the one a
-claim without --slot would take if no listener holds its ports.
+when two or more leases name the same slot, flagged "out of range" when the
+slot lies above the claimable slots of the current [ports] table, and a copy
+whose lease mws cannot read as "invalid lease". The last line names the next
+free slot, the one a claim without --slot would take if no listener holds its
+ports.
 
---json prints {"copies": [{"copy", "path", "slot", "conflict", "error"}],
+--json prints {"copies": [{"copy", "path", "slot", "conflict", "out_of_range", "error"}],
 "conflicts": [{"slot", "copies"}], "next_free"}, with next_free null when
 .mws.toml has no [ports] table or every slot is held.`,
 		Example: `  mws ports ls
@@ -181,13 +184,15 @@ claim without --slot would take if no listener holds its ports.
 }
 
 // portsLsCopy is one working copy in `ports ls`. Error is set, and Slot is
-// 0, when its lease is unreadable.
+// 0, when its lease is unreadable. OutOfRange is set when its slot lies above
+// the claimable slots of the current [ports] table.
 type portsLsCopy struct {
-	Copy     string `json:"copy"`
-	Path     string `json:"path"`
-	Slot     int    `json:"slot"`
-	Conflict bool   `json:"conflict"`
-	Error    string `json:"error,omitempty"`
+	Copy       string `json:"copy"`
+	Path       string `json:"path"`
+	Slot       int    `json:"slot"`
+	Conflict   bool   `json:"conflict"`
+	OutOfRange bool   `json:"out_of_range"`
+	Error      string `json:"error,omitempty"`
 }
 
 type portsConflictJSON struct {
@@ -233,11 +238,15 @@ func runPortsLs(o output) error {
 	}
 	var nextFree *int
 	nextNote := "none: .mws.toml has no [ports] table"
-	if policy, ok := cfg.PortPolicy(); ok {
+	policy, hasPorts := cfg.PortPolicy()
+	if hasPorts {
 		if slot, err := ports.NextFree(held, policy.Limit, nil); err == nil {
 			nextFree = &slot
 		} else {
 			nextNote = fmt.Sprintf("none: all %d slots are held", policy.Limit)
+		}
+		for i := range rows {
+			rows[i].OutOfRange = rows[i].Slot > policy.Limit
 		}
 	}
 	return o.result(portsLs{Copies: rows, Conflicts: conflictsJSON, NextFree: nextFree}, func(w io.Writer) error {
@@ -247,11 +256,14 @@ func runPortsLs(o output) error {
 		}
 		for _, row := range rows {
 			state := slotLabel(row.Slot)
-			switch {
-			case row.Error != "":
+			if row.Error != "" {
 				state = invalidLease
-			case row.Conflict:
+			}
+			if row.Conflict {
 				state += "  conflict: " + strings.Join(inConflict[row.Copy], ", ")
+			}
+			if row.OutOfRange {
+				state += fmt.Sprintf("  out of range: claimable slots are 1..%d", policy.Limit)
 			}
 			if _, err := fmt.Fprintf(w, "%-*s  %s\n", width, row.Copy, state); err != nil {
 				return err
@@ -334,12 +346,14 @@ slot whose ports have a listener right now (with a warning), writes its lease
 under a lock on the meta root, and re-renders the copy at that slot: its env
 files, its [[renders]] targets and its worktrees' carried files, then the root
 [[setup]] commands. A copy that already holds a slot keeps it and is
-re-rendered, so a retry is safe.
+re-rendered, so a retry is safe; one whose slot lies above the claimable slots
+(after ports.slots was lowered, say) is refused (exit 3) until --slot moves it.
 
---slot N takes or moves to slot N without probing for listeners. claim refuses
-(exit 3) a slot another live copy holds, and any claim without --slot while
-two copies' leases name one slot; --slot settles such a conflict by moving one
-of them.
+--slot N takes or moves to slot N without probing for listeners, and
+overwrites the copy's own lease even when mws cannot read it. claim refuses
+(exit 3) a slot another live copy holds, any claim while another copy's lease
+is unreadable, and any claim without --slot while two copies' leases name one
+slot; --slot settles such a conflict by moving one of them.
 
 --setup runs the root [[setup]] commands without prompting and --no-setup
 skips them; without a terminal one of the two is required when [[setup]] is
@@ -347,8 +361,9 @@ configured. --dry-run prints "would claim slot N for <copy>" and one
 "would copy <source> -> <target>" line per file, and changes nothing.
 
 Prints "<copy> slot N" on stdout. --json prints
-{"dry_run", "copy", "path", "slot", "previous_slot", "files": [...], "error"}
-with files as in ` + "`mws env sync --json`" + `.`,
+{"dry_run", "copy", "path", "slot", "previous_slot", "files": [...], "error", "setup_error"}
+with files, error and setup_error as in ` + "`mws env sync --json`" + `; previous_slot
+is null when the copy's old lease was unreadable.`,
 		Example: `  mws ports claim
   mws ports claim feature-x --slot 3 --no-setup
   mws ports claim --dry-run --json`,
@@ -380,7 +395,8 @@ func newPortsReleaseCmd(jsonOut *bool) *cobra.Command {
 		Long: `release drops the working copy's Port lease and re-renders the copy at the
 default ports (slot 0), as claim does at a slot, then runs the root [[setup]]
 commands. The rendered files are then byte for byte those of a fresh clone. A
-copy already on the default ports is left alone and release exits 0.
+copy already on the default ports is left alone and release exits 0. A lease
+mws cannot read is dropped all the same, with a warning.
 
 --setup, --no-setup and --dry-run work as for claim; --dry-run prints
 "would release slot N from <copy>" and the "would copy" lines.
@@ -404,22 +420,6 @@ with slot 0.`,
 	return cmd
 }
 
-// portsCopy resolves the [copy] argument of a ports subcommand: a name with
-// no working copy is NotFound (exit 4).
-func portsCopy(ws *project.Workspace, name, invocation string) (string, error) {
-	p, err := resolveCopy(ws, name, invocation)
-	switch {
-	case err == nil:
-		return p, nil
-	case errors.Is(err, fs.ErrNotExist):
-		return "", clierr.NotFoundf("no working copy %q under %s; `mws ls` lists the copies", name, ws.CopiesRoot())
-	case errors.As(err, new(*clierr.Error)):
-		return "", err
-	default:
-		return "", clierr.Failuref("%w", err)
-	}
-}
-
 // portPolicy is the workspace's port policy, or a usage error when
 // .mws.toml declares no [ports] table.
 func portPolicy(cfg *config.Config, ws *project.Workspace) (config.PortPolicy, error) {
@@ -439,9 +439,10 @@ type portsChange struct {
 	Copy         string          `json:"copy"`
 	Path         string          `json:"path"`
 	Slot         int             `json:"slot"`
-	PreviousSlot int             `json:"previous_slot"`
+	PreviousSlot *int            `json:"previous_slot"`
 	Files        []envFileResult `json:"files"`
 	Error        string          `json:"error,omitempty"`
+	SetupError   string          `json:"setup_error,omitempty"`
 }
 
 // portsShow is the result of `ports show`: the copy's slot and its export
@@ -490,10 +491,21 @@ type leaseRequest struct {
 
 // leaseChange is what claim or release did, or under --dry-run would do, to a
 // copy's Port lease: the slot it held before and the one it is on after (0
-// for the default ports), with the change's "would" line.
+// for the default ports), with the change's "would" line. previous is nil
+// when the copy's lease was unreadable, so the slot it held is unknown.
 type leaseChange struct {
-	previous, slot int
-	plan           string
+	previous *int
+	slot     int
+	plan     string
+}
+
+// previousLabel names the slot a copy held before a lease change as
+// slotLabel does, or says its lease was unreadable.
+func previousLabel(previous *int) string {
+	if previous == nil {
+		return "an unreadable lease"
+	}
+	return slotLabel(*previous)
 }
 
 // portsTarget locates the workspace and resolves the [copy] argument of a
@@ -504,7 +516,7 @@ func portsTarget(o output, name, usage string) (*project.Workspace, workingCopy,
 	if err != nil {
 		return nil, workingCopy{}, err
 	}
-	copyPath, err := portsCopy(ws, name, usage)
+	copyPath, err := resolveCopy(ws, name, usage)
 	if err != nil {
 		return nil, workingCopy{}, o.fail(err)
 	}
@@ -526,7 +538,7 @@ func changeLease(ctx context.Context, o output, c workingCopy, req leaseRequest,
 		return o.fail(err)
 	}
 	if mode != renderPreview {
-		r.OK(fmt.Sprintf("%s: %s -> %s", c.name(), slotLabel(change.previous), slotLabel(change.slot)))
+		r.OK(fmt.Sprintf("%s: %s -> %s", c.name(), previousLabel(change.previous), slotLabel(change.slot)))
 	}
 	return finishPortsChange(ctx, o, r, c, mode, change, req.invocation)
 }
@@ -574,22 +586,40 @@ func claimLease(r Reporter, ws *project.Workspace, c workingCopy, sc slotClaim) 
 	if err != nil {
 		return leaseChange{}, clierr.Failuref("list working copies: %w; no lease was written", err)
 	}
-	held, err := ports.ReadHoldings(copies)
-	if err != nil {
-		return leaseChange{}, clierr.Failuref("%w; no lease was written", err)
-	}
 	name := c.name()
-	var ch leaseChange
-	for _, h := range held {
-		if h.Copy == name {
-			ch.previous = h.Slot
+	ch := leaseChange{previous: new(int)}
+	held := make([]ports.Holding, 0, len(copies))
+	for _, dir := range copies {
+		h := ports.Holding{Copy: filepath.Base(dir)}
+		h.Slot, err = ports.ReadSlot(dir)
+		var bad *ports.LeaseError
+		switch {
+		case errors.As(err, &bad) && h.Copy == name && sc.want != nil:
+			// --slot names the slot, so the copy's own unreadable lease is
+			// simply overwritten; the slot it held is unknown.
+			r.Warn(fmt.Sprintf("%v; --slot %d replaces it", err, *sc.want))
+			ch.previous = nil
+			continue
+		case errors.As(err, &bad) && h.Copy != name:
+			return leaseChange{}, clierr.Refusedf("%w; no lease was written, since a slot it may hold could be handed out twice", err)
+		case err != nil:
+			return leaseChange{}, clierr.Failuref("%w; no lease was written", err)
 		}
+		if h.Copy == name {
+			ch.previous = &h.Slot
+		}
+		held = append(held, h)
 	}
 	if sc.want != nil {
 		ch.slot = *sc.want
 		err = ports.ClaimSlot(held, name, ch.slot, policy.Limit)
 	} else {
 		ch.slot, err = ports.Claim(held, name, policy.Limit, listenerProbe(r, policy))
+		var outOfRange *ports.SlotRangeError
+		if errors.As(err, &outOfRange) {
+			return leaseChange{}, clierr.Refusedf("%s holds slot %d, above the claimable slots 1..%d under the current [ports] table; move it with `mws ports claim %s --slot N` (N in 1..%d) or put it on the default ports with `mws ports release %s`; nothing was changed",
+				name, outOfRange.Slot, outOfRange.Limit, name, outOfRange.Limit, name)
+		}
 	}
 	if err != nil {
 		return leaseChange{}, claimError(err)
@@ -599,7 +629,7 @@ func claimLease(r Reporter, ws *project.Workspace, c workingCopy, sc slotClaim) 
 		return ch, nil
 	}
 	if err := ports.WriteLease(c.path, ports.NewExports(c.cfg, c.metaRoot, name, ch.slot)); err != nil {
-		return leaseChange{}, clierr.Failuref("%w; the copy is still on %s", err, slotLabel(ch.previous))
+		return leaseChange{}, clierr.Failuref("%w; the copy is still on %s", err, previousLabel(ch.previous))
 	}
 	return ch, nil
 }
@@ -664,13 +694,21 @@ func runPortsRelease(ctx context.Context, o output, name string, req leaseReques
 	if err != nil {
 		return err
 	}
+	// An unreadable lease is released like any other: the slot it held is
+	// unknown, and dropping it is what puts the copy back on the defaults.
 	held, err := ports.ReadSlot(c.path)
-	if err != nil {
+	var previous *int
+	switch {
+	case errors.As(err, new(*ports.LeaseError)):
+		o.reporter().Warn(fmt.Sprintf("%v; release drops it", err))
+	case err != nil:
 		return o.fail(clierr.Failuref("%w", err))
+	default:
+		previous = &held
 	}
-	if held == 0 {
+	if previous != nil && held == 0 {
 		o.reporter().Info(fmt.Sprintf("%s is already on the default ports; nothing to release", c.name()))
-		return o.result(portsChange{DryRun: req.dryRun, Copy: c.name(), Path: c.path, Files: []envFileResult{}}, func(w io.Writer) error {
+		return o.result(portsChange{DryRun: req.dryRun, Copy: c.name(), Path: c.path, PreviousSlot: previous, Files: []envFileResult{}}, func(w io.Writer) error {
 			if req.dryRun {
 				return nil
 			}
@@ -681,7 +719,7 @@ func runPortsRelease(ctx context.Context, o output, name string, req leaseReques
 	req.invocation = "mws ports release " + c.name()
 	return changeLease(ctx, o, c, req, func(_ Reporter, preview bool) (leaseChange, error) {
 		if preview {
-			return leaseChange{previous: held, plan: fmt.Sprintf("would release slot %d from %s", held, c.name())}, nil
+			return leaseChange{previous: previous, plan: fmt.Sprintf("would release %s from %s", previousLabel(previous), c.name())}, nil
 		}
 		previous, err := releaseLease(c.metaRoot, c.path)
 		return leaseChange{previous: previous}, err
@@ -690,19 +728,23 @@ func runPortsRelease(ctx context.Context, o output, name string, req leaseReques
 
 // releaseLease removes the Port lease of the working copy at copyPath under
 // the meta-root lock, putting it on the default ports, and returns the slot
-// it held. It renders nothing; the caller re-renders the copy.
-func releaseLease(metaRoot, copyPath string) (int, error) {
+// it held: nil when the lease was unreadable, which it removes all the same.
+// It renders nothing; the caller re-renders the copy.
+func releaseLease(metaRoot, copyPath string) (*int, error) {
 	unlock, err := ports.LockMeta(metaRoot)
 	if err != nil {
-		return 0, clierr.Failuref("%w; the lease was kept", err)
+		return nil, clierr.Failuref("%w; the lease was kept", err)
 	}
 	defer unlock()
-	previous, err := ports.ReadSlot(copyPath)
-	if err != nil {
-		return 0, clierr.Failuref("%w", err)
+	slot, err := ports.ReadSlot(copyPath)
+	previous := &slot
+	if errors.As(err, new(*ports.LeaseError)) {
+		previous = nil
+	} else if err != nil {
+		return nil, clierr.Failuref("%w; the lease was kept", err)
 	}
 	if err := ports.RemoveLease(copyPath); err != nil {
-		return 0, clierr.Failuref("%w; the copy still holds %s", err, slotLabel(previous))
+		return nil, clierr.Failuref("%w; the copy still holds %s", err, previousLabel(previous))
 	}
 	return previous, nil
 }
@@ -713,7 +755,7 @@ func releaseLease(metaRoot, copyPath string) (int, error) {
 func finishPortsChange(ctx context.Context, o output, r Reporter, c workingCopy, mode renderMode, change leaseChange, invocation string) error {
 	cr, setupErr := c.render(ctx, r, mode, o.stderr)
 	dryRun := mode == renderPreview
-	res := portsChange{DryRun: dryRun, Copy: cr.Copy, Path: c.path, Slot: change.slot, PreviousSlot: change.previous, Files: cr.Files, Error: cr.Error}
+	res := portsChange{DryRun: dryRun, Copy: cr.Copy, Path: c.path, Slot: change.slot, PreviousSlot: change.previous, Files: cr.Files, Error: cr.Error, SetupError: cr.SetupError}
 	if err := o.result(res, func(w io.Writer) error {
 		if !dryRun {
 			_, err := fmt.Fprintf(w, "%s %s\n", res.Copy, slotLabel(change.slot))
