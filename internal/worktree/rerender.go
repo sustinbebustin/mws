@@ -24,7 +24,8 @@ import (
 // (or deleted) is left alone with a warning naming the worktree and the file.
 // A file the copy has but the worktree never got, and whose directory exists
 // in the worktree, is carried now; one the copy no longer has is removed from
-// the worktree while pristine. Every worktree is attempted; the error joins
+// the worktree while pristine, and only its hash dropped when the worktree
+// lacks it too. Every worktree is attempted; the error joins
 // the failures.
 func Rerender(r Reporter, copyPath string, policy config.WorktreePolicy, rels []string) error {
 	roots, err := Roots(copyPath, policy)
@@ -98,6 +99,10 @@ func rerenderFile(r Reporter, wtName, copyPath, root, rel string, hashes map[str
 		updated := hashes[rel] != h
 		hashes[rel] = h
 		return updated, nil
+	case srcGone && dstGone:
+		// Gone on both sides: nothing to carry or remove, only the hash.
+		delete(hashes, rel)
+		return true, nil
 	case dstGone:
 		r.Warn(fmt.Sprintf("worktree %s: %s was deleted since mws carried it, leaving it out; copy it from the working copy by hand if the worktree needs it", wtName, rel))
 		return false, nil

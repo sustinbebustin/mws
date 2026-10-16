@@ -135,6 +135,21 @@ func TestRerenderRemovesAPristineFileTheCopyNoLongerHas(t *testing.T) {
 	}
 }
 
+// After release, a lease the user already deleted from the worktree is gone
+// from both sides: there is nothing to warn about, only a stale hash to drop.
+func TestRerenderForgetsAFileGoneFromTheCopyAndTheWorktree(t *testing.T) {
+	f := newRerenderFixture(t, map[string]string{".mws-ports.env": sha("MWS_SLOT=2\n")})
+
+	r := f.rerender(t, ".mws-ports.env")
+
+	if _, ok := f.hashes(t)[".mws-ports.env"]; ok {
+		t.Error("marker still records a file neither side has")
+	}
+	if len(r.warn) != 0 {
+		t.Errorf("warnings = %q, want none", r.warn)
+	}
+}
+
 func TestRerenderLeavesAnEditedFileAndWarns(t *testing.T) {
 	f := newRerenderFixture(t, map[string]string{"frontend/.env": sha("PORT=3000\n")})
 	write(t, filepath.Join(f.copy, "frontend", ".env"), "PORT=3010\n")
