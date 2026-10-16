@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `mws clone`, `mws rm` and `mws restore` take `--json` and print one object (path, repos cloned, setup outcome and ports; trash entry and released slot; restored path and entry), or `{"error": {code, message}}` on failure. `mws path [copy]` prints a working copy's absolute path (exit `4` when there is none), with `--json`.
 - `mws env diff [copy|--all]` reports each env file as `same`, `differs`, `missing in copy` or `missing in staging`, exiting `0` only when all are the same.
 - `mws shell-init --install` adds the line that loads the shell wrapper to your rc file (`~/.zshrc` or `$ZDOTDIR/.zshrc`, `~/.bashrc`, `~/.config/fish/config.fish`), once; `mws shell-init --status` says whether the wrapper is active in this shell (exit 0) or what to run (exit 1). The shell argument defaults to the one `$SHELL` names.
 
