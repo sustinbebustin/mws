@@ -3,6 +3,7 @@ package config
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -37,6 +38,18 @@ type Config struct {
 	// Worktrees tunes `mws worktree`. An absent table means defaults; read it
 	// through WorktreePolicy rather than dereferencing here.
 	Worktrees *Worktrees `toml:"worktrees,omitempty"`
+	// Ports declares the named ports a working copy shifts when it holds a
+	// port slot (ADR-0015). Absent means no port slots; read it through
+	// PortPolicy rather than dereferencing here.
+	Ports *Ports `toml:"ports,omitempty"`
+	// Vars are derived strings exported with every port lease. A value may
+	// reference port variables and builtins as ${NAME}, never another var.
+	Vars map[string]string `toml:"vars,omitempty"`
+	// Renders lists harness files rendered per working copy instead of
+	// symlinked.
+	Renders []Render `toml:"renders,omitempty"`
+	// Setup lists commands run at the working copy root after every render.
+	Setup []SetupCommand `toml:"setup,omitempty"`
 }
 
 // Default worktree settings, applied when the `[worktrees]` table or one of
@@ -187,6 +200,11 @@ func Load(metaRoot string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", p, err)
 	}
+	return parse(p, data)
+}
+
+// parse decodes and validates config bytes read from path p.
+func parse(p string, data []byte) (*Config, error) {
 	var c Config
 	if err := toml.Unmarshal(data, &c); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", p, err)
@@ -195,6 +213,61 @@ func Load(metaRoot string) (*Config, error) {
 		return nil, fmt.Errorf("%s: %w", p, err)
 	}
 	return &c, nil
+}
+
+// AppendRepo appends a `[[repos]]` or `[[optional_repos]]` block for folder
+// and url to the end of <metaRoot>/.mws.toml, leaving every existing byte
+// (comments, layout, unknown keys) as it was. The appended file is parsed and
+// validated before anything is written, so on error the file is unchanged.
+// Callers decide whether to append with Config.Register first.
+func AppendRepo(metaRoot string, list RepoList, folder, url string) error {
+	p := Path(metaRoot)
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", p, err)
+	}
+	table := "repos"
+	if list == ListOptional {
+		table = "optional_repos"
+	}
+	var block strings.Builder
+	if len(data) > 0 && data[len(data)-1] != '\n' {
+		block.WriteString("\n")
+	}
+	fmt.Fprintf(&block, "\n[[%s]]\n  folder = %s\n  url    = %s\n", table, quote(folder), quote(url))
+	if _, err := parse(p, append(bytes.Clone(data), block.String()...)); err != nil {
+		return fmt.Errorf("cannot append a [[%s]] block for %q: the result is invalid: %w; %s is unchanged, fix it by hand and retry", table, folder, err, p)
+	}
+	f, err := os.OpenFile(p, os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", p, err)
+	}
+	if _, err := f.WriteString(block.String()); err != nil {
+		return errors.Join(fmt.Errorf("append to %s: %w; the file may hold a partial [[%s]] block at its end", p, err, table), f.Close())
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close %s: %w", p, err)
+	}
+	return nil
+}
+
+// quote renders s as a TOML basic string.
+func quote(s string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	for _, r := range s {
+		switch {
+		case r == '"' || r == '\\':
+			b.WriteByte('\\')
+			b.WriteRune(r)
+		case r < 0x20 || r == 0x7f:
+			fmt.Fprintf(&b, "\\u%04X", r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
 }
 
 // Validate checks config values that must be rejected at load time rather than
@@ -209,10 +282,24 @@ func (c *Config) Validate() error {
 			return err
 		}
 	}
-	return nil
+	exported := map[string]string{}
+	for _, b := range Builtins {
+		exported[b] = "the builtin " + b
+	}
+	if c.Ports != nil {
+		if err := c.Ports.validate(exported); err != nil {
+			return err
+		}
+	}
+	if err := validateVars(c.Vars, exported); err != nil {
+		return err
+	}
+	return validateRenders(c.Renders)
 }
 
-// Save writes the config to <metaRoot>/.mws.toml.
+// Save writes the config to <metaRoot>/.mws.toml by re-encoding it, which
+// drops comments and unknown keys. Only `mws init` uses it, when there is no
+// file to preserve; edits to an existing config append (see AppendRepo).
 func Save(metaRoot string, c *Config) error {
 	if err := os.MkdirAll(metaRoot, 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", metaRoot, err)

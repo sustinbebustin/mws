@@ -1,6 +1,7 @@
 package worktree
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/sustinbebustin/mws/internal/atomicfile"
 	"github.com/sustinbebustin/mws/internal/project"
 )
 
@@ -18,9 +20,10 @@ type Marker struct {
 	Name       string    `toml:"name"`
 	Created    time.Time `toml:"created"`
 	MWSVersion string    `toml:"mws_version"`
-	// Copied maps each root file copied from the copy at creation to the
-	// SHA-256 of its content, so removal can tell an edited copy from a
-	// pristine one.
+	// Copied maps each file mws carried from the copy (root files by name,
+	// env targets by slash-separated path such as "frontend/.env") to the
+	// SHA-256 of the content mws last wrote, so removal and a re-render can
+	// tell an edited copy from a pristine one.
 	Copied map[string]string `toml:"copied"`
 }
 
@@ -33,6 +36,15 @@ func writeMarker(root string, m Marker) error {
 	}
 	encErr := toml.NewEncoder(f).Encode(m)
 	return errors.Join(encErr, f.Close())
+}
+
+// updateMarker atomically replaces the marker file of the worktree at root.
+func updateMarker(root string, m Marker) error {
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(m); err != nil {
+		return err
+	}
+	return atomicfile.Write(filepath.Join(root, project.WorktreeMarkerFileName), buf.Bytes(), 0o644)
 }
 
 // readMarker decodes the marker file of the worktree at root.

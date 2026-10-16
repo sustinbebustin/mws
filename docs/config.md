@@ -38,41 +38,64 @@ working_copies_dir  = "<segment>" # optional; single path segment under the meta
 
   [[worktrees.setup]]             # optional; zero or more
     cmd = "<shell string>"        # passed to `sh -c`, cwd = the worktree root
+
+[ports]                           # optional; whole table may be omitted
+  stride = 10                     # slot k moves every port by k * stride
+  slots  = 50                     # optional cap on the highest claimable slot
+
+  [[ports.port]]                  # one or more when [ports] is present
+    name = "<identifier>"         # exported as MWS_PORT_<NAME>
+    base = 54321                  # port at slot 0 (the default ports); 1..65535
+    var  = "<identifier>"         # optional alias exported alongside
+
+[vars]                            # optional; derived strings
+  <NAME> = "<string with ${PORT_VAR} or ${MWS_BUILTIN}>"
+
+[[renders]]                       # optional; zero or more
+  source = "<path>.render"        # under <meta>/.mws/
+  target = "<file name>"          # at the working copy root
+
+[[setup]]                         # optional; zero or more
+  cmd = "<shell string>"          # passed to `sh -c`, cwd = the working copy root
 ```
 
 | Top-level key        | Type              | Required | Notes |
 |----------------------|-------------------|----------|-------|
-| `project_name`       | string            | yes      | Used by `mws init` skeleton templates and surfaced in `mws list`. |
+| `project_name`       | string            | yes      | Used by `mws init` skeleton templates. |
 | `description`        | string            | no       | Free-form. Empty by default. |
 | `working_copies_dir` | string            | no       | Single path-safe segment validated by the same rules as `project_name` (letters, digits, `-`, `_`, `.`; no leading `.` or `-`; no `/`). When set, `mws clone` and `mws init` place working copies at `<meta>/<working_copies_dir>/<name>/` instead of `<meta>/<name>/`. Empty (the default) keeps working copies at the meta root. |
 | `repos`              | array of tables   | no       | Each entry adds one **Native repo** to every **Working copy**. |
 | `optional_repos`     | array of tables   | no       | On-demand **Native repos** that are *not* cloned into every copy. Pulled into a specific copy via the `mws clone` prompt, `mws clone --with <folder>`, or `mws include <folder>`. Same shape as `[[repos]]`. |
 | `trash`              | table             | no       | Tunes the soft-delete behaviour of `mws rm`. See [`[trash]`](#trash). Omit the table for the defaults. |
 | `worktrees`          | table             | no       | Tunes `mws worktree`. See [`[worktrees]`](#worktrees). Omit the table for the defaults. |
+| `ports`              | table             | no       | Named ports each working copy shifts by its **Port slot**. See [`[ports]`](#ports). |
+| `vars`               | table             | no       | Derived strings exported with the ports. See [`[vars]`](#vars). |
+| `renders`            | array of tables   | no       | Harness files rendered per working copy. See [`[[renders]]`](#renders). |
+| `setup`              | array of tables   | no       | Commands run at the working copy root after every render. See [`[[setup]]`](#setup). |
 
 ### `[[repos]]`
 
 | Key      | Type                | Required | Notes |
 |----------|---------------------|----------|-------|
 | `folder` | string              | yes      | Unique within the config. Determines the clone target: `<working-copy>/<folder>/`. |
-| `url`    | string              | yes      | Used by `git clone` when no peer working copy is available. `mws clone` prefers `git clone --local` from an existing peer's clone of the same repo and falls back to this URL. |
+| `url`    | string              | yes      | Passed to `git clone` by `mws clone`, `mws add-repo` and `mws include`; every working copy gets a fresh clone from this URL, never from a peer. |
 | `envs`   | array of tables     | no       | See [`[[repos.envs]]`](#reposenvs). Omitted when empty. |
 | `setup`  | array of tables     | no       | See [`[[repos.setup]]`](#repossetup). Omitted when empty. |
 
 ### `[[repos.envs]]`
 
-Maps a staged env file in `.envs/<folder>/` to a target inside the cloned repo. Materialised on `mws clone` (copy, not symlink) and re-pushed by `mws sync-env <copy>`. Captured into staging by `mws stage-env <copy>`.
+Maps a staged env file in `.envs/<folder>/` to a target inside the cloned repo. Rendered (a copy, not a symlink) on `mws clone`, `mws include` and `mws restore` and re-pushed by `mws env sync <copy>`: each `${VAR}` the copy exports is substituted at its port slot (slot 0 without a lease), every other byte, `$HOME` and `${lower}` included, is copied as is, and an unknown `${UPPER_CASE}` name stays and is reported as `[WARN]`. Captured into staging by `mws env stage <copy>`, which skips a source holding placeholders with a `[WARN]` unless `--force`; `mws env diff <copy>` compares the target with the rendered source. The same holds for `[[optional_repos.envs]]` of every optional repo present in the copy.
 
 | Key      | Type   | Required | Notes |
 |----------|--------|----------|-------|
 | `source` | string | yes      | Flat filename. Looked up at `<meta>/.envs/<folder>/<source>`. |
-| `target` | string | yes      | Path inside the repo working tree (relative to `<working-copy>/<folder>/`). Parent dirs are created on copy. |
+| `target` | string | yes      | Path inside the repo working tree (relative to `<working-copy>/<folder>/`). Parent dirs are created on copy. The target must be gitignored in the native repo: it is a per-copy file holding that copy's values and secrets, and mws does not edit the repo's ignore rules. |
 
 Design rationale and trade-offs: [ADR-0005](./adr/0005-env-staging-via-copy.md).
 
 ### `[[repos.setup]]`
 
-Shell commands run by `mws clone` against the cloned repo as the last step (after env copy succeeds for every repo). Each command runs via `sh -c <cmd>` with `cwd = <working-copy>/<folder>` and the user's `PATH` and environment inherited unchanged.
+Shell commands run by `mws clone` against the cloned repo as the last step (after env render succeeds for every repo). Each command runs via `sh -c <cmd>` with `cwd = <working-copy>/<folder>`, the user's `PATH` and environment inherited, and the copy's export set (`MWS_SLOT`, `MWS_PORT_<NAME>` and aliases, `[vars]`, the other builtins) added. `[[worktrees.setup]]` gets the same variables, from the worktree's working copy.
 
 | Key   | Type   | Required | Notes |
 |-------|--------|----------|-------|
@@ -94,7 +117,7 @@ Design rationale: [ADR-0006](./adr/0006-post-clone-setup-commands.md).
 An **Optional repo** registered for on-demand inclusion. It is *not* cloned by `mws clone` into every working copy; instead it is pulled into a specific copy when asked for:
 
 - During `mws clone`, when any `[[optional_repos]]` exist, a multiselect prompt offers them (defaulting to none). `mws clone --with <folder>` (repeatable) selects specific ones and `--no-optional` selects none, both without prompting; without a terminal one of them is required.
-- `mws include <folder> [working-copy]` clones one into an existing copy (the current copy by default).
+- `mws include <folder> [copy]` clones one into an existing copy (the current copy by default).
 
 Each entry uses the **same keys** as `[[repos]]` (`folder`, `url`, plus optional `[[optional_repos.envs]]` and `[[optional_repos.setup]]` tables). `folder` must be unique across both `[[repos]]` and `[[optional_repos]]` -- it maps to a single clone-target directory. Register entries with `mws add-repo --optional <url> [folder]`, which appends here without cloning into existing copies.
 
@@ -102,7 +125,7 @@ Design rationale: [ADR-0009](./adr/0009-optional-repos.md).
 
 ### `[trash]`
 
-`mws rm` does not delete a **Working copy**. It moves it into `<meta>/.trash/`, where `mws restore <name>` can bring it back and an automatic sweep purges it once it passes the retention window. Omit the table entirely for the defaults below.
+`mws rm` does not delete a **Working copy**. It moves it into `<meta>/.trash/`, where `mws restore <copy>` can bring it back and an automatic sweep purges it once it passes the retention window. Omit the table entirely for the defaults below.
 
 | Key              | Type | Required | Notes |
 |------------------|------|----------|-------|
@@ -160,26 +183,192 @@ error   {error:{code, message}}                  # code: usage | refused | not_f
 
 `base` in `new` is a full commit id (the branch tip for a reused branch) and is omitted for a reused worktree. A setup failure under `--json` prints the full result object plus `error` (`setup_failed`) and exits 1.
 
-Related behavior of the other commands: `mws list` appends `(+N worktrees)` to a copy; `mws rm <copy>` refuses while one of its worktrees has a live process and lists its worktrees in the confirmation; `mws restore` repairs the worktrees' git links; `mws relink` refreshes harness links in worktree roots; `mws trash prune|empty` prune stale meta worktree registrations; `mws sync-env` updates only the copy, never its worktrees.
+Related behavior of the other commands: `mws ls` appends `(+N worktrees)` to a copy; `mws rm <copy>` refuses while one of its worktrees has a live process and lists its worktrees in the confirmation; `mws restore` repairs the worktrees' git links; `mws relink` refreshes harness links in worktree roots; `mws trash prune|empty` prune stale meta worktree registrations; every render of a copy (`clone`, `include`, `restore`, `mws env sync`) also refreshes each of its worktrees' carried files (the lease, the env targets, the `[[renders]]` targets) whose content still matches the hash in `.mws-worktree.toml`, updates that hash, and leaves one edited in the worktree alone with a `[WARN]` naming the worktree and the file; `mws env stage` refuses inside a worktree.
 
 Design rationale: [ADR-0011](./adr/0011-worktrees-are-children-of-a-working-copy.md).
+
+### `[ports]`
+
+Declares the named ports of the workspace. A **Working copy** starts on the default ports (slot 0), where each port is its `base`. Holding a **Port slot** `k >= 1`, it owns `base + k * stride` for every port, recorded in its **Port lease**, `<copy>/.mws-ports.env`. Omit the table and the workspace has no port slots: no lease, no lock, nothing changes.
+
+| Key      | Type            | Required | Notes |
+|----------|-----------------|----------|-------|
+| `stride` | int             | no       | Distance between one slot and the next. Defaults to `10`; must be at least `1`. |
+| `slots`  | int             | no       | Caps the highest claimable slot; at least `1`. Defaults to the largest slot whose ports all stay at or below 65535. |
+| `port`   | array of tables | yes      | One or more `[[ports.port]]` entries, below. |
+
+`[[ports.port]]`:
+
+| Key    | Type   | Required | Notes |
+|--------|--------|----------|-------|
+| `name` | string | yes      | An identifier (letters, digits, `_`, not starting with a digit). Exported as `MWS_PORT_<NAME>`, upper-cased, so names must be unique ignoring case. |
+| `base` | int    | yes      | The port on the default ports, in `1..65535`. |
+| `var`  | string | no       | An identifier exported alongside `MWS_PORT_<NAME>` with the same value, for names a project already uses. Must not repeat another port's variable, alias or a builtin. |
+
+Every lease also exports four builtins: `MWS_SLOT`, `MWS_COPY` (the copy's directory name), `MWS_COPY_SLUG` (lower-cased, every character outside `[a-z0-9-]` replaced by `-`) and `MWS_META` (absolute meta root).
+
+Slot arithmetic is exact. Two ports whose bases are congruent modulo the stride meet at some pair of slots: bases `a < b` with `b - a = d * stride` mean slot `d` of the first is slot 0 of the second. Validation rejects such a pair unless the slot limit (`slots`, or the 65535 bound) stays below `d`. The highest claimable slot is the smaller of `slots` and the last slot whose ports all stay at or below 65535; validation requires it to be at least 1, so the highest base plus one stride must not exceed 65535. A copy whose slot lies above it after an edit (a lower `slots`, a higher base) is flagged `out of range` by `mws ports ls`, and `mws ports claim` refuses to keep it until `--slot N` moves it.
+
+### `[vars]`
+
+Derived strings exported with the ports, one line each for URLs, project ids and cookie names. Keys are identifiers that no port, alias or builtin already exports. A value may reference port variables (`${MWS_PORT_<NAME>}` or the alias) and the builtins as `${NAME}`, and nothing else: not another `[vars]` entry, since TOML tables are unordered. Any other `$` sequence (`$HOME`, `${a:-b}`) is literal text.
+
+### `[[renders]]`
+
+A harness file that needs per-copy values stays in the **Harness dir** under a `.render` name and is rendered to its target at the working copy root, with `${VAR}` placeholders substituted for the copy's slot. The source is still symlinked into every copy like any harness entry; the target is a regular per-copy file.
+
+| Key      | Type   | Required | Notes |
+|----------|--------|----------|-------|
+| `source` | string | yes      | Path relative to `<meta>/.mws/`, ending in `.render`. |
+| `target` | string | yes      | A single file name at the working copy root. Must not start with `.mws-` (reserved for mws markers) or repeat another entry's target. |
+
+### `[[setup]]`
+
+Root-level setup commands: each `cmd` runs via `sh -c` with cwd = the working copy root and the lease's variables in its environment, after every render, behind the same `--setup` / `--no-setup` choice as `[[repos.setup]]`. `direnv allow` is the motivating entry, since direnv refuses a changed `.envrc` until it is allowed again. `[[repos.setup]]` runs only when a repo is cloned, never on a render.
+
+| Key   | Type   | Required | Notes |
+|-------|--------|----------|-------|
+| `cmd` | string | yes      | Shell string. |
+
+### Command output
+
+Beyond the `mws wt` shapes [above](#worktrees), these commands print one JSON object under `--json` (see [ADR-0012](./adr/0012-headless-cli-contract.md)). A failure prints `{"error": {"code", "message"}}`, with `code` one of `usage`, `refused`, `not_found`, `failure`. A live working copy's name is under the key `copy`; a trash entry's `name` is the name it was trashed under.
+
+```text
+ls         {meta, copies:[{copy, path, current, ports, worktrees}]}   # ports: "default" | "slot N" | "invalid lease"
+path       {copy, path}
+clone      {copy, path, repos:[folder], setup, ports}                  # setup: none | skipped | ran
+rm         {dry_run, copy, path, entry?, purged, released_slot?}
+restore    {copy, path, entry}
+trash *    {dry_run?, purged:[...], unreadable:[...]} / {trash, entries:[...], unreadable:[...]}
+env sync|stage  {dry_run, copies:[{copy, path, files:[{repo?, from, to, status, error?}], error?, setup_error?}]}   # status: copied | would_copy | skipped | failed
+env diff   {same, copies:[{copy, path, files:[{repo?, source, target, state}]}]}
+ports show   {copy, path, slot, vars:{NAME: value}}
+ports claim|release  {dry_run, copy, path, slot, previous_slot, files:[...as env sync...], error?, setup_error?}   # previous_slot: null for an unreadable lease
+ports check  {copy, path, slot, ports:[{name, port, listening}]}
+ports ls     {copies:[{copy, path, slot, conflict, out_of_range, error?}], conflicts:[{slot, copies}], next_free}   # next_free: null without [ports] or when full
+```
+
+Exit codes follow ADR-0012: `0` ok, `1` failure, `2` usage, `3` refused, `4` not found. Every command that takes a `[copy]` argument exits `4` for a name with no working copy and `2` for an invalid name (one starting with `.` or `-`, say). In `mws ports`, `3` is a slot another copy holds, two leases naming one slot (`--slot` settles it), another copy's unreadable lease, or a claim without `--slot` on a copy whose slot lies above the claimable slots; `2` is a missing `[ports]` table or a bare `mws ports <arg>` whose arg is neither a subcommand nor a working copy (a mistyped subcommand); and `4` is a copy that does not exist when named after a subcommand (`mws ports show <copy>`). `mws env diff` exits `1` unless every file is `same`. A malformed lease fails every render of that copy with `1`, and `env stage` and `env diff` refuse it; `mws ports claim <copy> --slot N` overwrites it and `mws ports release <copy>` (or `mws rm`) drops it.
+
+Every render of a copy that holds a slot (`env sync`, `clone`, `include`, `restore`, `ports claim`) first rewrites its lease from the current `[ports]` and `[vars]` tables, so an edit to either reaches the lease on the next `mws env sync`.
+
+### Port examples
+
+A Next.js + Supabase monorepo, eight ports and ten derived vars. The highest base, 54323, caps the slot limit at 1121. Three pairs (3000/54320, 3001/54321, 3002/54322) are congruent modulo 10, but they first meet at slot 5132, past that limit.
+
+```toml
+[ports]
+  stride = 10
+
+  [[ports.port]]
+    name = "internal"
+    base = 3000
+    var  = "APP_INTERNAL_PORT"
+  [[ports.port]]
+    name = "public"
+    base = 3001
+    var  = "APP_PUBLIC_PORT"
+  [[ports.port]]
+    name = "hs"
+    base = 3002
+    var  = "APP_HS_PORT"
+  [[ports.port]]
+    name = "backend"
+    base = 8088
+    var  = "APP_BACKEND_PORT"
+  [[ports.port]]
+    name = "supabase_api"
+    base = 54321
+    var  = "APP_SUPABASE_API_PORT"
+  [[ports.port]]
+    name = "supabase_db"
+    base = 54322
+    var  = "APP_SUPABASE_DB_PORT"
+  [[ports.port]]
+    name = "supabase_db_shadow"
+    base = 54320
+    var  = "APP_SUPABASE_DB_SHADOW_PORT"
+  [[ports.port]]
+    name = "supabase_studio"
+    base = 54323
+    var  = "APP_SUPABASE_STUDIO_PORT"
+
+[vars]
+  APP_SUPABASE_PROJECT_ID                 = "app-${MWS_COPY_SLUG}"
+  APP_SUPABASE_API_URL                    = "http://localhost:${APP_SUPABASE_API_PORT}"
+  APP_AUTH_SITE_URL                       = "http://127.0.0.1:${APP_INTERNAL_PORT}"
+  APP_AUTH_REDIRECT_SITE                  = "https://127.0.0.1:${APP_INTERNAL_PORT}"
+  APP_AUTH_REDIRECT_CALLBACK_IP           = "http://127.0.0.1:${APP_INTERNAL_PORT}/auth/callback"
+  APP_AUTH_REDIRECT_CALLBACK_LOCALHOST    = "http://localhost:${APP_INTERNAL_PORT}/auth/callback"
+  APP_AUTH_REDIRECT_HS_CALLBACK_IP        = "http://127.0.0.1:${APP_HS_PORT}/auth/callback"
+  APP_AUTH_REDIRECT_HS_CALLBACK_LOCALHOST = "http://localhost:${APP_HS_PORT}/auth/callback"
+  APP_SUPABASE_AZURE_REDIRECT_URI         = "http://localhost:${APP_SUPABASE_API_PORT}/auth/v1/callback"
+  APP_AUTH_COOKIE_NAME                    = "app-auth-token-${APP_INTERNAL_PORT}"
+
+[[renders]]
+  source = ".mcp.json.render"
+  target = ".mcp.json"
+
+[[setup]]
+  cmd = "direnv allow"
+```
+
+shop, a web app with Postgres in docker compose and no Go changes. The default stride is 10, and the 65535 bound caps the slot limit at 6010.
+
+```toml
+project_name = "shop"
+
+[[repos]]
+  folder = "web"
+  url    = "git@github.com:example/shop-web.git"
+
+  [[repos.envs]]
+    source = ".env"
+    target = ".env"
+
+[ports]
+  [[ports.port]]
+    name = "web"
+    base = 5173
+  [[ports.port]]
+    name = "db"
+    base = 5432
+
+[vars]
+  COMPOSE_PROJECT_NAME = "shop-${MWS_COPY_SLUG}"
+  DATABASE_URL         = "postgres://postgres:postgres@localhost:${MWS_PORT_DB}/shop"
+```
+
+with `.envs/web/.env`:
+
+```sh
+PORT=${MWS_PORT_WEB}
+DB_HOST_PORT=${MWS_PORT_DB}
+DATABASE_URL=${DATABASE_URL}
+COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}
+```
+
+At slot 1, `web/.env` says `PORT=5183` and `DB_HOST_PORT=5442`, and the compose project of a copy named `two` is `shop-two`.
+
+Design rationale: [ADR-0015](./adr/0015-per-copy-port-slots.md).
 
 ## Worked example
 
 ```toml
-project_name = "pitch-app"
+project_name = "app"
 description  = ""
 
 [[repos]]
   folder = "backend"
-  url    = "git@github.com:lgcypower/lgcy-proposals.git"
+  url    = "git@github.com:example/api.git"
 
   [[repos.setup]]
     cmd = "go build ./..."
 
 [[repos]]
   folder = "frontend"
-  url    = "git@github.com:lgcypower/pitch-proposal-room.git"
+  url    = "git@github.com:example/web.git"
 
   [[repos.envs]]
     source = "internal.env"
@@ -198,7 +387,7 @@ description  = ""
 
 [[optional_repos]]
   folder = "worker"
-  url    = "git@github.com:lgcypower/lgcy-worker.git"
+  url    = "git@github.com:example/worker.git"
 ```
 
 What `mws clone peer` does with this config:
@@ -217,7 +406,7 @@ Most fields are written by `mws` subcommands:
 - `mws add-repo <url> [folder]` appends a `[[repos]]` entry (prompting for it when run with no arguments on a terminal) and clones it into every working copy. `mws init --repo <url>` registers repos at creation.
 - `mws add-repo --optional` appends an `[[optional_repos]]` entry without cloning it anywhere; pull it into a copy later with `mws clone --with` or `mws include`.
 
-`[[repos.envs]]` and `[[repos.setup]]` are hand-edited today; there are no dedicated subcommands. The schema is round-trip-safe: `mws` reads and writes the file using `BurntSushi/toml`, preserving every key it recognises. Unknown keys are ignored on parse but dropped on the next write -- avoid adding fields that mws does not understand.
+`[[repos.envs]]` and `[[repos.setup]]` are hand-edited today; there are no dedicated subcommands. `mws` never rewrites an existing file: `mws init` writes it once, and `mws add-repo` appends one block to its end, keeping comments, layout and unknown keys. Unknown keys are ignored on parse.
 
 Changing `working_copies_dir` after the fact does **not** relocate any existing working copies. The new value only affects subsequent `mws clone` (and `mws init`'s first copy on a fresh workspace). Move existing peers by hand if you want them under the new prefix, then run `mws relink` from the meta root.
 
@@ -235,3 +424,4 @@ The file is tracked by the meta workspace's git. Commit changes alongside the ha
 - [ADR-0010](./adr/0010-soft-delete-working-copies.md) - why `mws rm` trashes instead of deleting
 - [ADR-0011](./adr/0011-worktrees-are-children-of-a-working-copy.md) - why worktrees live inside the working copy
 - [ADR-0012](./adr/0012-headless-cli-contract.md) - prompts, output streams, exit codes and retries for agents and scripts
+- [ADR-0015](./adr/0015-per-copy-port-slots.md) - per-copy port slots, rendering, `[vars]` and root `[[setup]]`

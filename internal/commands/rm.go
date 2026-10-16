@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/sustinbebustin/mws/internal/clierr"
 	"github.com/sustinbebustin/mws/internal/config"
+	"github.com/sustinbebustin/mws/internal/ports"
 	"github.com/sustinbebustin/mws/internal/project"
 	"github.com/sustinbebustin/mws/internal/trash"
 	"github.com/sustinbebustin/mws/internal/worktree"
@@ -26,8 +28,9 @@ type rmFlags struct {
 
 func newRmCmd() *cobra.Command {
 	var f rmFlags
+	var jsonOut bool
 	cmd := &cobra.Command{
-		Use:   "rm <name>",
+		Use:   "rm <copy>",
 		Short: "Remove a working copy",
 		Long: `rm removes a working copy directory from the meta workspace. By default
 the copy is moved into <meta>/.trash/ rather than deleted, so it can be brought
@@ -36,49 +39,107 @@ see trash.retention_days in .mws.toml) is purged the next time an mws command
 touches the trash -- nothing purges in the background. Force one with
 'mws trash prune'.
 
-Pass --purge to delete the working copy outright with no way back. Either way
-the meta workspace and harness are untouched.
+Before trashing, rm releases the copy's Port slot: it drops the lease and
+renders the copy's env files at the default ports, so the trash holds no slot
+and a restored copy comes back on the defaults. A file that cannot be
+rendered is a warning; the copy is trashed anyway.
+
+Pass --purge to delete the working copy outright with no way back, and
+without the render. Either way the meta workspace and harness are untouched.
 
 The copy's worktrees go with it. rm refuses (exit 3) while another process
 works inside one of them.
 
 Without a terminal, the name and --yes are required. --dry-run runs every
 check and reports what would happen without changing anything (it does not
-sweep the trash either). A name that is no working copy exits 4 (not found);
+sweep the trash either): "would release slot N from <copy>" for a slotted
+copy, then "would trash <path>" or "would delete <path>". A name that is no working copy exits 4 (not found);
 when it was trashed earlier, the message names the trash entry and its age,
-so a retried rm can tell "already removed" from a typo.`,
+so a retried rm can tell "already removed" from a typo.
+
+--json prints {"dry_run", "copy", "path", "entry", "purged", "released_slot"}:
+the trash entry id (absent when purged) and the slot given back (absent for a
+copy on the default ports), or {"error": {"code", "message"}} on failure.`,
 		Example: `  mws rm feature-x
   mws rm feature-x --yes
+  mws rm feature-x --yes --json
   mws rm feature-x --purge --dry-run`,
-		Args: cobra.MaximumNArgs(1),
+		Args: usageCheckedArgs(cobra.MaximumNArgs(1), &jsonOut),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var name string
 			if len(args) == 1 {
 				name = args[0]
 			}
-			return runRm(cmd.Context(), newConsoleReporter(), name, f)
+			return runRm(cmd.Context(), newOutput(cmd, jsonOut), name, f)
 		},
 	}
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "print the result as JSON")
 	cmd.Flags().BoolVarP(&f.yes, "yes", "y", false, "skip confirmation")
 	cmd.Flags().BoolVar(&f.purge, "purge", false, "delete immediately instead of moving to the trash")
 	cmd.Flags().BoolVar(&f.dryRun, "dry-run", false, "report what would be removed; change nothing")
 	return cmd
 }
 
-func runRm(ctx context.Context, r Reporter, name string, f rmFlags) error {
+// rmResult is the outcome of `mws rm`: what became of the working copy at
+// Path. A purge has no Entry; ReleasedSlot is the Port slot given back, 0 for a
+// copy on the default ports. A dry run fills it with what would happen.
+type rmResult struct {
+	DryRun       bool   `json:"dry_run"`
+	Copy         string `json:"copy"`
+	Path         string `json:"path"`
+	Entry        string `json:"entry,omitempty"`
+	Purged       bool   `json:"purged"`
+	ReleasedSlot int    `json:"released_slot,omitempty"`
+}
+
+// printWouldRemove writes the dry-run lines of res in the "would <verb>
+// <object>" voice.
+func (res rmResult) printWouldRemove(w io.Writer) error {
+	verb := "delete"
+	if !res.Purged {
+		verb = "trash"
+	}
+	if res.ReleasedSlot > 0 {
+		if _, err := fmt.Fprintf(w, "would release slot %d from %s\n", res.ReleasedSlot, res.Copy); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintf(w, "would %s %s\n", verb, res.Path)
+	return err
+}
+
+func runRm(ctx context.Context, o output, name string, f rmFlags) error {
+	res, err := removeCopy(ctx, o.reporter(), name, f)
+	if err != nil {
+		return o.fail(err)
+	}
+	if res == nil {
+		return nil
+	}
+	return o.result(res, func(w io.Writer) error {
+		if !res.DryRun {
+			return nil
+		}
+		return res.printWouldRemove(w)
+	})
+}
+
+// removeCopy trashes or deletes the working copy called name. It returns nil
+// without an error when the user declined the confirmation.
+func removeCopy(ctx context.Context, r Reporter, name string, f rmFlags) (*rmResult, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	ws, err := project.Locate(cwd)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// Locate tolerates a malformed .mws.toml; surface the parse error here so
 	// the rm guard doesn't compare against a wrong copies root.
 	cfg, err := config.Load(ws.MetaRoot)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	policy := cfg.TrashPolicy()
 	if !f.dryRun {
@@ -88,10 +149,10 @@ func runRm(ctx context.Context, r Reporter, name string, f rmFlags) error {
 
 	peers, err := ws.EnumerateCopies()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if name == "" && len(peers) == 0 {
-		return fmt.Errorf("no working copies to remove in %s", ws.MetaRoot)
+		return nil, fmt.Errorf("no working copies to remove in %s", ws.MetaRoot)
 	}
 
 	if name == "" {
@@ -100,7 +161,7 @@ func runRm(ctx context.Context, r Reporter, name string, f rmFlags) error {
 			for i, p := range peers {
 				names[i] = filepath.Base(p)
 			}
-			return noPrompt(fmt.Sprintf("no working copy named (working copies: %s)", strings.Join(names, ", ")), "mws rm <name> --yes")
+			return nil, noPrompt(fmt.Sprintf("no working copy named (working copies: %s)", strings.Join(names, ", ")), "mws rm <copy> --yes")
 		}
 		opts := make([]huh.Option[string], 0, len(peers))
 		for _, p := range peers {
@@ -110,43 +171,50 @@ func runRm(ctx context.Context, r Reporter, name string, f rmFlags) error {
 			Title("Select working copy to remove").
 			Options(opts...).
 			Value(&name)); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	target := filepath.Join(ws.CopiesRoot(), name)
 	if !slices.Contains(peers, target) {
-		return notACopy(ws.MetaRoot, name, target)
+		return nil, notACopy(ws.MetaRoot, name, target)
 	}
 	if !looksLikeWorkingCopy(ws.MetaRoot, target) {
-		return clierr.Refusedf("%s does not contain any harness symlinks pointing into %s/.mws/; refusing to remove. If this is genuinely a working copy whose symlinks are broken, run `mws relink` first, or remove it manually", target, ws.MetaRoot)
+		return nil, clierr.Refusedf("%s does not contain any harness symlinks pointing into %s/.mws/; refusing to remove. If this is genuinely a working copy whose symlinks are broken, run `mws relink` first, or remove it manually", target, ws.MetaRoot)
 	}
 	wts, err := copyWorktrees(ctx, r, ws.MetaRoot, cfg, target)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := worktree.RefuseLive(wts); err != nil {
-		return fmt.Errorf("refusing to remove working copy %s: %w", target, err)
+		return nil, fmt.Errorf("refusing to remove working copy %s: %w", target, err)
 	}
 
+	// An unreadable lease reads as slot 0 (ReadSlot returns 0 with the
+	// error); a real run drops it in the release step before trashing.
+	slot, leaseErr := ports.ReadSlot(target)
+	description := rmConfirmDescription(ws.MetaRoot, name, toTrash, slot, wts)
 	if f.dryRun {
-		r.Info("Dry run: " + rmConfirmDescription(ws.MetaRoot, name, toTrash, wts))
-		return nil
+		if leaseErr != nil && toTrash {
+			r.Warn(fmt.Sprintf("%v; rm would drop it and render %s's env files at the default ports before trashing", leaseErr, name))
+		}
+		r.Info("Dry run: " + description)
+		return &rmResult{DryRun: true, Copy: name, Path: target, Purged: !toTrash, ReleasedSlot: slot}, nil
 	}
 	ok, err := confirm(r, f.yes, confirmation{
 		title:       fmt.Sprintf("Remove working copy %s?", target),
-		description: rmConfirmDescription(ws.MetaRoot, name, toTrash, wts),
+		description: description,
 		affirmative: "Remove",
 		missing:     "removing a working copy needs confirmation",
 		try:         []string{fmt.Sprintf("mws rm %s --yes", name), fmt.Sprintf("mws rm %s --dry-run", name)},
 	})
 	if err != nil || !ok {
-		return err
+		return nil, err
 	}
 
 	if !toTrash {
 		if err := os.RemoveAll(target); err != nil {
-			return err
+			return nil, err
 		}
 		r.OK(fmt.Sprintf("Deleted %s", target))
 		if len(wts) > 0 {
@@ -154,12 +222,14 @@ func runRm(ctx context.Context, r Reporter, name string, f rmFlags) error {
 				r.Warn(fmt.Sprintf("Could not drop the deleted worktrees' registrations from the meta repo: %v. Run `git worktree prune` in %s", err, ws.MetaRoot))
 			}
 		}
-		return nil
+		// Deleting the copy deletes its lease, which gives the slot back.
+		return &rmResult{Copy: name, Path: target, Purged: true, ReleasedSlot: slot}, nil
 	}
 
+	released := releaseBeforeTrash(r, workingCopy{metaRoot: ws.MetaRoot, cfg: cfg, path: target})
 	entry, err := trash.Stash(ws.MetaRoot, target)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	r.OK(fmt.Sprintf("Trashed %s -> %s", target, filepath.Join(trash.DirName, entry.ID)))
 	// Point the worktree registrations into the trash, so a `git worktree
@@ -172,7 +242,7 @@ func runRm(ctx context.Context, r Reporter, name string, f rmFlags) error {
 	} else {
 		r.Info(fmt.Sprintf("Kept until purged. Restore with `mws restore %s`.", entry.Name))
 	}
-	return nil
+	return &rmResult{Copy: name, Path: target, Entry: entry.ID, ReleasedSlot: released}, nil
 }
 
 // notACopy is the not-found error for `mws rm name` when no working copy has
@@ -187,12 +257,52 @@ func notACopy(metaRoot, name, target string) error {
 		return clierr.NotFoundf("%s is not a working copy of %s; a copy of that name was trashed %s ago (%s), so a previous rm already removed it. Restore it with `mws restore %s`",
 			target, metaRoot, humanDuration(time.Since(trashed[0].DeletedAt)), trashed[0].ID, name)
 	}
-	return clierr.NotFoundf("%s is not a working copy of %s; `mws list` shows the working copies", target, metaRoot)
+	return clierr.NotFoundf("%s is not a working copy of %s; `mws ls` shows the working copies", target, metaRoot)
+}
+
+// releaseBeforeTrash puts the working copy c back on the default ports before
+// rm trashes it: it drops the copy's Port lease and renders its env files at
+// slot 0, so the trash only holds copies on the default ports and restore
+// needs no port logic (ADR-0015). It runs no setup. Every failure is a
+// warning; rm trashes the copy anyway. It returns the slot it gave back, 0
+// when the copy held none, its lease could not be dropped, or its lease was
+// unreadable (dropped and rendered at slot 0 all the same).
+func releaseBeforeTrash(r Reporter, c workingCopy) int {
+	name := c.name()
+	previous, err := releaseLease(c.metaRoot, c.path)
+	if err != nil {
+		r.Warn(fmt.Sprintf("%s: %v; trashing it anyway with its lease. After `mws restore %s`, fix or delete %s and run `mws env sync %s`",
+			name, err, name, ports.LeaseFile, name))
+		return 0
+	}
+	slot := 0
+	if previous != nil {
+		slot = *previous
+	}
+	if previous != nil && slot == 0 {
+		return 0
+	}
+	r.OK(fmt.Sprintf("%s: %s -> %s", name, previousLabel(previous), slotLabel(0)))
+	res := c.renderEnv(r, false)
+	var stale []string
+	for _, f := range res.Files {
+		if f.Status != envCopied {
+			stale = append(stale, relToMeta(c.metaRoot, f.To))
+		}
+	}
+	if res.Error != "" {
+		stale = append(stale, "its worktrees' carried files")
+	}
+	if len(stale) > 0 {
+		r.Warn(fmt.Sprintf("%s: not every env file was rendered at the default ports, so %s may still hold the ports of %s; trashing it anyway. After `mws restore %s`, run `mws env sync %s`",
+			name, strings.Join(stale, ", "), previousLabel(previous), name, name))
+	}
+	return slot
 }
 
 // rmConfirmDescription explains what removing the copy called name does,
-// naming its worktrees, which go with it.
-func rmConfirmDescription(metaRoot, name string, toTrash bool, wts []worktree.Entry) string {
+// naming its worktrees, which go with it, and the Port slot it gives back.
+func rmConfirmDescription(metaRoot, name string, toTrash bool, slot int, wts []worktree.Entry) string {
 	contents := "the directory and any native repo clones inside it"
 	if len(wts) > 0 {
 		names := make([]string, len(wts))
@@ -202,7 +312,14 @@ func rmConfirmDescription(metaRoot, name string, toTrash bool, wts []worktree.En
 		contents = fmt.Sprintf("the directory, any native repo clones inside it, and its %s %s", plural(len(wts), "worktree", "worktrees"), strings.Join(names, ", "))
 	}
 	if toTrash {
-		return fmt.Sprintf("This moves %s into %s. Bring it back with `mws restore %s`.", contents, trash.Root(metaRoot), name)
+		release := ""
+		if slot > 0 {
+			release = fmt.Sprintf("It first releases %s and renders the env files at the default ports. ", slotLabel(slot))
+		}
+		return fmt.Sprintf("%sThis moves %s into %s. Bring it back on the default ports with `mws restore %s`.", release, contents, trash.Root(metaRoot), name)
+	}
+	if slot > 0 {
+		return fmt.Sprintf("This deletes %s, giving back %s. It cannot be undone.", contents, slotLabel(slot))
 	}
 	return fmt.Sprintf("This deletes %s. It cannot be undone.", contents)
 }

@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/sustinbebustin/mws/internal/config"
+	"github.com/sustinbebustin/mws/internal/ports"
 )
 
 func TestConfirmSetupFlagsBypassPrompt(t *testing.T) {
@@ -101,7 +102,7 @@ func TestRunClonePlacesPeerUnderWorkingCopiesDir(t *testing.T) {
 	}
 
 	withCwd(t, metaRoot, func() {
-		if err := runClone(context.Background(), nopReporter{}, io.Discard, "peer", setupSkip, optionalChoice{}); err != nil {
+		if err := runClone(context.Background(), nopReporter{}, discardOut, "peer", setupSkip, optionalChoice{}, false); err != nil {
 			t.Fatalf("runClone: %v", err)
 		}
 	})
@@ -178,7 +179,7 @@ func TestRunCloneFailsWhenRepoURLMissing(t *testing.T) {
 
 	rep := &recordingReporter{}
 	withCwd(t, metaRoot, func() {
-		err := runClone(context.Background(), rep, io.Discard, "peer", setupSkip, optionalChoice{})
+		err := runClone(context.Background(), rep, discardOut, "peer", setupSkip, optionalChoice{}, false)
 		if err == nil {
 			t.Fatalf("expected error when repo URL is empty")
 		}
@@ -214,7 +215,7 @@ func TestRunCloneSkipsSetupWhenClonePhaseFailed(t *testing.T) {
 	}
 
 	withCwd(t, metaRoot, func() {
-		err := runClone(context.Background(), nopReporter{}, io.Discard, "peer", setupForceRun, optionalChoice{})
+		err := runClone(context.Background(), nopReporter{}, discardOut, "peer", setupForceRun, optionalChoice{}, false)
 		if err == nil {
 			t.Fatalf("expected clone phase to fail")
 		}
@@ -249,7 +250,7 @@ func TestRunSetupExecutionPolicy(t *testing.T) {
 		{Folder: "c", Cmd: "touch c-after-fail"},
 	}
 
-	failed := runSetup(context.Background(), nopReporter{}, target, items, io.Discard, io.Discard)
+	failed := runSetup(context.Background(), nopReporter{}, target, ports.Exports{}, items, io.Discard, io.Discard)
 
 	wantFailed := []string{"a: false", "c: false"}
 	if len(failed) != len(wantFailed) {
@@ -353,7 +354,7 @@ func TestRunCloneWritesMWSCDFileWhenSet(t *testing.T) {
 
 	rep := &recordingReporter{}
 	withCwd(t, metaRoot, func() {
-		if err := runClone(context.Background(), rep, io.Discard, "peer", setupSkip, optionalChoice{}); err != nil {
+		if err := runClone(context.Background(), rep, discardOut, "peer", setupSkip, optionalChoice{}, false); err != nil {
 			t.Fatalf("runClone: %v", err)
 		}
 	})
@@ -399,7 +400,7 @@ func TestRunClonePrintsPathOnStdout(t *testing.T) {
 			tc.env(t)
 			var out bytes.Buffer
 			withCwd(t, metaRoot, func() {
-				if err := runClone(context.Background(), nopReporter{}, &out, "peer", setupSkip, optionalChoice{}); err != nil {
+				if err := runClone(context.Background(), nopReporter{}, output{stdout: &out}, "peer", setupSkip, optionalChoice{}, false); err != nil {
 					t.Fatalf("runClone: %v", err)
 				}
 			})
@@ -416,11 +417,11 @@ func TestRunCloneOfAnExistingCopyReportsItsPath(t *testing.T) {
 	writeFileAll(t, filepath.Join(metaRoot, ".mws", "CLAUDE.md"), "# harness")
 	unsetEnv(t, "MWS_CD_FILE")
 	withCwd(t, metaRoot, func() {
-		if err := runClone(context.Background(), nopReporter{}, io.Discard, "peer", setupSkip, optionalChoice{}); err != nil {
+		if err := runClone(context.Background(), nopReporter{}, discardOut, "peer", setupSkip, optionalChoice{}, false); err != nil {
 			t.Fatalf("first runClone: %v", err)
 		}
 		var out bytes.Buffer
-		if err := runClone(context.Background(), nopReporter{}, &out, "peer", setupSkip, optionalChoice{}); err != nil {
+		if err := runClone(context.Background(), nopReporter{}, output{stdout: &out}, "peer", setupSkip, optionalChoice{}, false); err != nil {
 			t.Fatalf("second runClone: %v", err)
 		}
 		if got, want := out.String(), filepath.Join(metaRoot, "peer")+"\n"; got != want {
@@ -450,7 +451,7 @@ func TestRunCloneRetryFinishesThePreviousRun(t *testing.T) {
 	withCwd(t, metaRoot, func() {
 		clone := func(choice setupChoice) {
 			t.Helper()
-			if err := runClone(context.Background(), nopReporter{}, io.Discard, "peer", choice, optionalChoice{}); err != nil {
+			if err := runClone(context.Background(), nopReporter{}, discardOut, "peer", choice, optionalChoice{}, false); err != nil {
 				t.Fatalf("runClone: %v", err)
 			}
 		}
@@ -469,11 +470,12 @@ func TestRunCloneRetryFinishesThePreviousRun(t *testing.T) {
 		if runs() != 2 {
 			t.Fatalf("retry ran setup %d times in total, want 2", runs())
 		}
-		// Nothing missing: --no-setup is a no-op, --setup reruns setup.
+		// Nothing missing: the retry clones nothing, so neither choice runs
+		// [[repos.setup]] again.
 		clone(setupSkip)
 		clone(setupForceRun)
-		if runs() != 3 {
-			t.Fatalf("setup ran %d times in total, want 3", runs())
+		if runs() != 2 {
+			t.Fatalf("setup ran %d times in total, want 2", runs())
 		}
 	})
 }
@@ -482,7 +484,7 @@ func TestRunCloneWithoutTerminalNamesTheMissingFlag(t *testing.T) {
 	metaRoot := seedMetaWithOptional(t)
 	noTerminal(t)
 	withCwd(t, metaRoot, func() {
-		err := runClone(context.Background(), nopReporter{}, io.Discard, "peer", setupSkip, optionalChoice{})
+		err := runClone(context.Background(), nopReporter{}, discardOut, "peer", setupSkip, optionalChoice{}, false)
 		if ExitCode(err) != 2 || !strings.Contains(err.Error(), "--no-optional") {
 			t.Fatalf("err = %v (exit %d), want a usage error naming --no-optional", err, ExitCode(err))
 		}
@@ -502,7 +504,7 @@ func TestRunCloneWarnsWhenMWSCDFileUnwritable(t *testing.T) {
 
 	rep := &recordingReporter{}
 	withCwd(t, metaRoot, func() {
-		if err := runClone(context.Background(), rep, io.Discard, "peer", setupSkip, optionalChoice{}); err != nil {
+		if err := runClone(context.Background(), rep, discardOut, "peer", setupSkip, optionalChoice{}, false); err != nil {
 			t.Fatalf("runClone should succeed despite handoff failure: %v", err)
 		}
 	})
@@ -618,7 +620,7 @@ func seedMetaWithOptional(t *testing.T) string {
 func TestRunCloneWithIncludesOptionalRepo(t *testing.T) {
 	metaRoot := seedMetaWithOptional(t)
 	withCwd(t, metaRoot, func() {
-		if err := runClone(context.Background(), nopReporter{}, io.Discard, "peer", setupSkip, optionalChoice{kind: optionalNamed, names: []string{"worker"}}); err != nil {
+		if err := runClone(context.Background(), nopReporter{}, discardOut, "peer", setupSkip, optionalChoice{kind: optionalNamed, names: []string{"worker"}}, false); err != nil {
 			t.Fatalf("runClone: %v", err)
 		}
 	})
@@ -633,7 +635,7 @@ func TestRunCloneWithUnknownOptionalFailsBeforeMkdir(t *testing.T) {
 	metaRoot := seedMetaWithOptional(t)
 	var err error
 	withCwd(t, metaRoot, func() {
-		err = runClone(context.Background(), nopReporter{}, io.Discard, "peer", setupSkip, optionalChoice{kind: optionalNamed, names: []string{"nope"}})
+		err = runClone(context.Background(), nopReporter{}, discardOut, "peer", setupSkip, optionalChoice{kind: optionalNamed, names: []string{"nope"}}, false)
 	})
 	if err == nil {
 		t.Fatal("expected error for unknown --with folder")
@@ -674,7 +676,7 @@ func TestRunCloneWithRunsOptionalSetup(t *testing.T) {
 	}
 
 	withCwd(t, metaRoot, func() {
-		if err := runClone(context.Background(), nopReporter{}, io.Discard, "peer", setupForceRun, optionalChoice{kind: optionalNamed, names: []string{"worker"}}); err != nil {
+		if err := runClone(context.Background(), nopReporter{}, discardOut, "peer", setupForceRun, optionalChoice{kind: optionalNamed, names: []string{"worker"}}, false); err != nil {
 			t.Fatalf("runClone: %v", err)
 		}
 	})

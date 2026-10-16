@@ -1,6 +1,6 @@
 # mws -- agent notes
 
-A Go CLI for managing **meta workspaces** around independent native git repos. Intentionally domain-free: no project-specific code paths, no branching on project names. The same rule applies to `skeleton/`, since it ships in a public binary.
+A Go CLI for managing **meta workspaces** around independent native git repos. Intentionally domain-free: no project-specific code paths, no branching on project names. The same rule applies to `skeleton/`, since it ships in a public binary. Examples, fixtures, docs and committed artifacts must never name private projects, organisations or local paths: use neutral placeholder names, and build committed binaries with `-trimpath`.
 
 Use `go build ./...` to verify compilation and `go test ./...` for tests. Run `make ci` before pushing to mirror the full CI matrix (build, test, lint, govulncheck).
 
@@ -8,7 +8,7 @@ When changing public-facing behavior, check [README.md](./README.md) and [docs/c
 
 ## Config schema
 
-`.mws.toml` schema, rationale, and a worked example: [docs/config.md](./docs/config.md). Round-trip via `BurntSushi/toml`; unknown keys are dropped on write.
+`.mws.toml` schema, rationale, and a worked example: [docs/config.md](./docs/config.md). Parsed via `BurntSushi/toml`. Only `init` encodes the whole file (`config.Save`); edits to an existing file append (`config.AppendRepo`) so comments and unknown keys survive.
 
 ## Skeleton edits
 
@@ -18,7 +18,9 @@ When changing public-facing behavior, check [README.md](./README.md) and [docs/c
 
 - Resolve the meta with `project.Locate(cwd)`; never duplicate the walk-up logic.
 - Reuse `project.LinkHarnessIntoWorkingCopy` for any symlink fan-out. It walks `<meta>/.mws/` and links every entry with no exclusions -- do not introduce a hardcoded list or skip filter.
-- For commands that target a working copy, use `(*project.Workspace).ResolveCopy` (defaults to cwd's copy, rejects reserved names like `.mws`, `.envs`, `.git` via `project.ValidateName`).
+- For commands that target a working copy, call `resolveCopy(ws, name, invocation)` in `internal/commands/helpers.go`. It wraps `(*project.Workspace).ResolveCopy` (defaults to cwd's copy, rejects reserved names like `.mws`, `.envs`, `.git` via `project.ValidateName`) and tags its failures: no name and no cwd copy (`project.ErrNoCopyNamed`) or an invalid name is a usage error (exit 2) that shows the invocation, and a name with no working copy is not found (exit 4).
+- Per-copy files (env targets, `[[renders]]` targets, the `.mws-ports.env` lease) are written only through the render path in `internal/commands/env.go` (`renderEnv` / `(workingCopy).render`) and `internal/ports`; never substitute `${VAR}` elsewhere. Port slots are claimed under `ports.LockMeta`.
+- Results go to stdout through `output` (`newOutput`), progress to stderr; every result command takes `--json` and every `--dry-run` prints `would <verb> <object>` lines on stdout (ADR-0012). Errors carry an `internal/clierr` kind, which sets the exit code.
 - Never build a path under `<meta>/.trash/` by hand; go through `internal/trash`. Commands read the resolved `config.TrashPolicy()`, never the raw `*config.Trash` pointer.
 - `huh` for prompts, through `runForm` / `runField` in `prompt.go`. Colour goes through `internal/ui`, bound per stream with `ui.Detect`; it only adds escape codes on a terminal and never changes the text (ADR-0013). Terse status lines with `[OK]` / `[WARN]` / `[FAIL]` prefixes.
 - Errors as values; surface them through Cobra's `RunE`.

@@ -15,7 +15,7 @@ import (
 
 func newIncludeCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "include <folder> [working-copy]",
+		Use:   "include <folder> [copy]",
 		Short: "Clone a registered optional repo into a working copy",
 		Long: `include clones a repo registered under [[optional_repos]] in .mws.toml into a
 working copy (the current one by default, or a named copy). It checks out the
@@ -24,11 +24,13 @@ repo's default branch and copies any mapped env files, mirroring 'mws clone'.
 Register optional repos first with 'mws add-repo --optional <url> <folder>'.
 
 After clone and env-copy succeed, any [[optional_repos.setup]] commands for the
-repo run via sh -c. By default a confirmation prompt summarises them; use
---setup to run without prompting or --no-setup to skip entirely; without a
-terminal one of them is required when the repo has setup commands.
+repo run via sh -c, then the root [[setup]] commands at the copy root. By
+default a confirmation prompt summarises them; use --setup to run without
+prompting or --no-setup to skip entirely; without a terminal one of them is
+required when any of them is configured.
 
-Re-running for a repo already in the copy skips the clone and succeeds.`,
+Re-running for a repo already in the copy skips the clone and the repo's
+setup, renders the copy's env files again and succeeds.`,
 		Example: `  mws include docs
   mws include docs feature-x --no-setup`,
 		Args: cobra.RangeArgs(1, 2),
@@ -42,11 +44,11 @@ Re-running for a repo already in the copy skips the clone and succeeds.`,
 			if err != nil {
 				return err
 			}
-			return runInclude(cmd.Context(), newConsoleReporter(), folder, copyName, choice)
+			return runInclude(cmd.Context(), reporterFor(cmd.ErrOrStderr()), folder, copyName, choice)
 		},
 	}
-	cmd.Flags().Bool("setup", false, "run [[optional_repos.setup]] commands without prompting")
-	cmd.Flags().Bool("no-setup", false, "skip [[optional_repos.setup]] commands without prompting")
+	cmd.Flags().Bool("setup", false, "run [[optional_repos.setup]] and root [[setup]] commands without prompting")
+	cmd.Flags().Bool("no-setup", false, "skip [[optional_repos.setup]] and root [[setup]] commands without prompting")
 	return cmd
 }
 
@@ -70,11 +72,17 @@ func runInclude(ctx context.Context, r Reporter, folder, copyName string, choice
 			folder, listOptionalFolders(cfg), folder)
 	}
 
-	target, err := ws.ResolveCopy(copyName)
+	target, err := resolveCopy(ws, copyName, "mws include "+repo.Folder+" <copy>")
 	if err != nil {
 		return err
 	}
-	items := collectSetup([]config.Repo{repo})
+	// The repo's setup runs only when this run clones it; the root [[setup]]
+	// follows every render.
+	var items []setupItem
+	if missing := missingRepos(target, []config.Repo{repo}); len(missing) > 0 {
+		items = collectSetup(missing)
+	}
+	items = append(items, rootSetupItems(cfg)...)
 	if err := requireSetupChoice(choice, items, "mws include "+repo.Folder); err != nil {
 		return err
 	}
@@ -82,14 +90,19 @@ func runInclude(ctx context.Context, r Reporter, folder, copyName string, choice
 	if err := cloneNative(ctx, r, repo, target); err != nil {
 		return fmt.Errorf("%s: %w", repo.Folder, err)
 	}
-	copyEnvsFor(r, ws.MetaRoot, repo, target)
+	wc := workingCopy{metaRoot: ws.MetaRoot, cfg: cfg, path: target}
+	wc.renderEnv(r, false)
 
 	run, err := confirmSetup(choice, items)
 	if err != nil {
 		return err
 	}
 	if run {
-		if failed := runSetup(ctx, r, target, items, os.Stderr, os.Stderr); len(failed) > 0 {
+		exports, err := wc.exports()
+		if err != nil {
+			return fmt.Errorf("included %s but no setup command ran: %w", repo.Folder, err)
+		}
+		if failed := runSetup(ctx, r, target, exports, items, os.Stderr, os.Stderr); len(failed) > 0 {
 			return fmt.Errorf("included %s but %d setup command(s) failed:\n  %s",
 				repo.Folder, len(failed), strings.Join(failed, "\n  "))
 		}

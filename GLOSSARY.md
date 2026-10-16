@@ -41,16 +41,32 @@ The template content embedded in the `mws` binary via `//go:embed`. Rendered int
 _Avoid_: template (overloaded with go templates and GitHub template repos), boilerplate.
 
 **mws config**:
-A single TOML file at the root of the **Meta workspace** (e.g. `.mws.toml`). Holds project name, description, the list of **Native repos** (folder + URL), and per-repo **Env staging** mappings. Discovered by walking up from cwd. Not symlinked into working copies.
+A single TOML file at the root of the **Meta workspace** (e.g. `.mws.toml`). Holds project name, description, the list of **Native repos** (folder + URL), per-repo **Env staging** mappings and **Setup commands**, and the tables behind **Port slots**: `[ports]`, `[vars]`, `[[renders]]` and root `[[setup]]`. Discovered by walking up from cwd. Not symlinked into working copies.
 _Avoid_: manifest, project file.
 
 **Env staging**:
-A dedicated directory inside the **Meta workspace** (`.envs/`, organized per **Native repo**) holding canonical env files. Per-repo entries in the **mws config** map staged files to target paths inside each clone's native repo. Files are **copied** into a **Working copy** on `mws clone` (not symlinked), so peers can diverge freely (different ports, different external service keys, etc.). `mws sync-env [clone]` re-pushes from staging when you want to reset a clone to defaults. Not tracked by the meta's git.
+A dedicated directory inside the **Meta workspace** (`.envs/`, organized per **Native repo**) holding canonical env files. Per-repo entries in the **mws config** map staged files to target paths inside each clone's native repo. Files are **copied** into a **Working copy** on `mws clone` (not symlinked), so peers can diverge freely (different ports, different external service keys, etc.). The copy is a **Render**: `${VAR}` placeholders for the copy's **Port lease** are substituted on the way in. `mws env sync [copy]` re-renders from staging to reset a copy to the staged defaults; `mws env stage [copy]` captures a copy's files back into staging; `mws env diff` shows which copies differ from staging. Not tracked by the meta's git.
 _Avoid_: env vault (sounds like secrets management), env dir (ambiguous).
 
 **Setup commands**:
-Per-**Native repo** shell commands listed in the **mws config** under `[[repos.setup]]`. Executed at the end of `mws clone` (after clone + env-copy) via `sh -c`, with cwd set to the repo's directory in the new **Working copy**, so a fresh peer can be made ready-to-use in one step. Opt-in: the user is prompted before execution and can override the prompt with `--setup` / `--no-setup`; without a terminal one of the two is required.
+Shell commands listed in the **mws config**, run via `sh -c` with the **Port lease** in their environment. Per-**Native repo** ones (`[[repos.setup]]`, cwd = the repo) run when the repo is cloned by `mws clone`, `mws include` or `mws worktree new`. Root-level ones (`[[setup]]`, cwd = the **Working copy** root; `[[worktrees.setup]]` for a **Worktree**) run after every **Render**: clone, include, `env sync`, `ports claim`, `ports release`. Opt-in: the user is prompted before execution and can override the prompt with `--setup` / `--no-setup`; without a terminal one of the two is required.
 _Avoid_: hooks (implies a broader lifecycle that does not exist), scripts (overloaded with package.json's name-keyed semantics).
+
+**Port slot**:
+A small integer `k >= 1` a **Working copy** may claim with `mws ports claim` (or `mws clone --ports`), giving it port `base + k * stride` for every port named under `[ports]` in the **mws config**. A copy with no slot is on the **default ports** (slot 0, the `base` values), which is a legitimate state and the one every copy starts in. Slots are never shared by live copies; a **Worktree** shares its copy's slot.
+_Avoid_: port block, offset, registry entry.
+
+**Port lease**:
+The record of a **Working copy**'s **Port slot**: an **mws marker** at `<copy>/.mws-ports.env`, a generated dotenv file exporting the slot, every port, the builtins (`MWS_SLOT`, `MWS_COPY`, `MWS_COPY_SLUG`, `MWS_META`) and the derived `[vars]`. The lease is the only record; `mws ports ls` finds slots by reading live copies' leases. `mws ports release` and `mws rm` remove it.
+_Avoid_: registry, ports file, allocation.
+
+**Render**:
+Producing a per-copy file from a staged source by substituting `${VAR}` for every variable the copy's **Port lease** exports (slot 0 values when it has none) and passing every other byte through. Env materialisation on `mws clone`, `mws include`, `mws env sync`, `mws restore`, `mws ports claim|release` is a render, and so is writing a per-copy harness file (such as `.mcp.json`) from a `.render` source under the **Harness dir**, mapped by `[[renders]]` in the **mws config**. A render is a pure function of (source, slot); it never reads the previous output.
+_Avoid_: rewrite, sed, remap, substitute (as a noun), template (reserved for Go `text/template`, which the **Skeleton** uses once at `mws init`).
+
+**mws marker**:
+A dot-prefixed file named `.mws-*` that mws writes at a **Working copy** or **Worktree** root and owns outright: `.mws-worktree.toml` and the **Port lease** `.mws-ports.env`. Never hand-edited, never promoted, carried into a worktree as per-copy state. Together with the **mws config** these are the only state mws keeps.
+_Avoid_: state file, metadata file, dotfile (too broad).
 
 ## Relationships
 
@@ -81,4 +97,6 @@ _Avoid_: hooks (implies a broader lifecycle that does not exist), scripts (overl
 - "clone" is overloaded: a git operation vs. a working copy as a unit. Resolved: we say **Working copy** for the directory and reserve "clone" for git operations (or the `mws clone` subcommand, which creates a working copy via git clone operations).
 - "template" was used early for both the GitHub-template-repo distribution model and the embedded **Skeleton**. Resolved: we use **Skeleton** for the embedded content; "template" only appears in references to Go's `text/template` or external GitHub template repos.
 - "meta dir" was used loosely for both the **Meta workspace** as a whole and `.mws/`. Resolved: the workspace is the **Meta workspace**; the inner `.mws/` is the **Harness dir**.
-- The path `.mws/` shares a name with the `mws` CLI. Resolved by separating the concept (**Harness dir**) from the path; the CLI's own state lives in the **mws config** file at the meta root, not in `.mws/`.
+- The path `.mws/` shares a name with the `mws` CLI. Resolved by separating the concept (**Harness dir**) from the path; the CLI's own state lives in the **mws config** file at the meta root and in **mws markers** at copy and worktree roots, never in `.mws/`.
+- "sync" was used for three different things: pushing env files into a copy, claiming a port slot (a sed-based `sync-ports` script), and promoting. Resolved: `mws env sync` is the only command that carries the word, and it means "re-render from staging"; a slot is **claimed** and **released**; a file is **promoted**.
+- "meta" as a `--prefer` value for the harness side of a diverged file. Resolved: `--prefer copy|harness|skip`, matching **Working copy** and **Harness dir**.

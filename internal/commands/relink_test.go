@@ -52,7 +52,7 @@ func TestRepairDivergedFilesPromptsAndPromotes(t *testing.T) {
 	mustWriteFile(t, filepath.Join(meta, project.HarnessDirName, ".mcp.json"), `{"old":true}`)
 	mustWriteFile(t, filepath.Join(peer, ".mcp.json"), `{"new":true}`)
 
-	prompt := func(string, string) (resolution, error) { return resolvePeer, nil }
+	prompt := func(string, string) (resolution, error) { return takeCopy, nil }
 	if err := repairDivergedFiles(nopReporter{}, meta, peer, prompt); err != nil {
 		t.Fatalf("repairDivergedFiles: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestRunRelinkVisitsCopiesUnderWorkingCopiesDir(t *testing.T) {
 	mustMkdir(t, peer)
 
 	withCwd(t, meta, func() {
-		if err := runRelink(nopReporter{}, relinkFlags{}); err != nil {
+		if err := runRelink(discardOut, relinkFlags{}); err != nil {
 			t.Fatalf("runRelink: %v", err)
 		}
 	})

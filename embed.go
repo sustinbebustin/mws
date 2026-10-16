@@ -4,7 +4,7 @@ package mws
 import "embed"
 
 // SkeletonFS holds the templated meta-workspace skeleton bundled into the binary.
-// The contents are rendered out to disk by `mws init` and `mws migrate`.
+// The contents are rendered out to disk by `mws init`.
 //
 //go:embed all:skeleton
 var SkeletonFS embed.FS

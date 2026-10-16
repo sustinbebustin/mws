@@ -47,25 +47,50 @@ func runWorktreePrune(ctx context.Context, o output, dryRun bool) error {
 	if err != nil {
 		return o.fail(err)
 	}
-	return o.result(res, func(w io.Writer) error { return printPrune(w, res) })
+	return o.result(res, func(w io.Writer) error {
+		if res.DryRun {
+			return printPruneDryRun(w, o.reporter(), res)
+		}
+		return printPrune(w, res)
+	})
+}
+
+// printPruneDryRun writes one "would <verb> <object>" line per planned change
+// to w; what prune would keep, and why, goes to r.
+func printPruneDryRun(w io.Writer, r Reporter, res worktree.PruneResult) error {
+	var lines []string
+	for _, p := range res.Repaired {
+		lines = append(lines, "would repair "+p)
+	}
+	for _, p := range res.Dropped {
+		lines = append(lines, "would drop registration of "+p)
+	}
+	for _, rm := range res.Removed {
+		lines = append(lines, "would remove "+rm.Path)
+	}
+	for _, k := range res.Kept {
+		r.Info(fmt.Sprintf("kept %s: %s", k.Name, strings.Join(k.Reasons, "; ")))
+	}
+	if len(lines) == 0 {
+		r.Info("nothing to prune")
+		return nil
+	}
+	_, err := fmt.Fprintln(w, strings.Join(lines, "\n"))
+	return err
 }
 
 // printPrune writes one line per repair, dropped registration, removal and
-// kept worktree, or "nothing to prune".
+// kept worktree of a real prune, or "nothing to prune".
 func printPrune(w io.Writer, res worktree.PruneResult) error {
-	would := ""
-	if res.DryRun {
-		would = "would "
-	}
 	var lines []string
 	for _, p := range res.Repaired {
-		lines = append(lines, fmt.Sprintf("%srepair %s", would, p))
+		lines = append(lines, "repair "+p)
 	}
 	for _, p := range res.Dropped {
-		lines = append(lines, fmt.Sprintf("%sdrop registration of %s (directory gone)", would, p))
+		lines = append(lines, fmt.Sprintf("drop registration of %s (directory gone)", p))
 	}
 	for _, r := range res.Removed {
-		lines = append(lines, fmt.Sprintf("%sremove %s", would, r.Path))
+		lines = append(lines, "remove "+r.Path)
 		for _, b := range r.Branches {
 			if !b.Deleted {
 				lines = append(lines, fmt.Sprintf("kept %s:%s, %s", b.Folder, b.Branch, b.Reason))

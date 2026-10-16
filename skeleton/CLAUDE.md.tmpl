@@ -17,13 +17,14 @@ Worktrees of a copy live at `<copy>/.wt/<name>/` (`mws wt new <name>`); use the 
 
 ```
 {{.ProjectName}}/            # meta root: git repo for harness + config only
-├── .mws.toml          # mws config: repos, env mappings, setup commands
+├── .mws.toml          # mws config: repos, env mappings, setup commands, ports
 ├── .mws/              # harness; every entry symlinks into every working copy
 ├── .envs/             # env staging, copied into new copies (untracked)
 ├── .trash/            # copies removed by `mws rm` (untracked)
 └── <copy>/            # a working copy (untracked); not a git repo at the top level
     ├── <repo>/        # native repo: own .git/, own branch
     ├── .scratch/      # copy-local in-flight work
+    ├── .mws-ports.env # port lease, once the copy claims a slot (generated; never edit)
     ├── .wt/<name>/    # worktrees of this copy
     └── CLAUDE.md .claude/ .workspace/ ...  # symlinks into <meta>/.mws/
 ```
@@ -31,17 +32,21 @@ Worktrees of a copy live at `<copy>/.wt/<name>/` (`mws wt new <name>`); use the 
 ## Git
 
 - Code: commit inside the native repo, `git -C <repo> ...`.
-- Harness and config: the meta root (nearest ancestor holding `.mws.toml`) is the repo -- `git -C <meta> add .gitignore .mws.toml .mws README.md CLAUDE.md && git -C <meta> commit`.
+- Harness and config: the meta root (nearest ancestor holding `.mws.toml`) is the repo, and `mws init` already committed it. Commit later changes with `git -C <meta> add .gitignore .mws.toml .mws README.md CLAUDE.md && git -C <meta> commit`.
 
 ## mws commands
 
 ```bash
-mws list                       # working copies of this meta workspace
-mws clone <name>               # new peer working copy: clones repos, copies env files, runs setup commands
-mws rm <name>                  # move a copy to .trash/ (mws restore <name> undoes it)
+mws ls                         # working copies of this meta workspace, with their ports
+mws path [copy]                # absolute path of a working copy
+mws clone <name>               # new peer working copy: clones repos, renders env files, runs setup commands
+mws rm <copy>                  # move a copy to .trash/ (mws restore <copy> undoes it)
 mws promote <path>             # move a copy-local file into the harness, symlink it into every copy
 mws relink                     # re-create harness symlinks in every copy
-mws sync-env [copy]            # reset a copy's env files to staged defaults
-mws stage-env [copy]           # capture a copy's env files into staging
+mws env sync [copy]            # re-render a copy's env files from staging
+mws env stage [copy]           # capture a copy's env files into staging
+mws env diff [copy]            # compare a copy's env files with staging
+mws ports [copy]               # a copy's port slot and exported variables
+mws ports claim|release [copy] # give a copy its own port slot, or put it back on the defaults
 mws wt new|ls|rm|path <name>   # worktrees of the current copy
 ```

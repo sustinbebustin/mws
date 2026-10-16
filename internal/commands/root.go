@@ -20,7 +20,8 @@ symlinks.
 Every command runs without prompts when given its arguments and flags. Without
 a terminal on stdin, mws never prompts: a missing input is a usage error that
 shows the invocation supplying it, and a confirmation needs --yes. Results go
-to stdout, progress to stderr; list commands take --json.
+to stdout, progress to stderr; commands with a result (ls, path, clone, rm,
+restore, trash, env, ports, wt) take --json.
 
 Exit codes: 0 ok, 1 failure, 2 usage, 3 refused by a safety check, 4 not found.`
 
@@ -29,6 +30,7 @@ const (
 	groupWorkspace = "workspace"
 	groupCopies    = "copies"
 	groupEnv       = "env"
+	groupPorts     = "ports"
 	groupWorktrees = "worktrees"
 	groupShell     = "shell"
 )
@@ -97,6 +99,7 @@ func NewRootCmd() *cobra.Command {
 		&cobra.Group{ID: groupWorkspace, Title: "Workspace:"},
 		&cobra.Group{ID: groupCopies, Title: "Working copies:"},
 		&cobra.Group{ID: groupEnv, Title: "Env files:"},
+		&cobra.Group{ID: groupPorts, Title: "Ports:"},
 		&cobra.Group{ID: groupWorktrees, Title: "Worktrees:"},
 		&cobra.Group{ID: groupShell, Title: "Shell and info:"},
 	)
@@ -108,9 +111,10 @@ func NewRootCmd() *cobra.Command {
 			root.AddCommand(c)
 		}
 	}
-	add(groupWorkspace, newInitCmd(), newAddRepoCmd(), newPromoteCmd(), newRelinkCmd(), newMigrateCmd())
-	add(groupCopies, newCloneCmd(), newIncludeCmd(), newListCmd(), newRmCmd(), newRestoreCmd(), newTrashCmd())
-	add(groupEnv, newStageEnvCmd(), newSyncEnvCmd())
+	add(groupWorkspace, newInitCmd(), newAddRepoCmd(), newPromoteCmd(), newRelinkCmd())
+	add(groupCopies, newCloneCmd(), newIncludeCmd(), newListCmd(), newPathCmd(), newRmCmd(), newRestoreCmd(), newTrashCmd())
+	add(groupEnv, newEnvCmd())
+	add(groupPorts, newPortsCmd())
 	add(groupWorktrees, newWorktreeCmd())
 	add(groupShell, newShellInitCmd(), newVersionCmd())
 	tagUsageArgs(root)
@@ -133,7 +137,11 @@ func tagUsageArgs(c *cobra.Command) {
 // error, at the root (cobra reports it as a plain error) and under a command
 // group such as `mws wt` (cobra prints the group's help and exits 0).
 func Execute(ctx context.Context, args []string) error {
-	root := NewRootCmd()
+	return execute(ctx, NewRootCmd(), args)
+}
+
+// execute is Execute on a caller-built root, so tests can bind its streams.
+func execute(ctx context.Context, root *cobra.Command, args []string) error {
 	root.SetArgs(args)
 	// Find does not know the help command cobra adds lazily, nor the hidden
 	// shell-completion commands; let those through to cobra.

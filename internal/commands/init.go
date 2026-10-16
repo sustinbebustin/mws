@@ -66,7 +66,7 @@ description, no copies subdir, the current directory as parent, no repos) and
 repeatable.`,
 		Example: `  mws init demo
   mws init demo --repo git@github.com:org/api.git --repo web=https://github.com/org/web --yes
-  mws init demo --description "Pitch tooling" --copies-dir copies --parent ~/dev --yes`,
+  mws init demo --description "Demo tooling" --copies-dir copies --parent ~/dev --yes`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var arg string
@@ -318,6 +318,14 @@ func executeInit(ctx context.Context, r Reporter, p *initPlan) error {
 		return err
 	}
 
+	if err := git.CheckIdentity(ctx, p.ParentDir); err != nil {
+		return fmt.Errorf("cannot commit the new meta workspace: git has no user identity, and nothing was created.\n"+
+			"Set one, then re-run:\n"+
+			"  git config --global user.name \"Your Name\"\n"+
+			"  git config --global user.email \"you@example.com\"\n"+
+			"(detail: %v)", err)
+	}
+
 	skeletonData := skeleton.Data{
 		ProjectName: p.ProjectName,
 		Description: p.Description,
@@ -339,6 +347,11 @@ func executeInit(ctx context.Context, r Reporter, p *initPlan) error {
 		return err
 	}
 	if err := git.InitQuiet(ctx, metaDir); err != nil {
+		return err
+	}
+	// Without a commit HEAD is unborn and `mws wt new` cannot base a worktree
+	// anchor on it. The .gitignore allowlist limits this to the meta files.
+	if err := git.CommitAll(ctx, metaDir, "chore: initialize meta workspace"); err != nil {
 		return err
 	}
 	r.OK(fmt.Sprintf("Created meta workspace at %s", metaDir))
@@ -377,7 +390,7 @@ func executeInit(ctx context.Context, r Reporter, p *initPlan) error {
 	}
 
 	if anyEnvMapping(p.Repos) {
-		r.Info(fmt.Sprintf("Populate env files inside %s and run `mws stage-env %s` to capture them into staging.", mainCopy, firstWorkingCopyName))
+		r.Info(fmt.Sprintf("Populate env files inside %s and run `mws env stage %s` to capture them into staging.", mainCopy, firstWorkingCopyName))
 	}
 	if len(failed) > 0 {
 		return fmt.Errorf("init completed with errors: %d repo(s) failed to clone: %s", len(failed), strings.Join(failed, ", "))

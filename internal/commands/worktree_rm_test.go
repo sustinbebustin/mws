@@ -14,7 +14,7 @@ import (
 )
 
 // decodeJSON parses stdout as exactly one JSON object into v.
-func decodeJSON(t *testing.T, res wtResult, v any) {
+func decodeJSON(t *testing.T, res mwsResult, v any) {
 	t.Helper()
 	if err := json.Unmarshal([]byte(res.stdout), v); err != nil {
 		t.Fatalf("stdout is not one JSON object: %v\n%s", err, res.stdout)
@@ -27,7 +27,7 @@ type jsonErrorOut struct {
 }
 
 // decodeError returns the {"error": ...} object of a failed --json run.
-func decodeError(t *testing.T, res wtResult) jsonErrorOut {
+func decodeError(t *testing.T, res mwsResult) jsonErrorOut {
 	t.Helper()
 	var out struct {
 		Error *jsonErrorOut `json:"error"`
@@ -143,7 +143,7 @@ func TestWtRmRefusesRootFilesUnlessForced(t *testing.T) {
 	for name, change := range map[string]func(root string){
 		"new file":    func(root string) { writeFileAll(t, filepath.Join(root, "plan.md"), "plan") },
 		"new dir":     func(root string) { writeFileAll(t, filepath.Join(root, "notes", "a.md"), "a") },
-		"edited copy": func(root string) { writeFileAll(t, filepath.Join(root, ".ports.env"), "PITCH_SLOT=9\n") },
+		"edited copy": func(root string) { writeFileAll(t, filepath.Join(root, ".ports.env"), "APP_SLOT=9\n") },
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := seedWtWorkspace(t)
@@ -171,7 +171,7 @@ func TestWtRmRefusesRootFilesUnlessForced(t *testing.T) {
 func TestWtRmIgnoresChangesInTheCopyRoot(t *testing.T) {
 	f := seedWtWorkspace(t)
 	mustNew(t, f.copy, "x", "--no-setup")
-	writeFileAll(t, filepath.Join(f.copy, ".ports.env"), "PITCH_SLOT=9\n")
+	writeFileAll(t, filepath.Join(f.copy, ".ports.env"), "APP_SLOT=9\n")
 
 	if res := runWt(t, f.copy, "rm", "x"); res.code != 0 {
 		t.Fatalf("exit %d\nstderr: %s", res.code, res.stderr)

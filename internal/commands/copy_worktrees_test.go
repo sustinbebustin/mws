@@ -51,10 +51,10 @@ func TestRestoreRepairsWorktrees(t *testing.T) {
 			writeFileAll(t, filepath.Join(f.wtPath("x"), "frontend", "wip.txt"), "unsaved")
 
 			withCwd(t, f.meta, func() {
-				if err := runRm(t.Context(), nopReporter{}, "c", rmFlags{yes: true}); err != nil {
+				if err := runRm(t.Context(), discardOut, "c", rmFlags{yes: true}); err != nil {
 					t.Fatalf("runRm: %v", err)
 				}
-				if err := runRestore(t.Context(), nopReporter{}, "c", tc.as, true); err != nil {
+				if err := runRestore(t.Context(), discardOut, "c", tc.as, true); err != nil {
 					t.Fatalf("runRestore: %v", err)
 				}
 			})
@@ -75,11 +75,11 @@ func TestRestoreSurvivesAMetaPruneWhileTrashed(t *testing.T) {
 	writeFileAll(t, filepath.Join(f.wtPath("x"), "frontend", "wip.txt"), "unsaved")
 
 	withCwd(t, f.meta, func() {
-		if err := runRm(t.Context(), nopReporter{}, "c", rmFlags{yes: true}); err != nil {
+		if err := runRm(t.Context(), discardOut, "c", rmFlags{yes: true}); err != nil {
 			t.Fatalf("runRm: %v", err)
 		}
 		gitT(t, f.meta, "worktree", "prune")
-		if err := runRestore(t.Context(), nopReporter{}, "c", "", true); err != nil {
+		if err := runRestore(t.Context(), discardOut, "c", "", true); err != nil {
 			t.Fatalf("runRestore: %v", err)
 		}
 	})
@@ -96,7 +96,7 @@ func TestRelinkRepairsHarnessSymlinksInWorktrees(t *testing.T) {
 	gitignore := readFile(t, filepath.Join(root, ".gitignore"))
 
 	withCwd(t, f.meta, func() {
-		if err := runRelink(nopReporter{}, relinkFlags{}); err != nil {
+		if err := runRelink(discardOut, relinkFlags{}); err != nil {
 			t.Fatalf("runRelink: %v", err)
 		}
 	})
@@ -116,16 +116,16 @@ func TestTrashPurgeDropsMetaWorktreeRegistrations(t *testing.T) {
 		name  string
 		purge func(t *testing.T) error
 	}{
-		{"prune", func(t *testing.T) error { return runTrashPrune(t.Context(), nopReporter{}, false) }},
+		{"prune", func(t *testing.T) error { return runTrashPrune(t.Context(), discardOut, false) }},
 		{"empty", func(t *testing.T) error {
-			return runTrashEmpty(t.Context(), nopReporter{}, confirmFlags{yes: true})
+			return runTrashEmpty(t.Context(), discardOut, confirmFlags{yes: true})
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := seedWtWorkspace(t)
 			mustNew(t, f.copy, "x", "--no-setup")
 			withCwd(t, f.meta, func() {
-				if err := runRm(t.Context(), nopReporter{}, "c", rmFlags{yes: true}); err != nil {
+				if err := runRm(t.Context(), discardOut, "c", rmFlags{yes: true}); err != nil {
 					t.Fatalf("runRm: %v", err)
 				}
 				entries, _, err := trash.List(f.meta)
@@ -159,12 +159,12 @@ func TestRmConfirmationListsWorktrees(t *testing.T) {
 	}
 
 	for _, toTrash := range []bool{true, false} {
-		got := rmConfirmDescription(f.meta, "c", toTrash, wts)
+		got := rmConfirmDescription(f.meta, "c", toTrash, 0, wts)
 		if !strings.Contains(got, "worktrees x, y") {
 			t.Fatalf("toTrash=%v: confirmation %q does not list worktrees x, y", toTrash, got)
 		}
 	}
-	if got := rmConfirmDescription(f.meta, "c", true, nil); strings.Contains(got, "worktree") {
+	if got := rmConfirmDescription(f.meta, "c", true, 0, nil); strings.Contains(got, "worktree") {
 		t.Fatalf("confirmation for a copy without worktrees mentions them: %q", got)
 	}
 }
@@ -178,7 +178,7 @@ func TestRmRefusesWhileAWorktreeIsLive(t *testing.T) {
 	agent := startIn(t, filepath.Join(f.wtPath("x"), "frontend"))
 
 	var err error
-	withCwd(t, f.meta, func() { err = runRm(t.Context(), nopReporter{}, "c", rmFlags{yes: true}) })
+	withCwd(t, f.meta, func() { err = runRm(t.Context(), discardOut, "c", rmFlags{yes: true}) })
 	if err == nil {
 		t.Fatal("rm removed a copy whose worktree has a live process")
 	}
@@ -212,16 +212,23 @@ func TestListCountsWorktreesPerCopyWithoutListingThem(t *testing.T) {
 			t.Fatalf("runList --json: %v", err)
 		}
 	})
-	if got, want := out.String(), "* c  (+2 worktrees)\n"; got != want {
+	if got, want := out.String(), "* c  default  (+2 worktrees)\n"; got != want {
 		t.Fatalf("list stdout = %q, want %q", got, want)
 	}
+	type lsCopy struct {
+		Copy      string `json:"copy"`
+		Path      string `json:"path"`
+		Current   bool   `json:"current"`
+		Ports     string `json:"ports"`
+		Worktrees int    `json:"worktrees"`
+	}
 	var got struct {
-		Copies []copyJSON `json:"copies"`
+		Copies []lsCopy `json:"copies"`
 	}
 	if err := json.Unmarshal(jsonOut.Bytes(), &got); err != nil {
 		t.Fatalf("list --json: %v\n%s", err, jsonOut.String())
 	}
-	want := []copyJSON{{Name: "c", Path: f.copy, Current: true, Worktrees: 2}}
+	want := []lsCopy{{Copy: "c", Path: f.copy, Current: true, Ports: "default", Worktrees: 2}}
 	if !slices.Equal(got.Copies, want) {
 		t.Fatalf("list --json copies = %+v, want %+v", got.Copies, want)
 	}

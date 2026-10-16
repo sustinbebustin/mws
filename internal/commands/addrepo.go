@@ -106,7 +106,7 @@ func runAddRepo(ctx context.Context, r Reporter, repoURL, folder string, optiona
 	case config.FolderTaken:
 		return clierr.Refusedf("folder %q is already registered, with another URL or in the other repo list; nothing was changed; check .mws.toml in %s or pass another folder", folder, ws.MetaRoot)
 	case config.Registered:
-		if err := config.Save(ws.MetaRoot, cfg); err != nil {
+		if err := config.AppendRepo(ws.MetaRoot, list, folder, repoURL); err != nil {
 			return err
 		}
 		r.OK(fmt.Sprintf("Registered %s -> %s", folder, repoURL))

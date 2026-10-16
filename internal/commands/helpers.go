@@ -3,18 +3,44 @@ package commands
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
 
 	"github.com/sustinbebustin/mws/internal/atomicfile"
+	"github.com/sustinbebustin/mws/internal/clierr"
 	"github.com/sustinbebustin/mws/internal/project"
 )
 
 // envStagingDir returns the env-staging root inside metaRoot.
 func envStagingDir(metaRoot string) string {
 	return filepath.Join(metaRoot, project.EnvStagingDirName)
+}
+
+// resolveCopy is ws.ResolveCopy with its failures tagged for the exit code: a
+// missing or invalid copy name is a usage error (exit 2) that shows the
+// invocation naming one, and a name with no working copy is not found (exit
+// 4). invocation is the command line with a `<copy>` placeholder, e.g.
+// "mws env sync <copy>".
+func resolveCopy(ws *project.Workspace, name, invocation string) (string, error) {
+	if name != "" {
+		if err := project.ValidateName(name); err != nil {
+			return "", usagef("working copy name %q: %w; run `%s` with the name of a working copy (`mws ls` shows them)", name, err, invocation)
+		}
+	}
+	target, err := ws.ResolveCopy(name)
+	switch {
+	case err == nil:
+		return target, nil
+	case errors.Is(err, project.ErrNoCopyNamed):
+		return "", usagef("%w (under %s); run `%s` (`mws ls` shows the copies) or run from inside a working copy", err, ws.MetaRoot, invocation)
+	case errors.Is(err, fs.ErrNotExist):
+		return "", clierr.NotFoundf("no working copy %q under %s; `mws ls` lists the copies", name, ws.CopiesRoot())
+	default:
+		return "", clierr.Failuref("%w", err)
+	}
 }
 
 // looksLikeWorkingCopy reports whether candidate is plausibly an mws-managed

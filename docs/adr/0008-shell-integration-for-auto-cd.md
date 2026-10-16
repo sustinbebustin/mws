@@ -1,16 +1,16 @@
 # Shell integration for auto-cd after `mws clone`
 
-Add an optional shell-function wrapper, distributed via a new `mws shell-init <zsh|bash|fish>` subcommand. With the wrapper installed, `mws clone <name>` lands the user's shell inside the new **Working copy** on success. Without it, `mws clone` prints a copy-pasteable `Next: cd <abs path>` hint after the final `[OK]` line.
+Add an optional shell-function wrapper, distributed via a new `mws shell-init <zsh|bash|fish>` subcommand. With the wrapper installed, `mws clone <name>` lands the user's shell inside the new **Working copy** on success. Without it, `mws clone` still prints the copy's path as its last stdout line (ADR-0012), for the caller to `cd` into. Amended: the original `Next: cd <abs path>` hint line is gone.
 
 The handoff channel is a tempfile path passed through `MWS_CD_FILE`. The wrapper creates the tempfile, sets the env var, runs the binary, and on a zero exit reads the path and `cd`s into it. The binary writes to the file only when the env var is set; nothing is emitted to stdout/stderr for the wrapper to parse.
 
-The wrapper only intercepts `clone`. Every other subcommand is a pure passthrough via `command mws`.
+The wrapper intercepts `clone` and `restore` (see the amendment under Consequences). Every other subcommand is a pure passthrough via `command mws`.
 
 ## Why
 
 `cd <copies-root>/<name>/` is the universal next step after every successful clone. The path is already known at the moment the command finishes -- forcing the user to copy or retype it is friction with no upside. The standard solution across CLIs of this shape (`zoxide`, `mise`, `nvm`, `broot`, `nnn`, `pyenv`, ...) is a one-time-installed shell wrapper. A child process cannot change its parent shell's working directory, so this is the only mechanism that actually delivers auto-cd.
 
-The opt-in shape keeps the binary's behavior identical for non-adopters (CI, scripts, IDE invocations, users who never run the install line). They get a hint line instead of an auto-cd; correctness and exit codes are unchanged.
+The opt-in shape keeps the binary's behavior identical for non-adopters (CI, scripts, IDE invocations, users who never run the install line). They get the path on stdout instead of an auto-cd; correctness and exit codes are unchanged.
 
 ## Considered options
 
@@ -21,7 +21,9 @@ The opt-in shape keeps the binary's behavior identical for non-adopters (CI, scr
 
 ## Consequences
 
-- The shell wrapper detects `clone` by exact match on `$argv[1]` (POSIX `$1`). mws has no global flags today (see `internal/commands/root.go`), so `mws clone foo` and `mws clone --setup foo` both work. If a global flag is added later (e.g. `mws --quiet clone foo`), the wrapper will miss the dispatch and `clone` will not auto-cd -- the binary still emits the hint as a fallback. Update the wrapper template when introducing the first global flag.
+- The shell wrapper detects `clone` by exact match on `$argv[1]` (POSIX `$1`). mws has no global flags today (see `internal/commands/root.go`), so `mws clone foo` and `mws clone --setup foo` both work. If a global flag is added later (e.g. `mws --quiet clone foo`), the wrapper will miss the dispatch and `clone` will not auto-cd -- the binary still prints the path as a fallback. Update the wrapper template when introducing the first global flag.
 - `MWS_CD_FILE` becomes a documented contract: any third-party process (IDE plugin, custom wrapper, build script) can set `MWS_CD_FILE=/some/path` before invoking `mws clone`, read the file afterwards, and use the path however it wants. Future commands that create a new directory the user wants to enter (none planned today) can adopt the same channel.
-- Behavior diff is invisible in scripted/CI contexts -- those never set `MWS_CD_FILE` and won't `eval` the shell-init output. The new `Next: cd <path>` line appears as a `[dim]` Info line, consistent with the rest of mws's UI.
+- Behavior diff is invisible in scripted/CI contexts -- those never set `MWS_CD_FILE` and won't `eval` the shell-init output. The path line on stdout is the same one they already parse.
+- Amended: the wrapper also intercepts `restore`, which lands the user in a directory just as `clone` does and writes `MWS_CD_FILE` the same way. The match is `$1` in `clone|restore`; the global-flag caveat above applies to both.
+- Amended: `mws shell-init --install` writes the eval line (fish: the `source` line) to the shell's rc file (`~/.zshrc` honouring `$ZDOTDIR`, `~/.bashrc`, `~/.config/fish/config.fish`) between `# >>> mws shell-init >>>` / `# <<< mws shell-init <<<` markers, so a second run finds the marker and changes nothing. The wrapper sets `MWS_SHELL_WRAPPER=1` on each `mws` it runs (`MWS_SHELL_WRAPPER=1 command mws "$@"`), never in the shell itself, so a child shell or script calling the binary directly does not inherit it and look wrapped; `mws shell-init --status` combines that with the marker to report `active`, `installed but not loaded in this shell` or `not installed`. The shell argument defaults to the one `$SHELL` names. The Homebrew formula's caveat points at `--install`.
 - The wrapper is the user's shell function, not mws code. If a user customises it (e.g. to also `git pull` on entry), they own the divergence -- mws doesn't track installed wrapper versions.

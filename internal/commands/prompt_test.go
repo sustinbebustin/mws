@@ -17,10 +17,10 @@ import (
 	"github.com/sustinbebustin/mws/internal/trash"
 )
 
-// noTerminal makes canPrompt report no terminal for the rest of the test, as
-// for an agent or a script.
 func ptr[T any](v T) *T { return &v }
 
+// noTerminal makes canPrompt report no terminal for the rest of the test, as
+// for an agent or a script.
 func noTerminal(t *testing.T) {
 	t.Helper()
 	prev := canPrompt
@@ -35,12 +35,14 @@ func TestUsageErrorsExitTwo(t *testing.T) {
 		{"clone", "a", "b"},
 		{"clone", "a", "--setup", "--no-setup"},
 		{"clone", "a", "--with", "x", "--no-optional"},
-		{"shell-init"},
+		{"shell-init", "powershell"},
+		{"shell-init", "zsh", "--install", "--status"},
 		{"wt", "new"},
 		{"wt", "bogus"},
 		{"wt", "ls", "--bogus"},
 		{"wt", "hook", "create", "extra"},
 		{"trash", "bogus"},
+		{"migrate", "some-path"},
 	} {
 		err := Execute(context.Background(), args)
 		if got := ExitCode(err); got != 2 {
@@ -93,6 +95,7 @@ func TestInitWithoutTerminal(t *testing.T) {
 		t.Skip("git not on PATH")
 	}
 	noTerminal(t)
+	isolateGit(t, true)
 	parent, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -137,19 +140,19 @@ func TestRmWithoutTerminal(t *testing.T) {
 	f := seedWtWorkspace(t)
 	noTerminal(t)
 	withCwd(t, f.meta, func() {
-		if err := runRm(t.Context(), nopReporter{}, "c", rmFlags{}); ExitCode(err) != 2 {
+		if err := runRm(t.Context(), discardOut, "c", rmFlags{}); ExitCode(err) != 2 {
 			t.Fatalf("rm without --yes: %v (exit %d), want a usage error", err, ExitCode(err))
 		}
-		if err := runRm(t.Context(), nopReporter{}, "c", rmFlags{dryRun: true}); err != nil {
+		if err := runRm(t.Context(), discardOut, "c", rmFlags{dryRun: true}); err != nil {
 			t.Fatalf("rm --dry-run: %v", err)
 		}
 		if _, err := os.Stat(f.copy); err != nil {
 			t.Fatalf("rm --dry-run removed the copy: %v", err)
 		}
-		if err := runRm(t.Context(), nopReporter{}, "c", rmFlags{yes: true}); err != nil {
+		if err := runRm(t.Context(), discardOut, "c", rmFlags{yes: true}); err != nil {
 			t.Fatalf("rm --yes: %v", err)
 		}
-		err := runRm(t.Context(), nopReporter{}, "c", rmFlags{yes: true})
+		err := runRm(t.Context(), discardOut, "c", rmFlags{yes: true})
 		if ExitCode(err) != 4 || !strings.Contains(err.Error(), "previous rm already removed it") {
 			t.Fatalf("rm --yes of a copy already in the trash: %v (exit %d), want exit 4 naming the trash entry", err, ExitCode(err))
 		}
@@ -165,18 +168,18 @@ func TestRelinkDivergedFileWithoutTerminal(t *testing.T) {
 	mustWriteFile(t, filepath.Join(peer, ".mcp.json"), "peer")
 	noTerminal(t)
 	withCwd(t, meta, func() {
-		if err := runRelink(nopReporter{}, relinkFlags{}); ExitCode(err) != 2 || !strings.Contains(err.Error(), "--prefer") {
+		if err := runRelink(discardOut, relinkFlags{}); ExitCode(err) != 2 || !strings.Contains(err.Error(), "--prefer") {
 			t.Fatalf("relink: %v (exit %d), want a usage error naming --prefer", err, ExitCode(err))
 		}
-		if err := runRelink(nopReporter{}, relinkFlags{dryRun: true}); err != nil {
+		if err := runRelink(discardOut, relinkFlags{dryRun: true}); err != nil {
 			t.Fatalf("relink --dry-run: %v", err)
 		}
-		if err := runRelink(nopReporter{}, relinkFlags{prefer: resolveMeta}); err != nil {
-			t.Fatalf("relink --prefer meta: %v", err)
+		if err := runRelink(discardOut, relinkFlags{prefer: keepHarness}); err != nil {
+			t.Fatalf("relink --prefer harness: %v", err)
 		}
 	})
 	if st, err := os.Lstat(filepath.Join(peer, ".mcp.json")); err != nil || st.Mode()&os.ModeSymlink == 0 {
-		t.Fatalf("peer .mcp.json should be a harness symlink after --prefer meta: %v", err)
+		t.Fatalf("copy .mcp.json should be a harness symlink after --prefer harness: %v", err)
 	}
 }
 
@@ -200,11 +203,11 @@ func TestRelinkRefusesBeforeChangingAnything(t *testing.T) {
 		f    relinkFlags
 	}{
 		{"no terminal, no --prefer", relinkFlags{}},
-		{"--prefer peer with two versions", relinkFlags{prefer: resolvePeer}},
-		{"--dry-run --prefer peer", relinkFlags{prefer: resolvePeer, dryRun: true}},
+		{"--prefer copy with two versions", relinkFlags{prefer: takeCopy}},
+		{"--dry-run --prefer copy", relinkFlags{prefer: takeCopy, dryRun: true}},
 	} {
 		withCwd(t, meta, func() {
-			if err := runRelink(nopReporter{}, tc.f); ExitCode(err) != 2 {
+			if err := runRelink(discardOut, tc.f); ExitCode(err) != 2 {
 				t.Fatalf("%s: %v (exit %d), want a usage error", tc.name, err, ExitCode(err))
 			}
 		})
@@ -245,14 +248,14 @@ func TestAddRepoTwiceWithTheSameURLSucceeds(t *testing.T) {
 func TestTrashEmptyWithoutTerminalNeedsYes(t *testing.T) {
 	f := seedWtWorkspace(t)
 	withCwd(t, f.meta, func() {
-		if err := runRm(t.Context(), nopReporter{}, "c", rmFlags{yes: true}); err != nil {
+		if err := runRm(t.Context(), discardOut, "c", rmFlags{yes: true}); err != nil {
 			t.Fatal(err)
 		}
 		noTerminal(t)
-		if err := runTrashEmpty(t.Context(), nopReporter{}, confirmFlags{}); ExitCode(err) != 2 {
+		if err := runTrashEmpty(t.Context(), discardOut, confirmFlags{}); ExitCode(err) != 2 {
 			t.Fatalf("trash empty: %v (exit %d), want a usage error", err, ExitCode(err))
 		}
-		if err := runTrashEmpty(t.Context(), nopReporter{}, confirmFlags{dryRun: true}); err != nil {
+		if err := runTrashEmpty(t.Context(), discardOut, confirmFlags{dryRun: true}); err != nil {
 			t.Fatalf("trash empty --dry-run: %v", err)
 		}
 		if entries, _, _ := trash.List(f.meta); len(entries) != 1 {

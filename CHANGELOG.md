@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Per-copy port slots, so parallel working copies can run their stacks side by side. `.mws.toml` gains `[ports]` (named base ports, stride, slot cap), `[vars]` (derived values such as URLs) and `[[renders]]` (harness `.render` sources rendered into each copy). Env files and render sources substitute `${VAR}` placeholders at the copy's slot; slot 0 keeps the base ports.
+- `mws ports [copy]` shows a copy's slot and exported variables (`--export` for shell use); `mws ports claim|release [copy]` moves a copy onto its own slot or back to the defaults (`--slot N` picks one); `mws ports ls` lists every copy's slot, conflicts and the next free slot; `mws ports check` reports which of the copy's ports are listening. The slot is recorded in a `.mws-ports.env` lease inside the copy, which `just` and direnv can read.
+- `mws clone --ports` claims the lowest free slot after cloning. Without it, a workspace with `[ports]` ends the clone with a `[WARN]` that the copy shares the default ports.
+- `mws ls` shows each copy's ports (`default` or `slot N`).
+- Root `[[setup]]` commands run once per copy after `clone`, `include`, `env sync` and `ports claim|release` (`--setup`/`--no-setup`), and every setup command sees the copy's port and variable exports.
+- Every render re-renders the copy's worktrees' carried files that are still untouched, and warns about edited ones instead of overwriting them.
+- `mws clone`, `mws rm` and `mws restore` take `--json`; `mws path [copy]` prints a working copy's absolute path, with `--json`.
+- `mws env diff [copy|--all]` reports each env file as `same`, `differs`, `missing in copy` or `missing in staging`, exiting `0` only when all are the same.
+- `mws shell-init --install` adds the line that loads the shell wrapper to your rc file, once; `mws shell-init --status` says whether the wrapper is active in this shell. The shell argument defaults to the one `$SHELL` names.
+
+### Changed
+- **BREAKING:** `mws sync-env` and `mws stage-env` are replaced by `mws env sync [copy] [--all] [--dry-run]` and `mws env stage [copy] [--dry-run] [--force]` (the old names exit `2`). Both cover the optional repos present in a copy; `env stage` skips files holding placeholders unless `--force`, and refuses inside a worktree.
+- **BREAKING:** `ls` is the only list spelling: `mws ls`, `mws trash ls`, `mws wt ls`.
+- **BREAKING:** `mws ls --json` keys each working copy as `copy` instead of `name`.
+- **BREAKING:** `mws relink --prefer` takes `copy|harness|skip` instead of `peer|meta|skip`.
+- `mws rm` releases the copy's slot before trashing it, so `mws restore` brings it back on the default ports; `--dry-run`, `--json` and the confirmation name the slot given back.
+- `mws clone`, `mws include` and `mws restore` render env files through the same path as `mws env sync`; `restore` resets a restored copy's env files to staging.
+- A command that targets a working copy exits `2` when none is named outside a copy or the name is invalid, and `4` when no working copy has that name.
+- `mws promote` refuses (exit `3`) mws markers (`.mws-*`) and `[[renders]]` targets, and links the promoted entry into every copy's worktrees.
+- Every `--dry-run` prints only `would <verb> <object>` lines on stdout; notes go to stderr.
+- `mws trash prune` and `mws trash empty` honour `--json`.
+- The shell wrapper cds into the copy after `mws restore` as well as `mws clone`.
+
+### Removed
+- `mws migrate`, the sibling-meta to meta-at-root converter.
+
+### Fixed
+- `mws add-repo` appends to `.mws.toml` instead of rewriting it, so comments, layout and unknown keys survive.
+- `mws init` commits the rendered skeleton, so `mws wt new` works in a fresh workspace; it fails early when no git identity is configured.
+- `mws promote` refuses native repo folders and the worktrees dir instead of moving them into the harness.
+
 ## [0.7.0] - 2026-10-14
 
 ### Added

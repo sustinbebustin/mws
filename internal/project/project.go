@@ -16,6 +16,10 @@ import (
 // ErrNotInWorkspace indicates the cwd is not inside any meta workspace.
 var ErrNotInWorkspace = errors.New("not inside a meta workspace")
 
+// ErrNoCopyNamed indicates ResolveCopy was given no name outside every
+// working copy, so there is no copy to default to.
+var ErrNoCopyNamed = errors.New("no working copy named, and the current directory is not inside one")
+
 // HarnessDirName is the meta-root directory that holds harness content that
 // fans out into every working copy.
 const HarnessDirName = ".mws"
@@ -194,12 +198,13 @@ func (w *Workspace) EnumerateCopies() ([]string, error) {
 
 // ResolveCopy resolves an optional name to an absolute working-copy path
 // inside w.CopiesRoot(). If name is empty, w.WorkingCopy is used as a fallback
-// (so commands run from inside a working copy default to that copy). The
-// resulting path is verified to exist as a directory.
+// (so commands run from inside a working copy default to that copy), and
+// ErrNoCopyNamed is returned when there is none. The resulting path is
+// verified to exist as a directory.
 func (w *Workspace) ResolveCopy(name string) (string, error) {
 	if name == "" {
 		if w.WorkingCopy == "" {
-			return "", fmt.Errorf("no working copy named, and the current directory is not inside one; pass the copy's name as an argument (`mws list` shows them) or run from inside a working copy of %s", w.MetaRoot)
+			return "", ErrNoCopyNamed
 		}
 		name = filepath.Base(w.WorkingCopy)
 	}
