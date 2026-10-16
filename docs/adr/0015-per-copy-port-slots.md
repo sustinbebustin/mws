@@ -78,43 +78,42 @@ failure, exit 4 for an unknown copy, one `would <verb> <object>` voice under
 
 Peer working copies exist so stacks can run side by side, and today they
 cannot: every copy renders the same env files, so the second `supabase start`
-or `next dev` collides with the first. The app meta solved this with two
+or `next dev` collides with the first. A meta can work around this with two
 harness scripts, `sync-ports` and `unsync-ports`, which allocate a slot from a
-registry line, `sed`-rewrite eight env files, append managed blocks, upsert a
-`PORT` pin and regenerate `.mcp.json`. Their history is a list of failure modes
-that a mechanism inside mws has to make impossible rather than patch:
+registry line, `sed`-rewrite the env files, append managed blocks, upsert a
+`PORT` pin and regenerate `.mcp.json`. Such scripts show a list of failure
+modes that a mechanism inside mws has to make impossible rather than patch:
 
-- **Two copies of the port list drifted.** The hs app's port was added to
-  `sync-ports` (9224c02) and only later to `unsync-ports` (71e0db4); between
-  the two the inverse was wrong. The inverse must not exist: rendering a
-  source at slot 0 is the undo of rendering it at slot `k`.
-- **Rewriting depended on history.** A copy that changed slot kept the old
-  ports because the `sed` matched only slot-0 values; the fix mapped
-  `prev -> 0 -> new` (380bc96) and read the previous slot out of `.ports.env`
-  before overwriting it. A render is a pure function of (source, slot).
-- **Absent vars fell back silently.** Cross-app URLs missing from `.env.local`
-  defaulted to slot-0 ports, so a copy quietly addressed another copy's apps
-  (380bc96, `set_local_url`). With placeholders, the staged file is the complete
-  list.
-- **The registry leaked and sat in the harness.** `.mws/ports.registry` still
-  holds `3 cdx-fix` for a copy that was trashed, and because it lives in
-  `.mws/` it is symlinked into every working copy. A lease inside the copy is
+- **Two copies of the port list drift.** A new app's port gets added to
+  `sync-ports` and only later to `unsync-ports`; between the two the inverse
+  is wrong. The inverse must not exist: rendering a source at slot 0 is the
+  undo of rendering it at slot `k`.
+- **Rewriting depends on history.** A copy that changes slot keeps the old
+  ports when the `sed` matches only slot-0 values; the fix maps
+  `prev -> 0 -> new` and reads the previous slot out of a dotenv file before
+  overwriting it. A render is a pure function of (source, slot).
+- **Absent vars fall back silently.** Cross-app URLs missing from `.env.local`
+  default to slot-0 ports, so a copy quietly addresses another copy's apps.
+  With placeholders, the staged file is the complete list.
+- **The registry leaks and sits in the harness.** A registry under `.mws/`
+  keeps lines for copies that were trashed, and because it lives in `.mws/`
+  it is symlinked into every working copy. A lease inside the copy is
   dropped by `rm` and never fans out.
-- **A forgotten sync was silent.** `quick-fixes` has no registry line;
-  nothing said so, so it renders the default ports and collides with `main`.
+- **A forgotten sync is silent.** A copy with no registry line renders the
+  default ports and collides with `main`, and nothing says so.
   Allocation stays opt-in (a copy on the shared default stack is a legitimate
   state), but `mws clone` and `mws ls` say which copies are on the defaults.
-- **The harness symlink fought the generated file.** `sync-ports` replaces
+- **The harness symlink fights the generated file.** `sync-ports` replaces
   the `.mcp.json` symlink with a file; `mws relink` then sees a diverged
   harness file and `--prefer peer` would move one copy's ports into the
-  harness (`main/.mcp.json` is a symlink again today). Rendering
-  `.mcp.json.render` to `.mcp.json` gives the two different names.
-- **Worktrees needed a guard** (92c5084) because the scripts located the copy
-  from `$PWD`. `project.Locate` already resolves a worktree to its copy.
-- **`.envrc` plumbing** (`source_up_if_exists`, da1204f) is direnv policy for
-  one project and belongs in its harness.
+  harness. Rendering `.mcp.json.render` to `.mcp.json` gives the two
+  different names.
+- **Worktrees need a guard** because the scripts locate the copy from
+  `$PWD`. `project.Locate` already resolves a worktree to its copy.
+- **`.envrc` plumbing** (`source_up_if_exists`) is direnv policy for one
+  project and belongs in its harness.
 
-The mechanism also has to stay domain-free (CLAUDE.md): no `APP_` prefix,
+The mechanism also has to stay domain-free (CLAUDE.md): no project prefix,
 no fixed port list, no fixed file list, no Supabase, no cookie names in Go.
 Each of those becomes a line of `.mws.toml` or a line in a staged source.
 
@@ -182,7 +181,7 @@ Each of those becomes a line of `.mws.toml` or a line in a staged source.
   containers and volumes, not host ports, and both take literal ports from the
   environment. `${MWS_COPY_SLUG}` exists so a derived var can feed them.
 - **Per-copy hostnames instead of ports** (`notes.shop.localhost` through
-  puma-dev or portless). Weighed seriously: the cookie hack in `sync-ports`
+  puma-dev or portless). Weighed seriously: a per-port cookie name
   (`NEXT_PUBLIC_AUTH_COOKIE_NAME=app-auth-token-<port>`) is a symptom of
   browsers scoping cookies by host and ignoring the port, and hostnames fix
   that properly. Rejected as the mechanism: it hides ports rather than
@@ -235,7 +234,7 @@ Each of those becomes a line of `.mws.toml` or a line in a staged source.
   the stride, and then at slot `d = (b - a) / stride`; `Config.Validate`
   rejects such a pair unless the effective limit (`slots`, or the last slot
   whose ports stay at or below 65535) is below `d`. The allocator stops at
-  that limit. For app (bases 3000, 3001, 3002, 8088, 54320-54323;
+  that limit. For the example below (bases 3000, 3001, 3002, 8088, 54320-54323;
   stride 10) the limit is 1121, set by 54323. Three pairs (3000/54320,
   3001/54321, 3002/54322) are congruent modulo 10 but first meet at slot
   5132, past the limit, so the config is valid.
@@ -301,22 +300,24 @@ Each of those becomes a line of `.mws.toml` or a line in a staged source.
   committing the skeleton, `promote` linking into worktrees, `trash --json`
   on every subcommand, `--json` on `clone`, `rm` and `restore`,
   `mws path <copy>`, and the removal of the sibling-meta converter.
-- **app migration** is config plus placeholders: the `[ports]` and
-  `[vars]` tables below, placeholders in the nine staged files,
-  `.mws/.mcp.json` renamed to `.mws/.mcp.json.render`, the two `.envrc` lines
-  moved into `.mws/.envrc`, `mws ports claim <copy> --slot N` once per slotted
-  copy to adopt today's numbers (`main` stays on the defaults, no lease),
-  `.mws/ports.registry` and both scripts deleted, and the justfile's dotenv
-  filename changed. Known differences from `sync-ports` output, each
-  deliberate: a default copy writes explicit values rather than relying on
-  `supabase/.env.development` (same values); the cookie name on the defaults
-  becomes `app-auth-token-3000` (one re-login on `main`); the Supabase
-  project id for `main` becomes `app-main` (one `supabase stop` and
-  start on `main`). There is no slot-0 special case in mws or in the config;
-  `app` as a bare project id can be kept only by writing the project
-  name without `${MWS_COPY_SLUG}`, which would then be shared by every copy.
+- **Migrating from `sed`-based port scripts** is config plus placeholders:
+  `[ports]` and `[vars]` tables, placeholders in the staged files,
+  `.mws/.mcp.json` renamed to `.mws/.mcp.json.render`, `mws ports claim
+  <copy> --slot N` once per slotted copy to adopt its current numbers (`main`
+  stays on the defaults, no lease), and the registry and both scripts
+  deleted. Three differences from such scripts' output are deliberate: a
+  default copy writes explicit values rather than relying on a tool's own
+  defaults file (same values); a port-derived name such as a cookie name
+  changes on the defaults too (`app-auth-token-3000`, one re-login on
+  `main`); a slug-derived project id for `main` becomes `app-main` (one
+  `supabase stop` and start on `main`). There is no slot-0 special case in
+  mws or in the config; a bare project id can be kept only by writing it
+  without `${MWS_COPY_SLUG}`, which would then be shared by every copy.
 
-### app configuration
+### Example: a Next.js + Supabase monorepo
+
+Three Next.js apps (`internal`, `public`, `hs`), a Go backend and a local
+Supabase stack:
 
 ```toml
 [ports]
@@ -380,7 +381,7 @@ becomes a plain list, `APP_SUPABASE_PROJECT_ID=${APP_SUPABASE_PROJECT_ID}`
 and so on; `.envs/frontend/internal.env.local` holds
 `NEXT_PUBLIC_SITE_URL=http://localhost:${APP_INTERNAL_PORT}`,
 `NEXT_PUBLIC_SUPABASE_URL=${APP_SUPABASE_API_URL}`,
-`NEXT_PUBLIC_API_URL=http://localhost:${APP_BACKEND_PORT}/app/api/v1`,
+`NEXT_PUBLIC_API_URL=http://localhost:${APP_BACKEND_PORT}/api/v1`,
 `NEXT_PUBLIC_AUTH_COOKIE_NAME=${APP_AUTH_COOKIE_NAME}`; `.envs/backend/.envrc`
 holds `export PORT=${APP_BACKEND_PORT}`; `.mws/.mcp.json.render` holds
 `"url": "http://localhost:${APP_SUPABASE_API_PORT}/mcp"`. The lease

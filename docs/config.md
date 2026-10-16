@@ -253,7 +253,7 @@ Exit codes follow ADR-0012: `0` ok, `1` failure, `2` usage, `3` refused, `4` not
 
 ### Port examples
 
-app, eight ports and ten derived vars. The highest base, 54323, caps the slot limit at 1121. Three pairs (3000/54320, 3001/54321, 3002/54322) are congruent modulo 10, but they first meet at slot 5132, past that limit.
+A Next.js + Supabase monorepo, eight ports and ten derived vars. The highest base, 54323, caps the slot limit at 1121. Three pairs (3000/54320, 3001/54321, 3002/54322) are congruent modulo 10, but they first meet at slot 5132, past that limit.
 
 ```toml
 [ports]
