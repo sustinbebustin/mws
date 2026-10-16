@@ -114,7 +114,9 @@ that it shares them.
 Re-running for an existing working copy finishes it: registered repos (and
 --with ones) that are missing are cloned and get their env files, setup runs
 for those, and the path is printed. Repos already there are left as they
-are; a re-run that clones nothing changes nothing and runs no setup.
+are; a re-run that clones nothing changes nothing and runs no setup, unless
+--ports is given: then it claims a slot (a copy that holds one keeps it),
+re-renders the copy and runs the root [[setup]] commands once.
 
 --json prints {"copy", "path", "repos", "setup", "ports"} instead of the path:
 the repos cloned this run, the setup outcome ("none" when no command was
@@ -273,8 +275,10 @@ func cloneCopy(ctx context.Context, r Reporter, name string, choice setupChoice,
 	missing := missingRepos(target, repos)
 	if existing && len(missing) == 0 {
 		r.Info(fmt.Sprintf("Working copy %s already exists and has every repo", target))
-		warnDefaultPorts(r, cfg, target)
-		return cloneResult{Copy: name, Path: target, Repos: []string{}, Setup: setupNone, Ports: copyPorts(target)}, nil
+		if !claimPorts {
+			warnDefaultPorts(r, cfg, target)
+			return cloneResult{Copy: name, Path: target, Repos: []string{}, Setup: setupNone, Ports: copyPorts(target)}, nil
+		}
 	}
 	// [[repos.setup]] runs only for the repos this run clones; the root
 	// [[setup]] follows it, after the render.
