@@ -47,8 +47,10 @@ mws ls --json                                         # copies; "current" marks 
 mws clone feature-x --no-optional --setup             # new peer copy, default branches, setup run
 mws clone feature-x --with docs --no-setup            # include optional repo "docs", skip setup
 cd "$(mws clone feature-x --no-optional --setup | tail -n1)"
-mws rm feature-x --yes                                # to .trash/, restorable for 7 days
-mws restore feature-x --yes                           # back from the trash (--as <name> if taken)
+mws clone feature-x --no-optional --setup --json      # {name, path, repos, setup, ports}
+mws path feature-x                                    # absolute path; exit 4 if no such copy (--json: {name, path})
+mws rm feature-x --yes                                # to .trash/, restorable for 7 days (--json: entry, released_slot)
+mws restore feature-x --yes                           # back from the trash (--as <name> if taken; --json: {name, path, entry})
 mws trash ls --json
 ```
 

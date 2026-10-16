@@ -54,7 +54,7 @@ func TestRestoreRepairsWorktrees(t *testing.T) {
 				if err := runRm(t.Context(), discardOut, "c", rmFlags{yes: true}); err != nil {
 					t.Fatalf("runRm: %v", err)
 				}
-				if err := runRestore(t.Context(), nopReporter{}, "c", tc.as, true); err != nil {
+				if err := runRestore(t.Context(), discardOut, "c", tc.as, true); err != nil {
 					t.Fatalf("runRestore: %v", err)
 				}
 			})
@@ -79,7 +79,7 @@ func TestRestoreSurvivesAMetaPruneWhileTrashed(t *testing.T) {
 			t.Fatalf("runRm: %v", err)
 		}
 		gitT(t, f.meta, "worktree", "prune")
-		if err := runRestore(t.Context(), nopReporter{}, "c", "", true); err != nil {
+		if err := runRestore(t.Context(), discardOut, "c", "", true); err != nil {
 			t.Fatalf("runRestore: %v", err)
 		}
 	})

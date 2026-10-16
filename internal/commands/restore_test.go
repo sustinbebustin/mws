@@ -21,7 +21,7 @@ func TestRunRestoreRoundTripsHarnessSymlinks(t *testing.T) {
 		if err := runRm(t.Context(), discardOut, "feature", rmFlags{yes: true}); err != nil {
 			t.Fatalf("runRm: %v", err)
 		}
-		if err := runRestore(t.Context(), nopReporter{}, "feature", "", true); err != nil {
+		if err := runRestore(t.Context(), discardOut, "feature", "", true); err != nil {
 			t.Fatalf("runRestore: %v", err)
 		}
 	})
@@ -71,7 +71,7 @@ func TestRunRestoreRefusesToOverwriteExistingCopy(t *testing.T) {
 		mustMkdir(t, wc)
 		mustWriteFile(t, filepath.Join(wc, "new.txt"), "new work")
 
-		err := runRestore(t.Context(), nopReporter{}, "feature", "", true)
+		err := runRestore(t.Context(), discardOut, "feature", "", true)
 		if err == nil {
 			t.Fatalf("runRestore should refuse to overwrite an existing working copy")
 		}
@@ -100,7 +100,7 @@ func TestRunRestoreAsAlternateName(t *testing.T) {
 		if err := runRm(t.Context(), discardOut, "feature", rmFlags{yes: true}); err != nil {
 			t.Fatalf("runRm: %v", err)
 		}
-		if err := runRestore(t.Context(), nopReporter{}, "feature", "feature-recovered", true); err != nil {
+		if err := runRestore(t.Context(), discardOut, "feature", "feature-recovered", true); err != nil {
 			t.Fatalf("runRestore: %v", err)
 		}
 	})
@@ -117,7 +117,7 @@ func TestRunRestoreReportsEmptyTrash(t *testing.T) {
 	meta, _ := setupRmTree(t, &config.Config{ProjectName: "demo"}, "feature")
 
 	withCwd(t, meta, func() {
-		err := runRestore(t.Context(), nopReporter{}, "", "", true)
+		err := runRestore(t.Context(), discardOut, "", "", true)
 		if err == nil {
 			t.Fatalf("runRestore should fail when there is nothing to restore")
 		}
@@ -134,7 +134,7 @@ func TestRunRestoreRejectsUnknownName(t *testing.T) {
 		if err := runRm(t.Context(), discardOut, "feature", rmFlags{yes: true}); err != nil {
 			t.Fatalf("runRm: %v", err)
 		}
-		err := runRestore(t.Context(), nopReporter{}, "nope", "", true)
+		err := runRestore(t.Context(), discardOut, "nope", "", true)
 		if err == nil {
 			t.Fatalf("runRestore should fail on a name that was never trashed")
 		}
