@@ -642,17 +642,26 @@ type envRunResult struct {
 func (res envRunResult) print(o output, metaRoot string) error {
 	return o.result(res, func(w io.Writer) error {
 		for _, c := range res.Copies {
-			for _, f := range c.Files {
-				if f.Status != envWouldCopy {
-					continue
-				}
-				if _, err := fmt.Fprintf(w, "would copy %s -> %s\n", relToMeta(metaRoot, f.From), relToMeta(metaRoot, f.To)); err != nil {
-					return err
-				}
+			if err := writeWouldCopy(w, metaRoot, c.Files); err != nil {
+				return err
 			}
 		}
 		return nil
 	})
+}
+
+// writeWouldCopy writes one "would copy <from> -> <to>" line per file a dry
+// run would copy.
+func writeWouldCopy(w io.Writer, metaRoot string, files []envFileResult) error {
+	for _, f := range files {
+		if f.Status != envWouldCopy {
+			continue
+		}
+		if _, err := fmt.Fprintf(w, "would copy %s -> %s\n", relToMeta(metaRoot, f.From), relToMeta(metaRoot, f.To)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // failure is the exit-1 error when any file failed to copy, or nil.

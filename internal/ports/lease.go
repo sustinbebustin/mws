@@ -78,8 +78,8 @@ func WriteLease(copyDir string, e Exports) error {
 	}
 	var b strings.Builder
 	b.WriteString(leaseHeader)
-	for _, v := range e.Vars {
-		b.WriteString(v.Name + "=" + dotenvQuote(v.Value) + "\n")
+	for _, line := range e.Dotenv() {
+		b.WriteString(line + "\n")
 	}
 	if err := atomicfile.Write(path, []byte(b.String()), 0o644); err != nil {
 		return fmt.Errorf("write port lease: %w", err)
