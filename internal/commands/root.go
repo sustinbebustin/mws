@@ -111,7 +111,7 @@ func NewRootCmd() *cobra.Command {
 		}
 	}
 	add(groupWorkspace, newInitCmd(), newAddRepoCmd(), newPromoteCmd(), newRelinkCmd())
-	add(groupCopies, newCloneCmd(), newIncludeCmd(), newListCmd(), newRmCmd(), newRestoreCmd(), newTrashCmd())
+	add(groupCopies, newCloneCmd(), newIncludeCmd(), newListCmd(), newPathCmd(), newRmCmd(), newRestoreCmd(), newTrashCmd())
 	add(groupEnv, newEnvCmd())
 	add(groupPorts, newPortsCmd())
 	add(groupWorktrees, newWorktreeCmd())
