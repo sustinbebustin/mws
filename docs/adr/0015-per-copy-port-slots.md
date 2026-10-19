@@ -305,14 +305,23 @@ Each of those becomes a line of `.mws.toml` or a line in a staged source.
   `.mws/.mcp.json` renamed to `.mws/.mcp.json.render`, `mws ports claim
   <copy> --slot N` once per slotted copy to adopt its current numbers (`main`
   stays on the defaults, no lease), and the registry and both scripts
-  deleted. Three differences from such scripts' output are deliberate: a
-  default copy writes explicit values rather than relying on a tool's own
-  defaults file (same values); a port-derived name such as a cookie name
-  changes on the defaults too (`app-auth-token-3000`, one re-login on
-  `main`); a slug-derived project id for `main` becomes `app-main` (one
-  `supabase stop` and start on `main`). There is no slot-0 special case in
-  mws or in the config; a bare project id can be kept only by writing it
-  without `${MWS_COPY_SLUG}`, which would then be shared by every copy.
+  deleted. A port-derived name such as a cookie name changes on the
+  defaults too (`app-auth-token-3000`, one re-login on `main`); that
+  difference from such scripts' output is deliberate.
+- **Amended: a tool with its own defaults file reads the slot from the
+  environment.** A staged file renders for every copy, so a file of
+  explicit values (a Supabase `supabase/.env.local` listing the project id
+  and ports, say) also reaches copies on the default ports. With a
+  slug-derived project id that gives each of them a project of its own on
+  the shared default ports, and `supabase status` finds no stack. There is
+  no slot-0 special case in mws or in the config, so such values stay out of
+  staging: the lease exports them, `just` and direnv load the lease, and a
+  tool that resolves `env(...)` from the process environment ahead of its
+  dotenv files (the Supabase CLI does) picks up the slot's values. Copies on
+  the defaults keep using the tool's committed defaults file and share one
+  stack, as before. A bare tool invocation in a shell without the lease
+  falls back to those defaults; `eval "$(mws ports show --export)"` loads the
+  lease into such a shell.
 - **Amended: the lease follows the config.** Every render of a copy that
   holds a slot rewrites its lease from the current `[ports]` and `[vars]`
   under the meta-root lock, so an edit to either reaches the lease (and the
@@ -387,9 +396,8 @@ Supabase stack:
   cmd = "direnv allow"
 ```
 
-Staged sources then carry the values. `.envs/frontend/supabase.env.local`
-becomes a plain list, `APP_SUPABASE_PROJECT_ID=${APP_SUPABASE_PROJECT_ID}`
-and so on; `.envs/frontend/internal.env.local` holds
+Staged sources then carry the values the apps read from files.
+`.envs/frontend/internal.env.local` holds
 `NEXT_PUBLIC_SITE_URL=http://localhost:${APP_INTERNAL_PORT}`,
 `NEXT_PUBLIC_SUPABASE_URL=${APP_SUPABASE_API_URL}`,
 `NEXT_PUBLIC_API_URL=http://localhost:${APP_BACKEND_PORT}/api/v1`,
@@ -398,7 +406,11 @@ holds `export PORT=${APP_BACKEND_PORT}`; `.mws/.mcp.json.render` holds
 `"url": "http://localhost:${APP_SUPABASE_API_PORT}/mcp"`. The lease
 `<copy>/.mws-ports.env` lists `MWS_SLOT`, `MWS_COPY`, `MWS_COPY_SLUG`,
 `MWS_META`, `MWS_PORT_*` and `APP_*_PORT` for the eight ports, and the ten
-derived vars; the justfile and `.mws/.envrc` read it.
+derived vars; the justfile and `.mws/.envrc` read it. Supabase needs no
+staged file: its `config.toml` reads `env(APP_SUPABASE_*)`, a slotted copy's
+lease sets those variables in the environment of every `just` recipe and
+direnv shell, and a copy on the defaults falls back to the committed
+`supabase/.env.development`.
 
 ### A second workspace, no Go changes
 
