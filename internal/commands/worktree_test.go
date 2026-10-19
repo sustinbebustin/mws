@@ -55,7 +55,10 @@ func seedWtWorkspace(t *testing.T) wtFixture {
 	// The harness ships its own .gitignore; the worktree root must keep the
 	// tracked meta allowlist instead of linking this one.
 	writeFileAll(t, filepath.Join(harness, ".gitignore"), "*.bak\n")
-	writeFileAll(t, filepath.Join(f.meta, ".gitignore"), "/*\n!/.gitignore\n!/.mws.toml\n!/.mws/\n")
+	writeFileAll(t, filepath.Join(f.meta, ".gitignore"), "/*\n!/.gitignore\n!/.mws.toml\n!/.mws/\n!/CLAUDE.md\n")
+	// The meta repo tracks its own CLAUDE.md (ADR-0014) at the path where the
+	// worktree root links the harness CLAUDE.md.
+	writeFileAll(t, filepath.Join(f.meta, "CLAUDE.md"), "# meta")
 	writeFileAll(t, filepath.Join(f.meta, project.EnvStagingDirName, "frontend", "app.env"), "STAGED=1\n")
 
 	f.cfg = &config.Config{

@@ -274,6 +274,11 @@ func (b *builder) build(ctx context.Context, r Reporter, opts NewOptions, plan [
 	if err := git.SparseCheckoutOnly(ctx, b.target, "/.gitignore"); err != nil {
 		return nil, failuref("sparse-checkout the anchor at %s: %w", b.target, err)
 	}
+	// The harness links land on paths the meta repo also tracks (its own
+	// CLAUDE.md, ADR-0014); keep git from reporting them as changes.
+	if err := git.ExpectFilesOutsideSparse(ctx, b.target); err != nil {
+		return nil, failuref("configure the meta repo at %s for the sparse anchor: %w", b.meta, err)
+	}
 	r.OK("Anchored root to the meta repo (detached, sparse)")
 
 	repos := make([]RepoResult, 0, len(plan))

@@ -53,6 +53,14 @@ func SparseCheckoutOnly(ctx context.Context, dir string, patterns ...string) err
 	return run(ctx, dir, "reset", "--quiet", "--hard")
 }
 
+// ExpectFilesOutsideSparse tells git, for the repo that dir belongs to, that
+// files present at paths outside a sparse checkout's patterns are expected.
+// Without it git drops the skip-worktree bit from any such path it finds on
+// disk and then reports the file as modified.
+func ExpectFilesOutsideSparse(ctx context.Context, dir string) error {
+	return run(ctx, dir, "config", "sparse.expectFilesOutsideOfPatterns", "true")
+}
+
 // AddWorktree checks out an existing branch at path as a linked worktree of repoDir.
 func AddWorktree(ctx context.Context, repoDir, path, branch string) error {
 	return run(ctx, repoDir, "worktree", "add", "--quiet", path, branch)
