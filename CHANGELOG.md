@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- A new worktree's root no longer shows `CLAUDE.md` as changed in `git status` when the meta repo tracks its own `CLAUDE.md`: `mws wt new` sets `sparse.expectFilesOutsideOfPatterns` in the meta repo so git ignores the harness link there.
+
 ## [0.8.0] - 2026-10-16
 
 ### Added
