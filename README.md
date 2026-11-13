@@ -15,6 +15,7 @@ The result: parallel agents work side-by-side without fighting over the same `.g
 ## Prerequisites
 
 - [Git](https://git-scm.com/) -- the meta workspace and every native repo are git repositories.
+- [jq](https://jqlang.org/) and, recommended, [ripgrep](https://github.com/BurntSushi/ripgrep) -- the harness's Claude Code `@`-mention picker (`.claude/file-suggestion.sh`) needs jq; without ripgrep it falls back to `find` and ignores `.gitignore` rules.
 
 ## Install
 

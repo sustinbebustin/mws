@@ -91,6 +91,10 @@ func TestRenderEmbeddedSkeleton(t *testing.T) {
 		t.Fatalf("read settings.json: %v", err)
 	}
 	var settings struct {
+		FileSuggestion struct {
+			Type    string `json:"type"`
+			Command string `json:"command"`
+		} `json:"fileSuggestion"`
 		Hooks map[string][]struct {
 			Hooks []struct {
 				Command string `json:"command"`
@@ -115,6 +119,9 @@ func TestRenderEmbeddedSkeleton(t *testing.T) {
 			t.Fatalf("settings.json hooks.%s = %q; want it to contain %q", event, got, want)
 		}
 	}
+	if fs := settings.FileSuggestion; fs.Type != "command" || fs.Command != "$CLAUDE_PROJECT_DIR/.claude/file-suggestion.sh" {
+		t.Fatalf("settings.json fileSuggestion = %+v; want the harness file-suggestion.sh command", fs)
+	}
 
 	// mws workspace notes live only in the meta-root CLAUDE.md; .mws/CLAUDE.md is project content.
 	if strings.Contains(string(claude), "mws clone") {
@@ -131,6 +138,7 @@ func TestRenderMarksExecutables(t *testing.T) {
 	}
 	claudeDir := filepath.Join(dst, ".mws", ".claude")
 	for rel, wantExec := range map[string]bool{
+		"file-suggestion.sh":             true,
 		"hooks/enforce-root-bin":         true,
 		"hooks/git-repo-reminder-bin":    true,
 		"settings.json":                  false,
