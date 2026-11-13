@@ -179,7 +179,12 @@ func TestInitGrantsClaudeAccessToHarness(t *testing.T) {
 		t.Skip("git not on PATH")
 	}
 	isolateGit(t, true)
-	parent := t.TempDir()
+	// init takes its parent from os.Getwd, which resolves symlinks (macOS's
+	// /var -> /private/var), so the expected path must be resolved too.
+	parent, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if res := runMWS(t, parent, "init", "demo", "--yes"); res.code != 0 {
 		t.Fatalf("init exit %d\nstderr: %s", res.code, res.stderr)
