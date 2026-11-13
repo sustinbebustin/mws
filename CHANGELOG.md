@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-13
+
 ### Added
 - `mws init` writes an untracked `.claude/settings.local.json` at the meta root that adds the harness dir to Claude Code's `permissions.additionalDirectories`, so editing files through harness symlinks no longer prompts for each one.
 - The skeleton ships `.claude/file-suggestion.sh`, wired as Claude Code's `fileSuggestion` command: the `@`-mention picker lists a working copy's files with copy-relative paths, including the native repos and the symlinked harness, honoring `.gitignore` at every level. Needs `jq`; uses `rg` when present.
@@ -153,7 +155,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tag-driven release pipeline: pushing a `v*` tag publishes darwin and linux binaries (amd64 and arm64) to GitHub Releases via goreleaser, with checksums and a conventional-commit-grouped changelog.
 - Homebrew tap: every release pushes a formula to `sustinbebustin/homebrew-mws`, enabling `brew install sustinbebustin/mws/mws`.
 
-[Unreleased]: https://github.com/sustinbebustin/mws/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/sustinbebustin/mws/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/sustinbebustin/mws/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/sustinbebustin/mws/releases/tag/v0.8.1
 [0.8.0]: https://github.com/sustinbebustin/mws/releases/tag/v0.8.0
 [0.7.0]: https://github.com/sustinbebustin/mws/releases/tag/v0.7.0
