@@ -2,6 +2,7 @@
 package skeleton
 
 import (
+	"bytes"
 	"fmt"
 	"io/fs"
 	"os"
@@ -81,6 +82,21 @@ func Render(dst string, data Data) error {
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err
 		}
-		return os.WriteFile(target, content, 0o644)
+		if err := os.WriteFile(target, content, 0o644); err != nil {
+			return err
+		}
+		// WriteFile applies perm only when it creates the file, and the umask
+		// would trim it; chmod sets the mode either way.
+		return os.Chmod(target, fileMode(content))
 	})
+}
+
+// fileMode is the mode a rendered verbatim file gets. embed.FS records no file
+// modes, so executability is read from the content: a shebang script or an ELF
+// binary (the prebuilt hooks) is made executable.
+func fileMode(content []byte) os.FileMode {
+	if bytes.HasPrefix(content, []byte("#!")) || bytes.HasPrefix(content, []byte("\x7fELF")) {
+		return 0o755
+	}
+	return 0o644
 }

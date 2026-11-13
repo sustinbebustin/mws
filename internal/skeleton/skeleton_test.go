@@ -121,3 +121,29 @@ func TestRenderEmbeddedSkeleton(t *testing.T) {
 		t.Fatalf(".mws/CLAUDE.md should not carry mws workflow notes; got:\n%s", string(claude))
 	}
 }
+
+// embed.FS drops file modes, so Render must restore the executable bit on the
+// scripts and binaries settings.json runs, and only on those.
+func TestRenderMarksExecutables(t *testing.T) {
+	dst := t.TempDir()
+	if err := Render(dst, Data{ProjectName: "demo"}); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	claudeDir := filepath.Join(dst, ".mws", ".claude")
+	for rel, wantExec := range map[string]bool{
+		"hooks/enforce-root-bin":         true,
+		"hooks/git-repo-reminder-bin":    true,
+		"settings.json":                  false,
+		"hooks/enforce-root/main.go":     false,
+		"hooks/git-repo-reminder/go.mod": false,
+		"rules/use-full-paths.md":        false,
+	} {
+		st, err := os.Stat(filepath.Join(claudeDir, rel))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if gotExec := st.Mode().Perm()&0o111 != 0; gotExec != wantExec {
+			t.Errorf("%s mode %v; want executable=%v", rel, st.Mode().Perm(), wantExec)
+		}
+	}
+}
