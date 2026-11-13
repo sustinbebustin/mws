@@ -24,6 +24,7 @@ jobs:
           cache: true
       - run: go build ./...
       - run: go test ./...
+      - run: make hooks-test
 
   lint:
     name: lint

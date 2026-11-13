@@ -2,6 +2,10 @@
   "permissions": {
     "allow": []
   },
+  "fileSuggestion": {
+    "type": "command",
+    "command": "$CLAUDE_PROJECT_DIR/.claude/file-suggestion.sh"
+  },
   "hooks": {
     "PreToolUse": [
       {

@@ -6,7 +6,7 @@
 
 A small Go CLI for managing **meta workspaces** -- a directory layout that wraps one or more native git repos with a shared AI-harness layer and cheap parallel working copies.
 
-1. `mws init my-project` creates a meta workspace: a git repo at the root, with the harness under `.mws/` committed as its first commit, and a first working copy at `main/`. Init needs a git identity (`user.name`, `user.email`) and fails before creating anything without one.
+1. `mws init my-project` creates a meta workspace: a git repo at the root, with the harness under `.mws/` committed as its first commit, and a first working copy at `main/`. It also writes an untracked `.claude/settings.local.json` that adds `.mws/` to Claude Code's `permissions.additionalDirectories`, so edits through harness symlinks don't prompt. Init needs a git identity (`user.name`, `user.email`) and fails before creating anything without one.
 2. `mws add-repo <url>` registers a native repo and clones it into every working copy.
 3. `mws clone <peer>` spins up another working copy that shares the same harness via symlinks, with its own independent native git clones inside.
 
@@ -15,6 +15,7 @@ The result: parallel agents work side-by-side without fighting over the same `.g
 ## Prerequisites
 
 - [Git](https://git-scm.com/) -- the meta workspace and every native repo are git repositories.
+- [jq](https://jqlang.org/) and, recommended, [ripgrep](https://github.com/BurntSushi/ripgrep) -- the harness's Claude Code `@`-mention picker (`.claude/file-suggestion.sh`) needs jq; without ripgrep it falls back to `find` and ignores `.gitignore` rules.
 
 ## Install
 

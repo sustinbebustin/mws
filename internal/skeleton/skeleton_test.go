@@ -91,6 +91,10 @@ func TestRenderEmbeddedSkeleton(t *testing.T) {
 		t.Fatalf("read settings.json: %v", err)
 	}
 	var settings struct {
+		FileSuggestion struct {
+			Type    string `json:"type"`
+			Command string `json:"command"`
+		} `json:"fileSuggestion"`
 		Hooks map[string][]struct {
 			Hooks []struct {
 				Command string `json:"command"`
@@ -115,9 +119,39 @@ func TestRenderEmbeddedSkeleton(t *testing.T) {
 			t.Fatalf("settings.json hooks.%s = %q; want it to contain %q", event, got, want)
 		}
 	}
+	if fs := settings.FileSuggestion; fs.Type != "command" || fs.Command != "$CLAUDE_PROJECT_DIR/.claude/file-suggestion.sh" {
+		t.Fatalf("settings.json fileSuggestion = %+v; want the harness file-suggestion.sh command", fs)
+	}
 
 	// mws workspace notes live only in the meta-root CLAUDE.md; .mws/CLAUDE.md is project content.
 	if strings.Contains(string(claude), "mws clone") {
 		t.Fatalf(".mws/CLAUDE.md should not carry mws workflow notes; got:\n%s", string(claude))
+	}
+}
+
+// embed.FS drops file modes, so Render must restore the executable bit on the
+// scripts and binaries settings.json runs, and only on those.
+func TestRenderMarksExecutables(t *testing.T) {
+	dst := t.TempDir()
+	if err := Render(dst, Data{ProjectName: "demo"}); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	claudeDir := filepath.Join(dst, ".mws", ".claude")
+	for rel, wantExec := range map[string]bool{
+		"file-suggestion.sh":             true,
+		"hooks/enforce-root-bin":         true,
+		"hooks/git-repo-reminder-bin":    true,
+		"settings.json":                  false,
+		"hooks/enforce-root/main.go":     false,
+		"hooks/git-repo-reminder/go.mod": false,
+		"rules/use-full-paths.md":        false,
+	} {
+		st, err := os.Stat(filepath.Join(claudeDir, rel))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if gotExec := st.Mode().Perm()&0o111 != 0; gotExec != wantExec {
+			t.Errorf("%s mode %v; want executable=%v", rel, st.Mode().Perm(), wantExec)
+		}
 	}
 }

@@ -14,6 +14,8 @@ When changing public-facing behavior, check [README.md](./README.md) and [docs/c
 
 `skeleton/` is the source of truth for the harness template, embedded via `embed.go` (`//go:embed all:skeleton` -- the `all:` prefix is required for dotfiles). `.tmpl` files use Go `text/template`; the extension is stripped on render. `.gitkeep` files are skipped. Edits ship in the next build.
 
+Hook sources under `skeleton/.mws/.claude/hooks/<hook>/` keep their module file as `go.mod.tmpl`: `go:embed` skips any directory holding a `go.mod`, which would ship only the binary. After editing a hook, run `make hooks` to test it and rebuild the committed `<hook>-bin` (static linux/amd64, `-trimpath`); `make ci` runs `make hooks-test`.
+
 ## Subcommand conventions
 
 - Resolve the meta with `project.Locate(cwd)`; never duplicate the walk-up logic.

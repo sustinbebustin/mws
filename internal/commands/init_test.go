@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -168,6 +169,43 @@ func TestInitCommitsTheTrackedAllowlist(t *testing.T) {
 	}
 	if status := gitT(t, meta, "status", "--porcelain"); status != "" {
 		t.Errorf("meta workspace not clean after init:\n%s", status)
+	}
+}
+
+// The harness lives outside the working copy, so without this grant every
+// edit through a harness symlink prompts for permission.
+func TestInitGrantsClaudeAccessToHarness(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	isolateGit(t, true)
+	// init takes its parent from os.Getwd, which resolves symlinks (macOS's
+	// /var -> /private/var), so the expected path must be resolved too.
+	parent, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if res := runMWS(t, parent, "init", "demo", "--yes"); res.code != 0 {
+		t.Fatalf("init exit %d\nstderr: %s", res.code, res.stderr)
+	}
+
+	meta := filepath.Join(parent, "demo")
+	data, err := os.ReadFile(filepath.Join(meta, ".claude", "settings.local.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Permissions struct {
+			AdditionalDirectories []string `json:"additionalDirectories"`
+		} `json:"permissions"`
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("parse settings.local.json: %v\n%s", err, data)
+	}
+	want := []string{filepath.Join(meta, ".mws")}
+	if !slices.Equal(got.Permissions.AdditionalDirectories, want) {
+		t.Fatalf("additionalDirectories = %v, want %v", got.Permissions.AdditionalDirectories, want)
 	}
 }
 

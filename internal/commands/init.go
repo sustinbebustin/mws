@@ -346,6 +346,9 @@ func executeInit(ctx context.Context, r Reporter, p *initPlan) error {
 	}); err != nil {
 		return err
 	}
+	if err := project.WriteClaudeLocalSettings(metaDir); err != nil {
+		return err
+	}
 	if err := git.InitQuiet(ctx, metaDir); err != nil {
 		return err
 	}

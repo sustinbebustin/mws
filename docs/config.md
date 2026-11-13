@@ -314,6 +314,8 @@ A Next.js + Supabase monorepo, eight ports and ten derived vars. The highest bas
   cmd = "direnv allow"
 ```
 
+The Supabase values need no staged file: `supabase/config.toml` reads `env(APP_SUPABASE_*)`, and the Supabase CLI prefers the process environment over its own dotenv files. A slotted copy's lease puts them in the environment of every `just` recipe and direnv shell, and a copy on the default ports falls back to the committed `supabase/.env.development`, sharing one stack. A staged file of those values would render for every copy, giving default copies a project of their own on the shared default ports.
+
 shop, a web app with Postgres in docker compose and no Go changes. The default stride is 10, and the 65535 bound caps the slot limit at 6010.
 
 ```toml
