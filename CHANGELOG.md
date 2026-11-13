@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `mws init` writes an untracked `.claude/settings.local.json` at the meta root that adds the harness dir to Claude Code's `permissions.additionalDirectories`, so editing files through harness symlinks no longer prompts for each one.
+- The skeleton ships `.claude/file-suggestion.sh`, wired as Claude Code's `fileSuggestion` command: the `@`-mention picker lists a working copy's files with copy-relative paths, including the native repos and the symlinked harness, honoring `.gitignore` at every level. Needs `jq`; uses `rg` when present.
+- The skeleton's `git-repo-reminder` hook denies `git worktree add` anywhere, pointing to `mws wt new` or an `isolation: "worktree"` Agent; other `git worktree` subcommands stay allowed.
+
+### Changed
+- `git-repo-reminder` judges the directory git would run in rather than `CLAUDE_PROJECT_DIR`, so it also covers worktree roots and follows `cd` within a command (`cd web && git diff` is allowed). Its denial names the copy's native repos.
+
+### Fixed
+- `mws init` makes the skeleton's prebuilt hook binaries executable. They were written `0644`, so the `enforce-root` and `git-repo-reminder` hooks failed to run in new meta workspaces.
+- `mws init` writes the Go source of the skeleton's hooks (`main.go`, `go.mod`, `go.sum`) next to their prebuilt `-bin` files. Previously only the binaries shipped.
+
 ## [0.8.1] - 2026-10-19
 
 ### Fixed
