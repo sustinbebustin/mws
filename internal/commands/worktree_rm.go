@@ -25,9 +25,11 @@ func newWorktreeRmCmd(jsonOut *bool) *cobra.Command {
 		Use:   "rm <name>...",
 		Short: "Remove worktrees, deleting their fully merged branches",
 		Long: `rm removes each named worktree: its native repo worktrees, then its root.
-A branch named <prefix><name> is deleted only when no other branch, tag or
-remote-tracking branch reaches all of its commits; otherwise it is kept and
-reported. --keep-branch keeps every branch.
+A branch named <prefix><name> is deleted in every native repo that has it,
+whatever that repo's worktree has checked out, but only when other branches,
+tags or remote-tracking branches reach all of its commits and no other
+worktree has it checked out; otherwise it is kept and reported. --keep-branch
+keeps every branch.
 
 Every worktree is checked before anything is removed. rm refuses (exit 3) a
 directory that is not both marked and registered, a native repo with modified

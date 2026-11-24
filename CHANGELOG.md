@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `mws wt rm` settles the worktree's own branch (`<prefix><name>`) in a native repo whose worktree was switched to a detached HEAD or to another branch. It used to leave that branch behind unreported, and the next `mws wt new <name>` reused it. A branch another worktree has checked out is kept and reported instead of failing the removal partway.
+
 ## [0.9.0] - 2026-11-13
 
 ### Added

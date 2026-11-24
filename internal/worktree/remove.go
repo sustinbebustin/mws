@@ -356,14 +356,11 @@ func removeOne(ctx context.Context, metaRoot string, policy config.WorktreePolic
 		if err != nil {
 			return res, failuref("remove worktree %s: %s: %w\nthe repos listed before %s were already removed; the rest of %s is intact; fix the cause, then rerun `mws wt rm %s`", t.name, ir.folder, err, ir.folder, t.root, t.name)
 		}
-		if ir.branch == "" {
-			continue
-		}
-		outcome, err := settleBranch(ctx, policy, t.name, ir, opts.KeepBranch)
+		outcomes, err := settleBranches(ctx, policy.BranchPrefix+t.name, ir, opts.KeepBranch)
+		res.Branches = append(res.Branches, outcomes...)
 		if err != nil {
 			return res, failuref("remove worktree %s: %s: %w", t.name, ir.folder, err)
 		}
-		res.Branches = append(res.Branches, outcome)
 	}
 	if err := git.RemoveWorktreeForce(ctx, metaRoot, t.root); err != nil {
 		return res, failuref("remove worktree %s: unregister its root from the meta repo: %w\nits native repo worktrees are already removed", t.name, err)
@@ -374,24 +371,63 @@ func removeOne(ctx context.Context, metaRoot string, policy config.WorktreePolic
 	return res, nil
 }
 
-// settleBranch deletes the inner repo's branch when mws owns it (it is named
-// <prefix><name>) and no commit on it would be lost.
-func settleBranch(ctx context.Context, policy config.WorktreePolicy, name string, ir innerRepo, keep bool) (BranchOutcome, error) {
-	o := BranchOutcome{Folder: ir.folder, Branch: ir.branch}
-	n, err := git.UniqueCommits(ctx, ir.src, ir.branch)
+// settleBranches settles the branch the removed inner repo was on and, when
+// the repo had left it (for another branch or a detached HEAD), the worktree's
+// own branch (ownBranch, <prefix><name>) if the copy's checkout still has it.
+// It returns the outcomes reached before any error.
+func settleBranches(ctx context.Context, ownBranch string, ir innerRepo, keep bool) ([]BranchOutcome, error) {
+	var branches []string
+	if ir.branch != "" {
+		branches = append(branches, ir.branch)
+	}
+	if ir.branch != ownBranch {
+		exists, err := git.BranchExists(ctx, ir.src, ownBranch)
+		if err != nil {
+			return nil, fmt.Errorf("look up branch %s: %w", ownBranch, err)
+		}
+		if exists {
+			branches = append(branches, ownBranch)
+		}
+	}
+	out := make([]BranchOutcome, 0, len(branches))
+	for _, branch := range branches {
+		o, err := settleBranch(ctx, ownBranch, ir, branch, keep)
+		if err != nil {
+			return out, err
+		}
+		out = append(out, o)
+	}
+	return out, nil
+}
+
+// settleBranch deletes branch in the inner repo's source checkout when mws
+// owns it (it is the worktree's own branch, ownBranch) and no commit on it
+// would be lost.
+func settleBranch(ctx context.Context, ownBranch string, ir innerRepo, branch string, keep bool) (BranchOutcome, error) {
+	o := BranchOutcome{Folder: ir.folder, Branch: branch}
+	n, err := git.UniqueCommits(ctx, ir.src, branch)
 	if err != nil {
-		return o, fmt.Errorf("count unmerged commits on %s: %w", ir.branch, err)
+		return o, fmt.Errorf("count unmerged commits on %s: %w", branch, err)
 	}
 	o.UniqueCommits = n
 	switch {
 	case keep:
 		o.Reason = "--keep-branch"
-	case ir.branch != policy.BranchPrefix+name:
-		o.Reason = fmt.Sprintf("not named %s%s, so mws does not own it", policy.BranchPrefix, name)
+	case branch != ownBranch:
+		o.Reason = fmt.Sprintf("not named %s, so mws does not own it", ownBranch)
 	case n > 0:
 		o.Reason = unmergedReason(n)
 	default:
-		if err := git.DeleteBranch(ctx, ir.src, ir.branch); err != nil {
+		// git refuses to delete a branch a worktree has checked out.
+		holder, err := branchHolder(ctx, ir.src, branch, "")
+		if err != nil {
+			return o, fmt.Errorf("list worktrees: %w", err)
+		}
+		if holder != "" {
+			o.Reason = "checked out at " + holder
+			return o, nil
+		}
+		if err := git.DeleteBranch(ctx, ir.src, branch); err != nil {
 			return o, err
 		}
 		o.Deleted = true
