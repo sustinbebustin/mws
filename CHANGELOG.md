@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-24
+
 ### Fixed
 - `mws wt rm` settles the worktree's own branch (`<prefix><name>`) in a native repo whose worktree was switched to a detached HEAD or to another branch. It used to leave that branch behind unreported, and the next `mws wt new <name>` reused it. A branch another worktree has checked out is kept and reported instead of failing the removal partway.
 
@@ -158,7 +160,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tag-driven release pipeline: pushing a `v*` tag publishes darwin and linux binaries (amd64 and arm64) to GitHub Releases via goreleaser, with checksums and a conventional-commit-grouped changelog.
 - Homebrew tap: every release pushes a formula to `sustinbebustin/homebrew-mws`, enabling `brew install sustinbebustin/mws/mws`.
 
-[Unreleased]: https://github.com/sustinbebustin/mws/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/sustinbebustin/mws/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/sustinbebustin/mws/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/sustinbebustin/mws/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/sustinbebustin/mws/releases/tag/v0.8.1
 [0.8.0]: https://github.com/sustinbebustin/mws/releases/tag/v0.8.0
