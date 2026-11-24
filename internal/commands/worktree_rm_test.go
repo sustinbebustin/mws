@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -214,6 +215,168 @@ func TestWtRmRemovesCleanDetachedRepo(t *testing.T) {
 		t.Fatalf("exit %d\nstderr: %s", res.code, res.stderr)
 	}
 	assertRemoved(t, f, "x")
+}
+
+type rmBranchOut struct {
+	Folder        string `json:"folder"`
+	Branch        string `json:"branch"`
+	Deleted       bool   `json:"deleted"`
+	UniqueCommits int    `json:"unique_commits"`
+	Reason        string `json:"reason"`
+}
+
+// rmBranches runs `wt rm name --json` with extra flags, requires exit 0 and
+// one removed worktree, and returns its branch outcomes.
+func rmBranches(t *testing.T, f wtFixture, name string, flags ...string) []rmBranchOut {
+	t.Helper()
+	res := runWt(t, f.copy, append([]string{"rm", name, "--json"}, flags...)...)
+	if res.code != 0 {
+		t.Fatalf("exit %d\nstderr: %s", res.code, res.stderr)
+	}
+	var out struct {
+		Removed []struct {
+			Name     string        `json:"name"`
+			Branches []rmBranchOut `json:"branches"`
+		} `json:"removed"`
+	}
+	decodeJSON(t, res, &out)
+	if len(out.Removed) != 1 || out.Removed[0].Name != name {
+		t.Fatalf("removed = %+v, want only %s", out.Removed, name)
+	}
+	return out.Removed[0].Branches
+}
+
+// The worktree's own branch is settled in a repo that left it for a detached
+// HEAD, so the next `wt new` of that name does not reuse a stale branch.
+func TestWtRmDeletesOwnBranchOfADetachedRepo(t *testing.T) {
+	f := seedWtWorkspace(t)
+	mustNew(t, f.copy, "x", "--no-setup")
+	gitT(t, filepath.Join(f.wtPath("x"), "frontend"), "switch", "-q", "--detach")
+
+	got := rmBranches(t, f, "x")
+	want := []rmBranchOut{
+		{Folder: "backend", Branch: "wt/x", Deleted: true},
+		{Folder: "frontend", Branch: "wt/x", Deleted: true},
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("branches = %+v, want %+v", got, want)
+	}
+	for _, folder := range []string{"backend", "frontend"} {
+		if branchExists(t, f, folder, "wt/x") {
+			t.Fatalf("%s still has wt/x", folder)
+		}
+	}
+	assertRemoved(t, f, "x")
+}
+
+// Unmerged commits on the worktree's own branch survive a detach: the branch
+// is kept and reported, so they can still be merged.
+func TestWtRmKeepsUnmergedOwnBranchOfADetachedRepo(t *testing.T) {
+	f := seedWtWorkspace(t)
+	mustNew(t, f.copy, "x", "--no-setup")
+	inner := filepath.Join(f.wtPath("x"), "frontend")
+	commitIn(t, inner, "a.txt")
+	gitT(t, inner, "switch", "-q", "--detach")
+
+	got := rmBranches(t, f, "x")
+	want := []rmBranchOut{
+		{Folder: "backend", Branch: "wt/x", Deleted: true},
+		{Folder: "frontend", Branch: "wt/x", UniqueCommits: 1, Reason: "1 commit not merged anywhere"},
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("branches = %+v, want %+v", got, want)
+	}
+	if !branchExists(t, f, "frontend", "wt/x") {
+		t.Fatal("frontend lost wt/x and the commit only it holds")
+	}
+	assertRemoved(t, f, "x")
+}
+
+// A repo switched to another branch reports that branch as not owned and
+// still settles the worktree's own branch.
+func TestWtRmSettlesOwnBranchOfARepoOnAnotherBranch(t *testing.T) {
+	f := seedWtWorkspace(t)
+	mustNew(t, f.copy, "x", "--no-setup")
+	gitT(t, filepath.Join(f.wtPath("x"), "frontend"), "switch", "-q", "-c", "side")
+
+	got := rmBranches(t, f, "x")
+	want := []rmBranchOut{
+		{Folder: "backend", Branch: "wt/x", Deleted: true},
+		{Folder: "frontend", Branch: "side", Reason: "not named wt/x, so mws does not own it"},
+		{Folder: "frontend", Branch: "wt/x", Deleted: true},
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("branches = %+v, want %+v", got, want)
+	}
+	if !branchExists(t, f, "frontend", "side") {
+		t.Fatal("frontend lost side, a branch mws does not own")
+	}
+	if branchExists(t, f, "frontend", "wt/x") {
+		t.Fatal("frontend still has wt/x")
+	}
+}
+
+// git refuses to delete a branch another worktree has checked out, so rm
+// keeps it and says where it is instead of failing partway.
+func TestWtRmKeepsOwnBranchCheckedOutInAnotherWorktree(t *testing.T) {
+	f := seedWtWorkspace(t)
+	mustNew(t, f.copy, "x", "--no-setup")
+	gitT(t, filepath.Join(f.wtPath("x"), "frontend"), "switch", "-q", "--detach")
+	other := filepath.Join(f.root, "other")
+	gitT(t, f.repo("frontend"), "worktree", "add", "-q", other, "wt/x")
+
+	got := rmBranches(t, f, "x")
+	want := []rmBranchOut{
+		{Folder: "backend", Branch: "wt/x", Deleted: true},
+		{Folder: "frontend", Branch: "wt/x", Reason: "checked out at " + other},
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("branches = %+v, want %+v", got, want)
+	}
+	if !branchExists(t, f, "frontend", "wt/x") {
+		t.Fatalf("frontend lost wt/x although %s has it checked out", other)
+	}
+	assertRemoved(t, f, "x")
+}
+
+func TestWtRmKeepBranchKeepsOwnBranchOfADetachedRepo(t *testing.T) {
+	f := seedWtWorkspace(t)
+	mustNew(t, f.copy, "x", "--no-setup")
+	gitT(t, filepath.Join(f.wtPath("x"), "frontend"), "switch", "-q", "--detach")
+
+	got := rmBranches(t, f, "x", "--keep-branch")
+	want := []rmBranchOut{
+		{Folder: "backend", Branch: "wt/x", Reason: "--keep-branch"},
+		{Folder: "frontend", Branch: "wt/x", Reason: "--keep-branch"},
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("branches = %+v, want %+v", got, want)
+	}
+	if !branchExists(t, f, "frontend", "wt/x") {
+		t.Fatal("--keep-branch deleted frontend:wt/x")
+	}
+}
+
+// A --branch override is never deleted, and a repo with no <prefix><name>
+// branch reports nothing for it.
+func TestWtRmKeepsABranchOverride(t *testing.T) {
+	f := seedWtWorkspace(t)
+	mustNew(t, f.copy, "x", "--branch", "feat/x", "--no-setup")
+
+	got := rmBranches(t, f, "x")
+	reason := "not named wt/x, so mws does not own it"
+	want := []rmBranchOut{
+		{Folder: "backend", Branch: "feat/x", Reason: reason},
+		{Folder: "frontend", Branch: "feat/x", Reason: reason},
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("branches = %+v, want %+v", got, want)
+	}
+	for _, folder := range []string{"backend", "frontend"} {
+		if !branchExists(t, f, folder, "feat/x") {
+			t.Fatalf("%s lost feat/x, a --branch override", folder)
+		}
+	}
 }
 
 func TestWtRmDeletesBranchMergedIntoIntegration(t *testing.T) {
